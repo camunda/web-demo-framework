@@ -1,0 +1,32 @@
+{
+  "name": "web-demo-framework",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Runnable, editable versions of Camunda's documentation examples: a BPMN model, the code behind each element, and an optional LLM connection, executed in the browser on the nano wasm engine.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@camunda/design-system": "^0.36.0",
+    "@mlc-ai/web-llm": "^0.2.84",
+    "@monaco-editor/react": "^4.6.0",
+    "@nanobpm/bojtos-kit": "^0.4.0",
+    "@nanobpm/bojtos-react": "^0.4.0",
+    "@nanobpm/engine-wasm": "^0.3.0",
+    "bpmn-js": "^17.11.1",
+    "feelin": "^7.0.1",
+    "monaco-editor": "^0.52.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5"
+  }
+}
