@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ActivationVars"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="activation-vars" name="Activation variable probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToAgent</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToAgent" sourceRef="Start" targetRef="Agent" />
+
+    <bpmn:adHocSubProcess id="Agent" name="Agent">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToAgent</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+
+      <!-- A tool with no ioMapping at all. -->
+      <bpmn:serviceTask id="ToolNoMapping" name="Tool without ioMapping">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="tool-no-mapping" />
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+
+      <!-- A tool whose input mapping copies the activation variable through a
+           plain FEEL expression the engine can evaluate. -->
+      <bpmn:serviceTask id="ToolPlainMapping" name="Tool with a plain ioMapping">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="tool-plain-mapping" />
+          <zeebe:ioMapping>
+            <zeebe:input source="=fromActivation" target="copiedByMapping" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+    </bpmn:adHocSubProcess>
+
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="Agent" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
