@@ -295,3 +295,36 @@ export function makeLiveAgent(
     };
   };
 }
+
+/**
+ * Route a shared job type across multiple agent hosts.
+ *
+ * Every AI Agent sub-process shares one job type
+ * (`io.camunda.agenticai:aiagent-job-worker:1`), so a diagram with more than
+ * one host still gets a single `AgentHandler` registration per job type. This
+ * builds one `makeLiveAgent` closure per host (keyed by `elementId`) up front,
+ * lazily-dispatching each job to its own host's closure underneath — the same
+ * trick `compile.ts` already uses for tool handlers, so each host keeps its
+ * own turn counter and called-tools set instead of sharing one.
+ */
+export function makeLiveAgentRouter(
+  specs: AgentSpec[],
+  chat: ChatFn,
+  trace: Trace,
+  opts: LiveAgentOptions = {},
+): AgentHandler {
+  const byElement = new Map(
+    specs.map((spec) => [spec.elementId, makeLiveAgent(spec, chat, trace, opts)]),
+  );
+  return async (job) => {
+    const handler = byElement.get(job.elementId);
+    if (!handler) {
+      trace({
+        kind: "error",
+        text: `No agent host registered for "${job.elementId}" — completing the agent.`,
+      });
+      return { completionConditionFulfilled: true };
+    }
+    return handler(job);
+  };
+}

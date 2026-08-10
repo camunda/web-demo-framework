@@ -18,14 +18,15 @@ import {
   TabsList,
   TabsTrigger,
 } from "@camunda/design-system";
-import { parseModel } from "../model";
-import { buildWorkers, compileAgent, compileHandler } from "../compile";
-import { makeLiveAgent } from "../agent/liveAgent";
+import type { AgentSpec } from "../model";
+import { buildDraftRunDefinition } from "../draft";
+import { buildWorkers, compileAgent } from "../compile";
+import { makeLiveAgentRouter } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
 import { useBrain } from "../useBrain";
 import { BrainPanel } from "./BrainPanel";
 import { FormRenderer, formDefaults, type FormSchema } from "./FormRenderer";
-import type { ExampleDef, ExampleHandler, TraceEntry } from "../types";
+import type { ExampleDef, TraceEntry } from "../types";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
@@ -52,7 +53,6 @@ interface LogLine extends TraceEntry {
  * adding an example means writing handlers, not wiring.
  */
 export function ExampleRunner({ example }: { example: ExampleDef }) {
-  const model = useMemo(() => parseModel(example.bpmn), [example.bpmn]);
   const run = useExampleRun({ bpmn: example.bpmn });
   const brain = useBrain();
 
@@ -60,6 +60,16 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
     Object.fromEntries(example.handlers.map((h) => [h.elementId, h.source])),
   );
   const [agentSource, setAgentSource] = useState(example.scriptedAgent ?? "");
+
+  // The atomic "draft run definition": the parsed model, every handler and
+  // form resolved (or not) against what's actually on offer, and the
+  // diagnostics that follow — naming exactly what's missing and where. Run
+  // stays disabled while it reports an error; see docs/supported-edits.md.
+  const draft = useMemo(
+    () => buildDraftRunDefinition(example, sources),
+    [example, sources],
+  );
+  const model = draft.model;
 
   // The start form comes from the model's start-event `formId`, if it has one.
   const startSchema = model.startFormId
@@ -132,18 +142,17 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
     : null;
 
   const start = useCallback(async () => {
-    if (run.phase !== "ready" || runningRef.current) return;
+    // The draft already gates this in the UI (the Run button is disabled),
+    // but re-check here too: `draft.hasErrors` is the single source of truth
+    // for "safe to run", not just a button prop.
+    if (run.phase !== "ready" || runningRef.current || draft.hasErrors) return;
     setCompileError(null);
 
-    // Compile everything before touching the engine, so a syntax error is
-    // reported next to the editor rather than as a mid-run incident.
-    const byElement: Record<string, ExampleHandler> = {};
+    // The scripted brain's agent code isn't part of the draft's handler
+    // resolution (it's the LLM stand-in, not a BPMN element handler), so it's
+    // still compiled here, next to the editor, before the engine is touched.
     let scripted: AgentHandler | null = null;
     try {
-      for (const def of example.handlers)
-        byElement[def.elementId] = compileHandler(
-          sources[def.elementId] ?? def.source,
-        );
       if (model.agent && agentSource.trim())
         scripted = compileAgent(agentSource);
     } catch (e) {
@@ -151,19 +160,26 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
       return;
     }
 
-    const workers = buildWorkers(model, byElement, trace);
+    const workers = buildWorkers(model, draft.handlers, trace);
 
-    // Which brain drives the agent this run.
+    // Which brain drives every agent host this run. Every AI Agent
+    // sub-process shares one job type, so hosts are grouped by job type and
+    // routed by `job.elementId` underneath — each keeps its own turn counter
+    // and called-tools set instead of sharing one closure.
     const agents: Record<string, AgentHandler> = {};
-    if (model.agent) {
+    if (model.agents.length > 0) {
       const live = brain.kind !== "scripted" && brain.chat;
       if (live) {
-        agents[model.agent.jobType] = makeLiveAgent(
-          model.agent,
-          brain.chat!,
-          trace,
-        );
-      } else if (scripted) {
+        const byJobType = new Map<string, AgentSpec[]>();
+        for (const spec of model.agents)
+          byJobType.set(spec.jobType, [...(byJobType.get(spec.jobType) ?? []), spec]);
+        for (const [jobType, specs] of byJobType)
+          agents[jobType] = makeLiveAgentRouter(specs, brain.chat!, trace);
+      } else if (scripted && model.agent) {
+        // The scripted brain is one closure today — it only drives the
+        // primary process's first agent host. A model with several hosts and
+        // no live brain runs the rest with no agent handler registered,
+        // which the engine reports as an incident rather than a silent stall.
         agents[model.agent.jobType] = async (job) => {
           const result = await scripted!(job);
           const tools = (result.activateElements ?? [])
@@ -233,7 +249,7 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
       runningRef.current = false;
       setRunning(false);
     }
-  }, [run, example, sources, agentSource, startValues, model, brain, trace]);
+  }, [run, example, draft, agentSource, startValues, model, brain, trace]);
 
   const stop = useCallback(() => {
     runningRef.current = false;
@@ -273,7 +289,10 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
         <h1>{example.title}</h1>
         <p>{example.blurb}</p>
         <div className="controls">
-          <Button onClick={() => void start()} disabled={run.phase !== "ready" || running}>
+          <Button
+            onClick={() => void start()}
+            disabled={run.phase !== "ready" || running || draft.hasErrors}
+          >
             ▶ Run
           </Button>
           <Button variant="secondary" onClick={stop} disabled={run.phase !== "ready"}>
@@ -291,6 +310,32 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
           <Alert variant="destructive">
             <AlertTitle>Code didn't compile</AlertTitle>
             <AlertDescription>{compileError}</AlertDescription>
+          </Alert>
+        )}
+        {draft.hasErrors && (
+          <Alert variant="destructive">
+            <AlertTitle>Run is disabled — the diagram has unresolved references</AlertTitle>
+            <AlertDescription>
+              <ul className="diagnostics">
+                {draft.diagnostics
+                  .filter((d) => d.severity === "error")
+                  .map((d, i) => (
+                    <li key={i}>{d.message}</li>
+                  ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+        {!draft.hasErrors && draft.diagnostics.length > 0 && (
+          <Alert>
+            <AlertTitle>Heads up</AlertTitle>
+            <AlertDescription>
+              <ul className="diagnostics">
+                {draft.diagnostics.map((d, i) => (
+                  <li key={i}>{d.message}</li>
+                ))}
+              </ul>
+            </AlertDescription>
           </Alert>
         )}
       </section>
