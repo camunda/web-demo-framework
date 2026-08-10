@@ -1,0 +1,65 @@
+name: Preview
+
+# Builds every PR and publishes it to a per-PR preview URL, so a reviewer
+# can click through to a real deployed page before merge — this repo has
+# many parallel issues in flight and "does it work on the deployed page"
+# needs answering before merge, not after (issue #19, acceptance
+# criterion 2).
+#
+# Implementation: the preview bundle is published under
+# pr-preview/pr-<number>/ on the gh-pages branch, alongside (but never
+# overwriting) the production deployment that deploy.yml publishes via
+# GitHub Pages' native `actions/deploy-pages` flow. rossjrw/pr-preview-action
+# manages that subfolder (publish on open/sync, tear down on close) using
+# only the built-in GITHUB_TOKEN — no external hosting account needed.
+#
+# Note: GitHub Pages serves a single artifact per deployment when using
+# actions/deploy-pages (deploy.yml). This workflow instead pushes to the
+# gh-pages branch directly, which is a second, classic Pages source. Both
+# can coexist on the same custom domain by pointing Pages at the gh-pages
+# branch instead of the deploy-pages environment, or by serving previews
+# from a distinct path/subdomain (e.g. previews.demos.camunda.io) — this
+# is exactly the kind of infra decision flagged in
+# docs/hosting-and-deployment.md as needing sign-off. Until that's
+# settled, treat this workflow as the mechanism and the exact URL
+# shape as pending infra approval.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      built: ${{ steps.build.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - id: build
+        run: npm run build
+      - uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: dist/
+
+  close:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rossjrw/pr-preview-action@v1
+        with:
+          action: remove
