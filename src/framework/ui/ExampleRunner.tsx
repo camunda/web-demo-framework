@@ -28,6 +28,7 @@ import { BrainPanel } from "./BrainPanel";
 import { FormRenderer, formDefaults, type FormSchema } from "./FormRenderer";
 import { ModelEditor } from "./ModelEditor";
 import type { ExampleDef, TraceEntry } from "../types";
+import { createTemplateMap, type TemplateMap } from "../templates";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
@@ -78,8 +79,8 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   // falling back to `example.templates`, before the model is ever parsed or
   // deployed — a prompt edit flows through the exact same draft-definition
   // pipeline as a handler edit.
-  const [templateSources, setTemplateSources] = useState<Record<string, string>>(
-    () => ({ ...(example.templates ?? {}) }),
+  const [templateSources, setTemplateSources] = useState<TemplateMap>(() =>
+    createTemplateMap(example.templates),
   );
 
   // The atomic "draft run definition": the parsed model, every handler and
@@ -653,10 +654,9 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                         defaultLanguage="markdown"
                         value={templateSources[name]}
                         onChange={(v) =>
-                          setTemplateSources((prev) => ({
-                            ...prev,
-                            [name]: v ?? "",
-                          }))
+                          setTemplateSources((prev) =>
+                            createTemplateMap(prev, { [name]: v ?? "" }),
+                          )
                         }
                         options={editorOptions}
                       />

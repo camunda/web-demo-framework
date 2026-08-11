@@ -1,5 +1,5 @@
 import type { ExampleDef } from "../../framework/types";
-import { templateNameFromPath } from "../../framework/templates";
+import { createTemplateMap, templateNameFromPath } from "../../framework/templates";
 import bpmn from "./model.bpmn?raw";
 import shipmentReadyForm from "./shipment-ready.form.json";
 import reviewForm from "./review.form.json";
@@ -24,11 +24,13 @@ const promptFiles = import.meta.glob("./prompts/*.md", {
   query: "?raw",
   import: "default",
 }) as Record<string, string>;
-const prompts = Object.fromEntries(
-  Object.entries(promptFiles).map(([path, content]) => [
-    templateNameFromPath(path),
-    content.trimEnd(),
-  ]),
+const prompts = createTemplateMap(
+  Object.fromEntries(
+    Object.entries(promptFiles).map(([path, content]) => [
+      templateNameFromPath(path),
+      content.trimEnd(),
+    ]),
+  ),
 );
 
 
