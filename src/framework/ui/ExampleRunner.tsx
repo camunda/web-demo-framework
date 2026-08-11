@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { AgentHandler } from "@nanobpm/bojtos-react";
+import type { AgentHandler, JobHandler, Snapshot } from "@nanobpm/bojtos-react";
 import {
   Alert,
   AlertDescription,
@@ -207,6 +207,11 @@ export function ExampleRunner({
   // the same turn group as the agent entry that activated it — see
   // `TraceTimeline.tsx`. Recreated fresh in `start` below, per run.
   const turnRef = useRef<TurnRef>({ current: undefined });
+  // The workers/agents maps from the run currently in progress, kept around
+  // so a manual-control resolution (below) can resume the same drive loop
+  // instead of rebuilding it.
+  const workersRef = useRef<Record<string, JobHandler>>({});
+  const agentsRef = useRef<Record<string, AgentHandler>>({});
 
   /** Element id -> human label, for the trace timeline and its engine-view panels. */
   const elementLabels = useMemo(() => {
@@ -243,6 +248,43 @@ export function ExampleRunner({
   );
 
   /**
+   * Job types this example holds out of the automatic drive loop (see
+   * `HandlerDef.manualControl`), keyed by the job type the engine actually
+   * emits (not the element id) — that's what `run.snapshot.jobs` and the
+   * `workers` map both key on.
+   */
+  const manualControls = useMemo(() => {
+    const allTasks = model.processes.flatMap((p) => p.tasks);
+    const map = new Map<
+      string,
+      NonNullable<(typeof example.handlers)[number]["manualControl"]> & {
+        elementId: string;
+      }
+    >();
+    for (const h of example.handlers) {
+      if (!h.manualControl) continue;
+      const task = allTasks.find((t) => t.elementId === h.elementId);
+      if (task)
+        map.set(task.jobType, { ...h.manualControl, elementId: h.elementId });
+    }
+    return map;
+  }, [example.handlers, model]);
+
+  /**
+   * The one job, if any, currently waiting on a job type this example holds
+   * back manually — the drive loop below stops here (nothing registered for
+   * this job type) rather than completing it, so the reader gets a choice.
+   */
+  const pendingManualJob = useMemo(() => {
+    if (!run.snapshot) return null;
+    for (const job of run.snapshot.jobs) {
+      const control = manualControls.get(job.jobType);
+      if (control && job.state === "Created") return { job, control };
+    }
+    return null;
+  }, [run.snapshot, manualControls]);
+
+  /**
    * Agent tools that never ran this instance. When a human task opens with some
    * of these outstanding, the agent finished early — a hallucinated tool name,
    * or it declared itself done — and the process took a gateway's default path.
@@ -267,6 +309,105 @@ export function ExampleRunner({
     ? ((example.forms?.[openUserTaskSpec.formId] as FormSchema | undefined) ??
       null)
     : null;
+
+  /**
+   * Drive `stepWorkers` to quiescence, completion, a human task, or a
+   * manually-held job — shared by `start` and by `resolveManualControl`
+   * below, which resumes exactly this loop after the reader picks how a
+   * held-back job resolves (see `manualControls`/`pendingManualJob`).
+   */
+  const driveLoop = useCallback(
+    async (
+      workers: Record<string, JobHandler>,
+      agents: Record<string, AgentHandler>,
+      initialSnap: Snapshot | null,
+    ) => {
+      let snap = initialSnap;
+      let guard = 0;
+      while (
+        runningRef.current &&
+        snap &&
+        snap.completedInstances < 1 &&
+        guard++ < 80
+      ) {
+        const round = await run.stepWorkers(workers, { agents });
+        snap = round?.snapshot ?? snap;
+        const vars = snap.instances[0]?.variables;
+        if (vars && Object.keys(vars).length) setDisplayVars({ ...vars });
+        if (snap.userTasks.some((t) => t.state === "Created")) {
+          trace({
+            kind: "human",
+            text: "⏸ waiting for a human — complete the task below to continue",
+          });
+          break;
+        }
+        if (!round || round.handled === 0) break;
+        await new Promise((r) => setTimeout(r, BEAT));
+      }
+
+      if (snap && snap.completedInstances >= 1)
+        trace({ kind: "done", text: "✅ process instance completed" });
+      else if (snap && snap.incidentElementIds.length > 0)
+        trace({
+          kind: "error",
+          text: "A job failed — incident on the diagram",
+        });
+      return snap;
+    },
+    [run, trace],
+  );
+
+  /**
+   * Resolve the job `pendingManualJob` is holding back, either by completing
+   * it the normal way or by firing its boundary event (a timer or a thrown
+   * BPMN error — see `HandlerDef.manualControl`), then resume the drive loop
+   * with the same workers/agents the run started with.
+   */
+  const resolveManualControl = useCallback(
+    async (choice: "complete" | "action") => {
+      if (!pendingManualJob || runningRef.current) return;
+      const { job, control } = pendingManualJob;
+      runningRef.current = true;
+      setRunning(true);
+      try {
+        let snap: Snapshot | null;
+        if (choice === "complete") {
+          snap = run.completeJobManually(job.jobType, "{}");
+          trace({
+            kind: "vars",
+            text: "  ↳ completed normally",
+            elementId: job.elementId,
+          });
+        } else if (control.action.kind === "timer") {
+          const dueInMs = run.snapshot?.timers[0]?.dueInMs ?? 0;
+          snap = run.advanceTime(Math.max(dueInMs, 0) + 1);
+          trace({
+            kind: "vars",
+            text: `  ↳ advanced the clock — timer fired`,
+            elementId: job.elementId,
+          });
+        } else {
+          const { errorCode, message } = control.action;
+          snap = run.throwJobError(job.jobType, errorCode, message);
+          trace({
+            kind: "vars",
+            text: `  ↳ threw BPMN error ${errorCode}: ${message}`,
+            elementId: job.elementId,
+          });
+        }
+        if (snap) {
+          const vars = snap.instances[0]?.variables;
+          if (vars) setDisplayVars({ ...vars });
+          await new Promise((r) => setTimeout(r, BEAT));
+          await driveLoop(workersRef.current, agentsRef.current, snap);
+        }
+      } finally {
+        runningRef.current = false;
+        setRunning(false);
+      }
+    },
+    [pendingManualJob, run, trace, driveLoop],
+  );
 
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
@@ -298,6 +439,10 @@ export function ExampleRunner({
     // agent turns — see the `turnRef` comment above.
     turnRef.current = { current: undefined };
     const workers = buildWorkers(model, draft.handlers, trace, turnRef.current);
+    // Job types this example holds back for a manual choice (see
+    // `manualControls`/`pendingManualJob`) never auto-dispatch — the drive
+    // loop below simply finds nothing registered for them and stops there.
+    for (const jobType of manualControls.keys()) delete workers[jobType];
 
     // Which brain drives every agent host this run. Every AI Agent
     // sub-process shares one job type, so hosts are grouped by job type and
@@ -355,6 +500,8 @@ export function ExampleRunner({
     setReviewValues({});
     const seed = { ...example.seed, ...startValues };
     setDisplayVars(seed);
+    workersRef.current = workers;
+    agentsRef.current = agents;
 
     try {
       // Apply the draft XML to the engine now — not on every keystroke (see
@@ -373,43 +520,27 @@ export function ExampleRunner({
             : "no agent in this model"
         }`,
       });
-      let snap = run.createInstance(pid, JSON.stringify(seed));
+      const snap = run.createInstance(pid, JSON.stringify(seed));
       await new Promise((r) => setTimeout(r, BEAT));
 
-      let guard = 0;
-      while (
-        runningRef.current &&
-        snap &&
-        snap.completedInstances < 1 &&
-        guard++ < 80
-      ) {
-        const round = await run.stepWorkers(workers, { agents });
-        snap = round?.snapshot ?? snap;
-        const vars = snap.instances[0]?.variables;
-        if (vars && Object.keys(vars).length) setDisplayVars({ ...vars });
-        if (snap.userTasks.some((t) => t.state === "Created")) {
-          trace({
-            kind: "human",
-            text: "⏸ waiting for a human — complete the task below to continue",
-          });
-          break;
-        }
-        if (!round || round.handled === 0) break;
-        await new Promise((r) => setTimeout(r, BEAT));
-      }
-
-      if (snap && snap.completedInstances >= 1)
-        trace({ kind: "done", text: "✅ process instance completed" });
-      else if (snap && snap.incidentElementIds.length > 0)
-        trace({
-          kind: "error",
-          text: "A job failed — incident on the diagram",
-        });
+      await driveLoop(workers, agents, snap);
     } finally {
       runningRef.current = false;
       setRunning(false);
     }
-  }, [run, example, draft, bpmn, agentSource, startValues, model, brain, trace]);
+  }, [
+    run,
+    example,
+    draft,
+    bpmn,
+    agentSource,
+    startValues,
+    model,
+    brain,
+    trace,
+    manualControls,
+    driveLoop,
+  ]);
 
   const stop = useCallback(() => {
     runningRef.current = false;
@@ -590,6 +721,35 @@ export function ExampleRunner({
                 >
                   Complete task
                 </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {pendingManualJob && (
+            <Card className="panel">
+              <CardHeader>
+                <CardTitle>{pendingManualJob.control.label}</CardTitle>
+                <CardDescription>
+                  This job is held here on purpose — pick how it resolves.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="controls">
+                  <Button
+                    onClick={() => void resolveManualControl("complete")}
+                    disabled={running}
+                  >
+                    {pendingManualJob.control.completeLabel ??
+                      "✅ Complete normally"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => void resolveManualControl("action")}
+                    disabled={running}
+                  >
+                    {pendingManualJob.control.action.label}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
