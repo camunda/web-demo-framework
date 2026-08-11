@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeSignal"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:signal id="Signal_Probe" name="probe-signal" />
+  <bpmn:process id="probe-signal" name="Signal probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToWait</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToWait" sourceRef="Start" targetRef="WaitForSignal" />
+    <bpmn:intermediateCatchEvent id="WaitForSignal" name="Wait for signal">
+      <bpmn:incoming>ToWait</bpmn:incoming>
+      <bpmn:outgoing>ToTask</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="SignalDef_1" signalRef="Signal_Probe" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="ToTask" sourceRef="WaitForSignal" targetRef="AfterSignal" />
+    <bpmn:serviceTask id="AfterSignal" name="After the signal broadcasts">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-after-signal" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToTask</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="AfterSignal" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

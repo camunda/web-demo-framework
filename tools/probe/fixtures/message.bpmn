@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeMessage"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="Message_Probe" name="probe-message">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=&#34;probe-correlation-key&#34;" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="probe-message" name="Message probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToWait</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToWait" sourceRef="Start" targetRef="WaitForMessage" />
+    <bpmn:intermediateCatchEvent id="WaitForMessage" name="Wait for message">
+      <bpmn:incoming>ToWait</bpmn:incoming>
+      <bpmn:outgoing>ToTask</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageDef_1" messageRef="Message_Probe" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="ToTask" sourceRef="WaitForMessage" targetRef="AfterMessage" />
+    <bpmn:serviceTask id="AfterMessage" name="After the message correlates">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-after-message" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToTask</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="AfterMessage" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeDmn"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-dmn" name="DMN probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToDecision</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToDecision" sourceRef="Start" targetRef="Decide" />
+    <bpmn:businessRuleTask id="Decide" name="Evaluate a decision">
+      <bpmn:extensionElements>
+        <zeebe:calledDecision decisionId="probe-decision" resultVariable="probeResult" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToDecision</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="Decide" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

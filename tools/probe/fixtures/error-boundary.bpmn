@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeErrorBoundary"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-error-boundary" name="Error boundary probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToRisky</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToRisky" sourceRef="Start" targetRef="RiskyTask" />
+    <bpmn:serviceTask id="RiskyTask" name="A task that throws a BPMN error">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-risky-task" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToRisky</bpmn:incoming>
+      <bpmn:outgoing>ToHappyEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="ErrorBoundary" attachedToRef="RiskyTask">
+      <bpmn:outgoing>ToErrorEnd</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorDef_1" errorRef="Error_Probe" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="ToHappyEnd" sourceRef="RiskyTask" targetRef="HappyEnd" />
+    <bpmn:endEvent id="HappyEnd" name="Completed normally">
+      <bpmn:incoming>ToHappyEnd</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="ToErrorEnd" sourceRef="ErrorBoundary" targetRef="ErrorEnd" />
+    <bpmn:endEvent id="ErrorEnd" name="Handled the error">
+      <bpmn:incoming>ToErrorEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmn:error id="Error_Probe" name="probe-error" errorCode="PROBE_ERROR" />
+</bpmn:definitions>

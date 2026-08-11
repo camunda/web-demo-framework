@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeTimer"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-timer" name="Timer probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToTimer</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToTimer" sourceRef="Start" targetRef="Timer" />
+    <bpmn:intermediateCatchEvent id="Timer" name="Wait 1s">
+      <bpmn:incoming>ToTimer</bpmn:incoming>
+      <bpmn:outgoing>ToTask</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerDef_1">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">PT1S</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="ToTask" sourceRef="Timer" targetRef="AfterTimer" />
+    <bpmn:serviceTask id="AfterTimer" name="After the timer fires">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-after-timer" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToTask</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="AfterTimer" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
