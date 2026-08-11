@@ -57,10 +57,14 @@ interface LogLine extends TraceEntry {
 export function ExampleRunner({ example }: { example: ExampleDef }) {
   // The diagram is data, not a static import: lifted into state so the new
   // XML editor tab (and, later, a visual bpmn-js Modeler behind the same
-  // seam) can hand-edit it and have every downstream consumer — the engine,
-  // the diagnostics, the diagram view — see the edit on the next Run.
+  // seam) can hand-edit it and have every downstream consumer — the
+  // diagnostics, the diagram view — see the edit as it's typed. The engine
+  // itself only sees this draft on the next Run (via `run.redeploy`, in
+  // `start` below): feeding every keystroke straight into `useExampleRun`
+  // would tear down and redeploy the whole session on every character typed,
+  // repeatedly wiping the previous run's state mid-edit.
   const [bpmn, setBpmn] = useState(example.bpmn);
-  const run = useExampleRun({ bpmn });
+  const run = useExampleRun({ bpmn: example.bpmn });
   const brain = useBrain();
 
   const [sources, setSources] = useState<Record<string, string>>(() =>
@@ -225,8 +229,12 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
     setDisplayVars(seed);
 
     try {
-      run.reset();
-      const pid = run.processIds[0] ?? model.processId;
+      // Apply the draft XML to the engine now — not on every keystroke (see
+      // `useExampleRun`'s `bpmn` param) — so Run always executes exactly
+      // what's in the editor. `draft.hasErrors` already gated the button
+      // above, so this redeploy is against XML the model parser accepted.
+      const ids = run.redeploy(bpmn);
+      const pid = ids?.[0] ?? model.processId;
       trace({
         kind: "start",
         text: `Starting "${pid}" — ${
@@ -270,7 +278,7 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
       runningRef.current = false;
       setRunning(false);
     }
-  }, [run, example, draft, agentSource, startValues, model, brain, trace]);
+  }, [run, example, draft, bpmn, agentSource, startValues, model, brain, trace]);
 
   const stop = useCallback(() => {
     runningRef.current = false;
@@ -543,6 +551,14 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                   <div className="editor-meta">
                     <strong>BPMN XML</strong>
                     <code>hand-edit the diagram — Run re-checks it below</code>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setBpmn(example.bpmn)}
+                      disabled={bpmn === example.bpmn}
+                    >
+                      Revert to original
+                    </Button>
                   </div>
                   <ModelEditor value={bpmn} onChange={setBpmn} />
                 </TabsContent>
