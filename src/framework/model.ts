@@ -319,7 +319,12 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     const jobType = jobTypeOf(el);
     const id = el.getAttribute("id");
     if (!jobType || !id) continue;
-    const host = agentHosts.find((h) => h.contains(el));
+    // A tool nested inside two AI Agent hosts (one inside another) matches
+    // `.contains()` for both; attribute it to the innermost one — the
+    // candidate every other containing candidate also contains — not
+    // whichever comes first in document order.
+    const containing = agentHosts.filter((h) => h.contains(el));
+    const host = containing.find((h) => containing.every((other) => other === h || other.contains(h)));
     const spec: TaskSpec = {
       elementId: id,
       label: el.getAttribute("name") ?? id,

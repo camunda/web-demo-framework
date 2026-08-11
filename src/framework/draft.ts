@@ -81,9 +81,14 @@ export function buildDraftRunDefinition(
 
   // Every job-bearing element needs source, and that source needs to compile,
   // before the run starts — not as a mid-run "no handler registered" incident.
+  // Check every process, not just the primary one: with multi-process BPMN
+  // (call activities, or a runner that starts a non-primary processId), tasks
+  // in secondary processes can still activate jobs, so `hasErrors` must cover
+  // them too.
+  const allTasks = model.processes.flatMap((p) => p.tasks);
   const defaultSourceOf = new Map(example.handlers.map((h) => [h.elementId, h.source]));
   const handlers: Record<string, ExampleHandler> = {};
-  for (const task of model.tasks) {
+  for (const task of allTasks) {
     const source = sources[task.elementId] ?? defaultSourceOf.get(task.elementId);
     if (source === undefined) {
       diagnostics.push({
@@ -110,7 +115,7 @@ export function buildDraftRunDefinition(
 
   // Orphaned handlers: source naming an element the current diagram no longer
   // has (typically after a rename) is otherwise silently inert.
-  const taskIds = new Set(model.tasks.map((t) => t.elementId));
+  const taskIds = new Set(allTasks.map((t) => t.elementId));
   const handlerIds = new Set([...defaultSourceOf.keys(), ...Object.keys(sources)]);
   for (const elementId of handlerIds) {
     if (!taskIds.has(elementId)) {
