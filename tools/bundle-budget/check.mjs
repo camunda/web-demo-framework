@@ -8,6 +8,10 @@
 // entry point regressed back to eager-loading Monaco, as long as the
 // gallery stayed light — issue #9 explicitly calls this out, so each
 // artifact below gets its own budget instead of one combined number.
+// `modeler-on-demand` covers the bpmn-js `Modeler` behind the model-editing
+// seam (`src/framework/ui/ModelEditor.tsx`, issue #3), added once that
+// component existed and got its own `React.lazy()` boundary in
+// `ExampleRunner.tsx`.
 //
 // Run after `npm run build` (see package.json's `budget` script and
 // .github/workflows/ci.yml). Fails (non-zero exit) if any artifact exceeds
@@ -33,6 +37,7 @@ const BUDGETS_KB = {
   "embed-initial-js": 300,
   "monaco-on-demand": 950,
   "webllm-on-demand": 2200,
+  "modeler-on-demand": 950,
 };
 
 async function loadManifest() {
@@ -110,6 +115,10 @@ async function main() {
   const webllmKey = findDynamicTarget(manifest, (k) =>
     k.includes("@mlc-ai/web-llm"),
   );
+  const modelerKey = findDynamicTarget(
+    manifest,
+    (k) => manifest[k].name === "ModelEditor" && manifest[k].isDynamicEntry,
+  );
 
   const monacoKb = monacoKey
     ? await sumGzipKb(
@@ -129,12 +138,22 @@ async function main() {
         ),
       )
     : 0;
+  const modelerKb = modelerKey
+    ? await sumGzipKb(
+        manifest,
+        subtractKeys(
+          collectFromDynamicTarget(manifest, modelerKey),
+          initialKeys,
+        ),
+      )
+    : 0;
 
   const measurements = {
     "gallery-initial-js": initialKb,
     "embed-initial-js": initialKb,
     "monaco-on-demand": monacoKb,
     "webllm-on-demand": webllmKb,
+    "modeler-on-demand": modelerKb,
   };
 
   let failed = false;
@@ -165,11 +184,14 @@ async function main() {
     );
     failed = true;
   }
-
-  // No "modeler-on-demand" budget yet: no bpmn-js Modeler component exists
-  // in this codebase as of issue #9 (only the read-only BpmnRuntimeView
-  // diagram viewer via @nanobpm/bojtos-react). Add one here once issues
-  // #3/#4 land a Modeler and it gets its own lazy boundary.
+  if (!modelerKey) {
+    console.warn(
+      "\nWarning: couldn't find the Modeler on-demand chunk in the manifest — " +
+        "modeler-on-demand measured as 0 kB, which would mask a real regression. " +
+        "Check that src/framework/ui/ModelEditor.tsx still exists and is dynamically imported.",
+    );
+    failed = true;
+  }
 
   if (failed) {
     console.error("\nBundle budget check FAILED.");

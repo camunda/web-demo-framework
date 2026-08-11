@@ -40,7 +40,6 @@ import {
   type FormRendererHandle,
   type FormSchema,
 } from "./FormRenderer";
-import { ModelEditor } from "./ModelEditor";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 
@@ -74,6 +73,12 @@ const BpmnRuntimeView = lazy(async () => {
 // Monaco's own setup (worker environment, `loader.config`) lives in
 // `./MonacoEditor` so it only runs once this dynamic import actually resolves.
 const Editor = lazy(() => import("./MonacoEditor"));
+// The model-editing seam's visual bpmn-js `Modeler` pulls in the same
+// multi-MB `bpmn-js` dependency `BpmnRuntimeView` above already lazy-loads —
+// loading it eagerly here would put it right back on the initial-load path
+// this file otherwise keeps clear (see `tools/bundle-budget/check.mjs`'s
+// `modeler-on-demand` budget).
+const ModelEditor = lazy(() => import("./ModelEditor"));
 
 function safeStringify(value: unknown, space?: number): string {
   try {
@@ -682,7 +687,7 @@ export function ExampleRunner({
               >
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
                   <TabsList>
-                    <TabsTrigger value={MODEL_TAB}>model (XML)</TabsTrigger>
+                    <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
                     {model.agent && (
                       <TabsTrigger value={AGENT_TAB}>
                         agent (scripted)
@@ -703,8 +708,8 @@ export function ExampleRunner({
 
                   <TabsContent value={MODEL_TAB}>
                     <div className="editor-meta">
-                      <strong>BPMN XML</strong>
-                      <code>hand-edit the diagram — Run re-checks it below</code>
+                      <strong>Model</strong>
+                      <code>edit the diagram visually — Run re-checks it below</code>
                       <Button
                         variant="secondary"
                         size="sm"

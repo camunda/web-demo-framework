@@ -251,6 +251,12 @@ body {
   overflow: hidden;
 }
 
+/* The visual bpmn-js Modeler behind the model-editing seam (ModelEditor.tsx)
+   — matches the fixed height the Monaco XML editor it replaced used. */
+.model-editor-canvas {
+  height: 360px;
+}
+
 /* Forms rendered from the model's .form schemas. */
 .form {
   display: flex;
