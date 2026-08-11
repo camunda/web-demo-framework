@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BpmnModdle as BpmnModdleType } from "bpmn-moddle";
 import * as BpmnModdleModule from "bpmn-moddle";
@@ -248,6 +248,45 @@ describe("ModelEditor component", () => {
         container.querySelector('[data-element-id="RenamedElement"]'),
       ).not.toBeNull(),
     );
+  });
+
+  it("toggles the expanded layout class, button label and aria-pressed on click, and Escape exits", async () => {
+    const onChange = () => {};
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={onChange} />,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-element-id]").length,
+      ).toBeGreaterThan(0),
+    );
+
+    const layout = container.querySelector(".model-editor-layout");
+    const button = container.querySelector(
+      ".model-editor-expand",
+    ) as HTMLButtonElement;
+    expect(layout).not.toBeNull();
+    expect(button).not.toBeNull();
+
+    expect(layout).not.toHaveClass("model-editor-layout--expanded");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.textContent).toBe("Full screen");
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(layout).toHaveClass("model-editor-layout--expanded");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.textContent).toBe("Exit full screen (Esc)");
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+
+    expect(layout).not.toHaveClass("model-editor-layout--expanded");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.textContent).toBe("Full screen");
   });
 
   it("keeps the same value/onChange contract signature the XML editor used", () => {
