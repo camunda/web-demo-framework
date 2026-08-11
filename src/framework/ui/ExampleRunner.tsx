@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BpmnRuntimeView, type AgentHandler } from "@nanobpm/bojtos-react";
 import Editor from "@monaco-editor/react";
 import {
@@ -24,6 +24,8 @@ import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
 import { useBrain } from "../useBrain";
+import type { BrainKind } from "../brains/types";
+import { patchDeepLinkState } from "../deepLink";
 import { BrainPanel } from "./BrainPanel";
 import {
   FormRenderer,
@@ -62,7 +64,18 @@ interface LogLine extends TraceEntry {
  * which elements are agent tools are read off the diagram by `parseModel`, so
  * adding an example means writing handlers, not wiring.
  */
-export function ExampleRunner({ example }: { example: ExampleDef }) {
+export function ExampleRunner({
+  example,
+  initialBrainKind,
+}: {
+  example: ExampleDef;
+  /**
+   * Pre-selects a brain from a deep link (see `src/framework/deepLink.ts`)
+   * instead of the default "scripted". Applied once, right after mount —
+   * additive to `useBrain`'s own default, not a change to it.
+   */
+  initialBrainKind?: BrainKind;
+}) {
   // The diagram is data, not a static import: lifted into state so the new
   // XML editor tab (and, later, a visual bpmn-js Modeler behind the same
   // seam) can hand-edit it and have every downstream consumer — the
@@ -73,6 +86,21 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   // repeatedly wiping the previous run's state mid-edit.
   const [bpmn, setBpmn] = useState(example.bpmn);
   const brain = useBrain();
+
+  useEffect(() => {
+    if (initialBrainKind && initialBrainKind !== brain.kind) {
+      brain.setKind(initialBrainKind);
+    }
+    // Intentionally only on mount: this seeds the initial choice from the
+    // URL, it doesn't keep re-syncing on every brain.kind change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the deep-linkable brain choice (see deepLink.ts) in sync so a
+  // reader who switches brains and shares the URL hands over that choice too.
+  useEffect(() => {
+    patchDeepLinkState({ brain: brain.kind });
+  }, [brain.kind]);
 
   const [sources, setSources] = useState<Record<string, string>>(() =>
     Object.fromEntries(example.handlers.map((h) => [h.elementId, h.source])),

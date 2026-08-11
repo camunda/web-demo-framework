@@ -1,5 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { copyFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // `index.html` ships a baseline CSP <meta> tag intended for hosted/production
 // deployments (see docs/security.md). It must not apply to `npm run dev`,
@@ -19,6 +21,46 @@ function stripDevCsp(): Plugin {
     },
   };
 }
+
+// GitHub Pages (and most static hosts) serve `404.html` for any path it
+// doesn't recognize as a file — which is every deep-linked route this app
+// adds (`/examples/<id>`), since there's no server-side router. Copying the
+// built `index.html` to `404.html` means a direct navigation (or a docs page
+// `<iframe src="…/examples/order-process?embed=1">`) still boots the app,
+// which then reads the real path from `location.pathname` itself (the URL in
+// the address bar is left untouched by this fallback) — see
+// src/framework/routing.ts. `vite preview` doesn't emulate this Pages
+// behaviour, so verify deep-linked routes against a real deployment too, not
+// just `npm run preview`.
+function spaFallback404(): Plugin {
+  let outDir = "dist";
+  return {
+    name: "spa-fallback-404",
+    apply: "build",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      const resolvedOutDir = resolve(process.cwd(), outDir);
+      try {
+        copyFileSync(
+          resolve(resolvedOutDir, "index.html"),
+          resolve(resolvedOutDir, "404.html"),
+        );
+      } catch (err) {
+        // Best-effort — a custom outDir or a failed build shouldn't crash the
+        // rest of the pipeline over this fallback file, but it should be
+        // visible in CI logs rather than silently missing on deploy.
+        this.warn(
+          `spa-fallback-404: could not create 404.html fallback in "${resolvedOutDir}": ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    },
+  };
+}
+
 
 // The `@nanobpm/*` packages are excluded from esbuild's dependency pre-bundling
 // so the engine's `new URL('nanobpmn_engine_bg.wasm', import.meta.url)` survives
@@ -48,7 +90,7 @@ export default defineConfig({
   // where the build is actually published — see .github/workflows/deploy.yml
   // and preview.yml, and docs/hosting-and-deployment.md decision 1.
   base: basePath,
-  plugins: [react(), stripDevCsp()],
+  plugins: [react(), stripDevCsp(), spaFallback404()],
   server: {
     port: 5174,
     allowedHosts: [".ngrok-free.dev", ".ngrok-free.app", ".trycloudflare.com"],

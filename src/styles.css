@@ -44,6 +44,41 @@ body {
   flex-wrap: wrap;
 }
 
+.example-nav {
+  display: flex;
+}
+
+.example-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.docs-link,
+.open-full-page {
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--primary, #2563eb);
+}
+.docs-link:hover,
+.open-full-page:hover {
+  text-decoration: underline;
+}
+
+/* ?embed=1 — no gallery nav, no app header, sized to sit cleanly in an
+   iframe (see docs on embedding, issue #8). */
+.app-embed {
+  min-height: auto;
+}
+.layout-embed {
+  max-width: none;
+  margin: 0;
+  padding: 12px;
+  min-height: 100vh;
+}
+
 .runner {
   display: flex;
   flex-direction: column;
