@@ -113,6 +113,11 @@ describe("xmlContextAt", () => {
     const xml = `<a b="=&#34;{{x}}&#34;" />`;
     expect(xmlContextAt(xml, xml.indexOf("{{x}}"))).toBe("feel-literal");
   });
+
+  it("classifies inside a &quot;-delimited FEEL string literal", () => {
+    const xml = `<a b="=&quot;{{x}}&quot;" />`;
+    expect(xmlContextAt(xml, xml.indexOf("{{x}}"))).toBe("feel-literal");
+  });
 });
 
 describe("substituteTemplates — content-type-aware escaping", () => {

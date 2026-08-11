@@ -134,9 +134,11 @@ function escapeJsonString(s: string): string {
 
 /**
  * Classify where `index` sits in `xml`: inside an XML attribute value that is
- * itself inside an `&#34;`-delimited FEEL string literal (`"feel-literal"`),
- * inside a plain XML attribute value (`"attribute"`), or in element text
- * content / outside any tag (`"text"`).
+ * itself inside a `&#34;`- or `&quot;`-delimited FEEL string literal
+ * (`"feel-literal"`), inside a plain XML attribute value (`"attribute"`), or
+ * in element text content / outside any tag (`"text"`). Both entity forms are
+ * treated equivalently — this repo's fixtures use both (e.g. `model.test.ts`
+ * uses `&quot;`) and either can appear as the FEEL-literal quote delimiter.
  */
 export function xmlContextAt(xml: string, index: number): "feel-literal" | "attribute" | "text" {
   const lastLt = xml.lastIndexOf("<", index);
@@ -147,11 +149,12 @@ export function xmlContextAt(xml: string, index: number): "feel-literal" | "attr
   const quoteCount = (sinceTag.match(/"/g) ?? []).length;
   if (quoteCount % 2 === 0) return "text"; // inside the tag, but between attributes
 
-  // Inside an attribute value: count &#34; entities since that attribute's
-  // opening real quote to see whether we're also inside a FEEL string literal.
+  // Inside an attribute value: count &#34;/&quot; entities since that
+  // attribute's opening real quote to see whether we're also inside a FEEL
+  // string literal.
   const lastRealQuote = sinceTag.lastIndexOf('"');
   const attrValueSoFar = sinceTag.slice(lastRealQuote + 1);
-  const feelQuoteCount = (attrValueSoFar.match(/&#34;/g) ?? []).length;
+  const feelQuoteCount = (attrValueSoFar.match(/&#34;|&quot;/g) ?? []).length;
   return feelQuoteCount % 2 === 1 ? "feel-literal" : "attribute";
 }
 

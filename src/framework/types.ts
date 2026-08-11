@@ -1,4 +1,5 @@
 import type { ActivatedJob } from "@nanobpm/bojtos-react";
+import type { TemplateMap } from "./templates";
 
 /** A line in the run's activity log. */
 export interface TraceEntry {
@@ -86,5 +87,5 @@ export interface ExampleDef {
    * an example with no templates behaves exactly as one whose `bpmn` has no
    * `{{...}}` placeholders at all.
    */
-  templates?: Record<string, string>;
+  templates?: TemplateMap;
 }
