@@ -66,6 +66,32 @@ export interface HandlerDef {
   standsInFor?: string;
   /** The default editable source: an arrow-function expression. */
   source: string;
+  /**
+   * When present, this handler's job type is deliberately held out of the
+   * automatic drive loop instead of completing the moment it's activated —
+   * see `ExampleRunner`'s manual-control panel (rendered from `run.snapshot`,
+   * not example-specific UI). This exists for the boundary-event example: a
+   * job handler dispatched through `dispatchRound`/`dispatchWorkers` can only
+   * complete or fail a job (see `@nanobpm/bojtos-kit`'s `JobHandler` doc
+   * comment) — it has no way to call `throwError`, the command that actually
+   * routes a token through an error boundary catch rather than raising an
+   * incident. Firing a boundary error (or a boundary timer, the other new
+   * case this construct exists for) from the UI therefore means holding the
+   * job back and resolving it directly against the session — see
+   * `useExampleRun`'s `completeJobManually`/`throwJobError`/`advanceTime`.
+   * Optional and additive: an example with no `manualControl` on any handler
+   * behaves exactly as before (every job auto-dispatches).
+   */
+  manualControl?: {
+    /** Panel heading, e.g. `"Charge payment"`. */
+    label: string;
+    /** Label for the "run it the normal way" button. */
+    completeLabel?: string;
+    /** What the other button does. */
+    action:
+      | { kind: "error"; errorCode: string; message: string; label: string }
+      | { kind: "timer"; label: string };
+  };
 }
 
 /** One selectable start scenario, rendered by the start form. */

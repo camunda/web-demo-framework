@@ -32,6 +32,33 @@ export interface ExampleRunControls {
     opts?: DispatchOptions,
   ): Promise<RoundResult | null>;
   completeUserTask(userTaskKey: string, variablesJson: string): Snapshot | null;
+  /** Advance the virtual clock by `byMs`, firing any timer now due. */
+  advanceTime(byMs: number): Snapshot | null;
+  /**
+   * Activate one waiting job of `jobType` and complete it directly against
+   * the session, bypassing the normal `dispatchRound`/`workers` map. For a
+   * job type an example deliberately excludes from the drive loop (see
+   * `HandlerDef.manualControl`) so a reader can choose, at the moment it's
+   * reached, between completing it normally and firing its boundary
+   * event — this is the "complete it normally" half of that choice.
+   */
+  completeJobManually(jobType: string, variablesJson: string): Snapshot | null;
+  /**
+   * Activate one waiting job of `jobType` and throw a BPMN error on it
+   * directly against the session (`BojtosSession.throwError`), routing the
+   * token through a matching error boundary catch instead of raising an
+   * incident. `dispatchRound`/`dispatchWorkers` only support
+   * `completeJob`/`failJob` for a registered `JobHandler` — there is no way
+   * for ordinary handler code to reach `throwError` — so this is the only
+   * way the UI can demonstrate an error boundary event actually catching a
+   * thrown error rather than the job merely failing. See
+   * `HandlerDef.manualControl`.
+   */
+  throwJobError(
+    jobType: string,
+    errorCode: string,
+    errorMessage: string,
+  ): Snapshot | null;
   reset(): void;
   /**
    * Reset the engine and redeploy it with `xml`, replacing whatever was
@@ -140,6 +167,37 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     [run],
   );
 
+  const advanceTime = useCallback(
+    (byMs: number) => run((s) => s.advanceTime(byMs)),
+    [run],
+  );
+
+  /** Activate the one waiting job of `jobType`, or throw if none is waiting. */
+  function activateOne(session: BojtosSession, jobType: string) {
+    const [job] = session.activateJobs(jobType, 1, 30_000, "manual-control");
+    if (!job)
+      throw new Error(`No waiting job of type "${jobType}" to resolve.`);
+    return job;
+  }
+
+  const completeJobManually = useCallback(
+    (jobType: string, variablesJson: string) =>
+      run((s) => {
+        const job = activateOne(s, jobType);
+        return s.completeJob(job.key, variablesJson);
+      }),
+    [run],
+  );
+
+  const throwJobError = useCallback(
+    (jobType: string, errorCode: string, errorMessage: string) =>
+      run((s) => {
+        const job = activateOne(s, jobType);
+        return s.throwError(job.key, errorCode, errorMessage);
+      }),
+    [run],
+  );
+
   const stepWorkers = useCallback(
     async (workers: Record<string, JobHandler>, opts?: DispatchOptions) => {
       const session = sessionRef.current;
@@ -195,6 +253,9 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     createInstance,
     stepWorkers,
     completeUserTask,
+    advanceTime,
+    completeJobManually,
+    throwJobError,
     reset,
     redeploy,
   };
