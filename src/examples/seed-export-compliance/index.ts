@@ -1,5 +1,6 @@
 import type { ExampleDef } from "../../framework/types";
 import { createTemplateMap, templateNameFromPath } from "../../framework/templates";
+import { complianceTour } from "./tour";
 import bpmn from "./model.bpmn?raw";
 import shipmentReadyForm from "./shipment-ready.form.json";
 import reviewForm from "./review.form.json";
@@ -226,6 +227,7 @@ export const seedExportCompliance: ExampleDef = {
   ],
   scriptedAgent: SCRIPTED_AGENT,
   templates: prompts,
+  tour: complianceTour,
   handlers: [
     {
       elementId: "VerifyGeneticMarker",

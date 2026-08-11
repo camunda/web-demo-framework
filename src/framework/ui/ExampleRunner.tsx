@@ -43,6 +43,7 @@ import {
 import { TraceTimeline } from "./TraceTimeline";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
+import { TOUR_ANCHOR, useTour } from "../tour";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
@@ -104,6 +105,7 @@ interface LogLine extends TraceEntry {
 export function ExampleRunner({
   example,
   initialBrainKind,
+  initialTourId,
 }: {
   example: ExampleDef;
   /**
@@ -112,6 +114,14 @@ export function ExampleRunner({
    * additive to `useBrain`'s own default, not a change to it.
    */
   initialBrainKind?: BrainKind;
+  /**
+   * Auto-starts `example.tour` when it matches (see
+   * `src/framework/tour/deepLink.ts`'s `?tour=<id>`), so a docs page can link
+   * straight into the guided version. Applied once, right after mount, same
+   * as `initialBrainKind` above — additive, ignored entirely when `example`
+   * has no `tour` or the id doesn't match.
+   */
+  initialTourId?: string | null;
 }) {
   // The diagram is data, not a static import: lifted into state so the new
   // XML editor tab (and, later, a visual bpmn-js Modeler behind the same
@@ -169,6 +179,22 @@ export function ExampleRunner({
   // not `example.bpmn` directly — so what runs and what's shown is exactly
   // what the diagnostics above are about.
   const run = useExampleRun({ bpmn: draft.resolvedBpmn });
+
+  // The example's optional guided tour (see `src/framework/tour/**`) — a
+  // no-op `start`/`stop` when `example.tour` is undefined, so nothing below
+  // needs its own conditional. `getSnapshot` reads live via a ref-like
+  // closure over `run.snapshot` at poll time rather than being recreated
+  // every render, since `useTour` only calls it from its own interval.
+  const tour = useTour(example.tour, () => run.snapshot);
+  useEffect(() => {
+    if (initialTourId && example.tour?.id === initialTourId) {
+      tour.start();
+    }
+    // Intentionally only on mount, mirroring `initialBrainKind` above — this
+    // seeds the initial "start the tour" instruction from the URL once, it
+    // doesn't re-trigger on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The start form comes from the model's start-event `formId`, if it has one.
   const startSchema = model.startFormId
@@ -583,6 +609,7 @@ export function ExampleRunner({
         <p>{example.blurb}</p>
         <div className="controls">
           <Button
+            data-tour={TOUR_ANCHOR.runButton}
             onClick={() => void start()}
             disabled={
               run.phase !== "ready" ||
@@ -600,6 +627,15 @@ export function ExampleRunner({
           >
             ↺ Reset
           </Button>
+          {example.tour && (
+            <Button
+              variant="secondary"
+              onClick={tour.start}
+              disabled={tour.active}
+            >
+              {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
+            </Button>
+          )}
           {statusBadge}
         </div>
         {run.phase === "error" && (
@@ -646,7 +682,7 @@ export function ExampleRunner({
 
       <div className="grid">
         <div className="col">
-          <Card className="panel">
+          <Card className="panel" data-tour={TOUR_ANCHOR.diagram}>
             <CardHeader>
               <CardTitle>Process</CardTitle>
               <CardDescription>
@@ -751,7 +787,7 @@ export function ExampleRunner({
           )}
 
           <div className="row">
-            <Card className="panel grow">
+            <Card className="panel grow" data-tour={TOUR_ANCHOR.variablesPanel}>
               <CardHeader>
                 <CardTitle>Variables</CardTitle>
                 <CardDescription>The instance payload, live.</CardDescription>
@@ -772,7 +808,7 @@ export function ExampleRunner({
 
         <div className="col">
           {model.agent && (
-            <Card className="panel">
+            <Card className="panel" data-tour={TOUR_ANCHOR.brainPanel}>
               <CardHeader>
                 <CardTitle>Brain</CardTitle>
                 <CardDescription>
@@ -830,7 +866,7 @@ export function ExampleRunner({
             </CardContent>
           </Card>
 
-          <Card className="panel editors">
+          <Card className="panel editors" data-tour={TOUR_ANCHOR.codePanel}>
             <CardHeader>
               <CardTitle>Code</CardTitle>
               <CardDescription>
