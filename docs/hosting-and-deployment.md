@@ -169,8 +169,12 @@ being served for real. Once deployed:
    as a `<meta http-equiv="Content-Security-Policy">` tag in `index.html`
    rather than an HTTP header, or the origin needs to move to a host that can
    set headers (e.g. Cloudflare Pages/Workers in front of the same static
-   bundle). Confirm which is used and verify with the browser devtools
-   Security/Network panel against the deployed URL, not just `localhost`.
+   bundle). Note that a meta CSP is not a full substitute for a header: some
+   directives (notably `frame-ancestors`, and `report-uri`/`report-to`) are
+   ignored when set via `<meta>`, so any directive that depends on those must
+   come from a host that can set headers. Confirm which delivery mechanism is
+   used and verify with the browser devtools Security/Network panel against
+   the deployed URL, not just `localhost`.
 2. **Sandbox.** Load the deployed page, open devtools, and confirm the
    handler/agent execution boundary from #18 (sandboxed iframe/worker) is
    actually present in the served HTML — a build or deploy misconfiguration

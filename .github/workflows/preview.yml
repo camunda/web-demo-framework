@@ -59,7 +59,7 @@ jobs:
           # so asset URLs must be rooted at that subpath or the preview
           # renders without JS/CSS.
           VITE_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}/
-      - uses: rossjrw/pr-preview-action@v1
+      - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           source-dir: dist/
 
@@ -71,6 +71,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rossjrw/pr-preview-action@v1
+      - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           action: remove
