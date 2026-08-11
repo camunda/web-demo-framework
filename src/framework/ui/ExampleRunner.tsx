@@ -26,11 +26,13 @@ import { useExampleRun } from "../useExampleRun";
 import { useBrain } from "../useBrain";
 import { BrainPanel } from "./BrainPanel";
 import { FormRenderer, formDefaults, type FormSchema } from "./FormRenderer";
+import { ModelEditor } from "./ModelEditor";
 import type { ExampleDef, TraceEntry } from "../types";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
 const AGENT_TAB = "__agent__";
+const MODEL_TAB = "__model__";
 
 function safeStringify(value: unknown, space?: number): string {
   try {
@@ -53,7 +55,12 @@ interface LogLine extends TraceEntry {
  * adding an example means writing handlers, not wiring.
  */
 export function ExampleRunner({ example }: { example: ExampleDef }) {
-  const run = useExampleRun({ bpmn: example.bpmn });
+  // The diagram is data, not a static import: lifted into state so the new
+  // XML editor tab (and, later, a visual bpmn-js Modeler behind the same
+  // seam) can hand-edit it and have every downstream consumer — the engine,
+  // the diagnostics, the diagram view — see the edit on the next Run.
+  const [bpmn, setBpmn] = useState(example.bpmn);
+  const run = useExampleRun({ bpmn });
   const brain = useBrain();
 
   const [sources, setSources] = useState<Record<string, string>>(() =>
@@ -65,9 +72,12 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   // form resolved (or not) against what's actually on offer, and the
   // diagnostics that follow — naming exactly what's missing and where. Run
   // stays disabled while it reports an error; see docs/supported-edits.md.
+  // Hand-edited XML from the model tab flows through here too, so an
+  // unsupported edit (a renamed tool element, a second process) surfaces via
+  // these same diagnostics rather than a new one-off error path.
   const draft = useMemo(
-    () => buildDraftRunDefinition(example, sources),
-    [example, sources],
+    () => buildDraftRunDefinition(example, sources, bpmn),
+    [example, sources, bpmn],
   );
   const model = draft.model;
 
@@ -365,7 +375,7 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                 <div className="diagram-fallback">Booting the engine…</div>
               ) : (
                 <BpmnRuntimeView
-                  xml={example.bpmn}
+                  xml={bpmn}
                   activeIds={run.snapshot?.activeElementIds ?? []}
                   incidentIds={run.snapshot?.incidentElementIds ?? []}
                   className="diagram"
@@ -517,6 +527,7 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
             <CardContent>
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
+                  <TabsTrigger value={MODEL_TAB}>model (XML)</TabsTrigger>
                   {model.agent && (
                     <TabsTrigger value={AGENT_TAB}>agent (scripted)</TabsTrigger>
                   )}
@@ -527,6 +538,14 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                     </TabsTrigger>
                   ))}
                 </TabsList>
+
+                <TabsContent value={MODEL_TAB}>
+                  <div className="editor-meta">
+                    <strong>BPMN XML</strong>
+                    <code>hand-edit the diagram — Run re-checks it below</code>
+                  </div>
+                  <ModelEditor value={bpmn} onChange={setBpmn} />
+                </TabsContent>
 
                 {model.agent && (
                   <TabsContent value={AGENT_TAB}>
