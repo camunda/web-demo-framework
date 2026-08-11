@@ -28,7 +28,7 @@ import {
 import type { AgentSpec } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
-import { makeLiveAgentRouter } from "../agent/liveAgent";
+import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
 import { useBrain } from "../useBrain";
 import type { BrainKind } from "../brains/types";
@@ -40,6 +40,7 @@ import {
   type FormRendererHandle,
   type FormSchema,
 } from "./FormRenderer";
+import { TraceTimeline } from "./TraceTimeline";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 
@@ -201,7 +202,25 @@ export function ExampleRunner({
 
   const runningRef = useRef(false);
   const logIdRef = useRef(0);
-  const logListRef = useRef<HTMLDivElement>(null);
+  // Shared with `buildWorkers` (compile.ts) and `makeLiveAgentRouter`
+  // (agent/liveAgent.ts) for one run, so a tool's own trace entries land in
+  // the same turn group as the agent entry that activated it — see
+  // `TraceTimeline.tsx`. Recreated fresh in `start` below, per run.
+  const turnRef = useRef<TurnRef>({ current: undefined });
+
+  /** Element id -> human label, for the trace timeline and its engine-view panels. */
+  const elementLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of model.processes) {
+      for (const t of p.tasks) map.set(t.elementId, t.label);
+      for (const a of p.agents) {
+        map.set(a.elementId, a.label);
+        for (const t of a.tools) map.set(t.elementId, t.label);
+      }
+      for (const u of p.userTasks) map.set(u.elementId, u.label);
+    }
+    return (elementId: string) => map.get(elementId) ?? elementId;
+  }, [model]);
 
   /** Append a trace line — or update in place when it carries a `key`. */
   const trace = useCallback((entry: TraceEntry) => {
@@ -215,10 +234,6 @@ export function ExampleRunner({
         }
       }
       return [...prev, { ...entry, id: logIdRef.current++ }].slice(-80);
-    });
-    queueMicrotask(() => {
-      const el = logListRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
     });
   }, []);
 
@@ -279,7 +294,10 @@ export function ExampleRunner({
       return;
     }
 
-    const workers = buildWorkers(model, draft.handlers, trace);
+    // Fresh per run, so a tool's trace entries only group with this run's
+    // agent turns — see the `turnRef` comment above.
+    turnRef.current = { current: undefined };
+    const workers = buildWorkers(model, draft.handlers, trace, turnRef.current);
 
     // Which brain drives every agent host this run. Every AI Agent
     // sub-process shares one job type, so hosts are grouped by job type and
@@ -296,7 +314,9 @@ export function ExampleRunner({
             spec,
           ]);
         for (const [jobType, specs] of byJobType)
-          agents[jobType] = makeLiveAgentRouter(specs, brain.chat!, trace);
+          agents[jobType] = makeLiveAgentRouter(specs, brain.chat!, trace, {
+            turnRef: turnRef.current,
+          });
       } else if (scripted && model.agent) {
         // The scripted brain is one closure today — it only drives the
         // primary process's first agent host. Every AI Agent host shares one
@@ -585,28 +605,12 @@ export function ExampleRunner({
               </CardContent>
             </Card>
 
-            <Card className="panel grow">
-              <CardHeader>
-                <CardTitle>Activity</CardTitle>
-                <CardDescription>
-                  Agent turns, model replies, and tool calls.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="log" ref={logListRef}>
-                  {log.length === 0 ? (
-                    <div className="log-empty">Press Run to start.</div>
-                  ) : (
-                    log.map((l) => (
-                      <div key={l.id} className={`log-line log-${l.kind}`}>
-                        {l.pending ? "⏳ " : ""}
-                        {l.text}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <TraceTimeline
+              log={log}
+              elementStats={run.snapshot?.elementStats}
+              incidents={run.snapshot?.incidents}
+              labelFor={elementLabels}
+            />
           </div>
         </div>
 

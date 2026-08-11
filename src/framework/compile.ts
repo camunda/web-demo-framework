@@ -1,6 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
+import type { TurnRef } from "./agent/liveAgent";
 import { runAgentSandboxed, runHandlerSandboxed } from "./sandbox";
 
 /**
@@ -42,10 +43,19 @@ export function compileAgent(source: string): AgentHandler {
   return (job) => runAgentSandboxed(source, job);
 }
 
-function helpersFor(job: ActivatedJob, trace: Trace): HandlerHelpers {
+function helpersFor(job: ActivatedJob, trace: Trace, turn?: number): HandlerHelpers {
   return {
     sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
-    trace: (text: string) => trace({ kind: "tool", text: `   ${text}` }),
+    // Default `turn`/`elementId` so a handler's own `trace()` calls land in
+    // the same turn/element grouping as the "started"/"result" entries
+    // below, instead of appearing as ungrouped lines that split the turn.
+    trace: (text: string) =>
+      trace({
+        kind: "tool",
+        text: `   ${text}`,
+        elementId: job.elementId,
+        turn,
+      }),
     text: (key, fallback = "") => {
       const v = job.variables[key];
       return typeof v === "string" ? v : v == null ? fallback : String(v);
@@ -59,8 +69,12 @@ function helpersFor(job: ActivatedJob, trace: Trace): HandlerHelpers {
 }
 
 function safeStringify(value: unknown): string {
+  // Preserve `undefined`/`null` explicitly rather than folding `undefined`
+  // into `{}` — a handler that actually returned `undefined` should show
+  // that, not an empty object it never produced.
+  if (value === undefined) return "undefined";
   try {
-    return JSON.stringify(value ?? {});
+    return JSON.stringify(value);
   } catch {
     return "[unserializable value]";
   }
@@ -71,11 +85,18 @@ function safeStringify(value: unknown): string {
  * model's task list and the compiled per-element handlers. An element with no
  * handler throws when activated, which surfaces as an incident on the diagram
  * rather than a silent stall.
+ *
+ * `turnRef`, when supplied, stamps each "started"/"result" trace entry with
+ * the agent turn in progress when the job ran (see `liveAgent.ts`'s
+ * `TurnRef`), so a tool activated by an agent groups with its own result in
+ * the trace timeline. Omit it for a non-agentic example — the entries just
+ * render ungrouped, exactly as before.
  */
 export function buildWorkers(
   model: ModelInfo,
   byElement: Record<string, ExampleHandler>,
   trace: Trace,
+  turnRef?: TurnRef,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
   // Cover every process, not just the primary one: call activities (or a
@@ -94,9 +115,16 @@ export function buildWorkers(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
       const label = labels.get(job.elementId) ?? job.elementId;
-      trace({ kind: "tool", text: `▶ ${label}` });
-      const out = await handler(job, helpersFor(job, trace));
-      trace({ kind: "vars", text: `  ↳ ${safeStringify(out)}` });
+      const turn = turnRef?.current;
+      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
+      const out = await handler(job, helpersFor(job, trace, turn));
+      trace({
+        kind: "vars",
+        text: `  ↳ ${safeStringify(out)}`,
+        elementId: job.elementId,
+        result: out,
+        turn,
+      });
       return out as Record<string, unknown> | undefined;
     };
   }

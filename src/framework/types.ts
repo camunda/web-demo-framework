@@ -12,6 +12,28 @@ export interface TraceEntry {
   key?: string;
   /** True while the entry is still being produced (renders a spinner). */
   pending?: boolean;
+  /**
+   * Additive fields — used by `TraceTimeline` (see `ui/TraceTimeline.tsx`) to
+   * render a run as a turn-by-turn story instead of a flat log. Every field
+   * here is optional and safe to ignore: a consumer reading only `kind`/`text`
+   * (or an example never touching an agent) is unaffected.
+   *
+   * - `turn` groups every entry produced by one agent turn together — the
+   *   streamed LLM reply, each tool it activated, and that tool's own
+   *   "started"/"result" entries (see `liveAgent.ts` and `compile.ts`, which
+   *   share a turn counter via a `TurnRef` for exactly this correlation).
+   *   Entries with no `turn` (process start, a human task, the final
+   *   outcome) render outside any turn group, in their original order.
+   * - `elementId` names the BPMN element (tool or task) this entry concerns.
+   * - `args` are the arguments supplied when activating a tool — the
+   *   validated/coerced values, not the model's raw reply.
+   * - `result` is what a tool/handler returned, for pairing with its own
+   *   `args` entry by `elementId`.
+   */
+  turn?: number;
+  elementId?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
 }
 
 export type Trace = (entry: TraceEntry) => void;
