@@ -371,35 +371,31 @@ export function ExampleRunner({
       setRunning(true);
       try {
         let snap: Snapshot | null;
+        let successText: string;
         if (choice === "complete") {
           snap = run.completeJobManually(job.jobType, "{}");
-          trace({
-            kind: "vars",
-            text: "  ↳ completed normally",
-            elementId: job.elementId,
-          });
+          successText = "  ↳ completed normally";
         } else if (control.action.kind === "timer") {
           const dueInMs = run.snapshot?.timers[0]?.dueInMs ?? 0;
           snap = run.advanceTime(Math.max(dueInMs, 0) + 1);
-          trace({
-            kind: "vars",
-            text: `  ↳ advanced the clock — timer fired`,
-            elementId: job.elementId,
-          });
+          successText = `  ↳ advanced the clock — timer fired`;
         } else {
           const { errorCode, message } = control.action;
           snap = run.throwJobError(job.jobType, errorCode, message);
-          trace({
-            kind: "vars",
-            text: `  ↳ threw BPMN error ${errorCode}: ${message}`,
-            elementId: job.elementId,
-          });
+          successText = `  ↳ threw BPMN error ${errorCode}: ${message}`;
         }
         if (snap) {
+          trace({ kind: "vars", text: successText, elementId: job.elementId });
           const vars = snap.instances[0]?.variables;
           if (vars) setDisplayVars({ ...vars });
           await new Promise((r) => setTimeout(r, BEAT));
           await driveLoop(workersRef.current, agentsRef.current, snap);
+        } else {
+          trace({
+            kind: "error",
+            text: "  ↳ failed to resolve the manual job",
+            elementId: job.elementId,
+          });
         }
       } finally {
         runningRef.current = false;
