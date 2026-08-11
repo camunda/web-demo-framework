@@ -38,7 +38,10 @@ concurrency:
 
 jobs:
   build:
-    if: github.event.action != 'closed'
+    # Fork PRs get a read-only GITHUB_TOKEN and can't push to gh-pages, so
+    # this job would fail noisily on every fork PR. Same-repo branches only;
+    # see docs/hosting-and-deployment.md for the documented limitation.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       built: ${{ steps.build.outcome }}
@@ -51,12 +54,20 @@ jobs:
       - run: npm ci
       - id: build
         run: npm run build
+        env:
+          # Preview is published under pr-preview/pr-<number>/ on gh-pages,
+          # so asset URLs must be rooted at that subpath or the preview
+          # renders without JS/CSS.
+          VITE_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}/
       - uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: dist/
 
   close:
-    if: github.event.action == 'closed'
+    # Same fork-PR limitation as the build job above: a fork PR's close
+    # event has a read-only token that can't push to gh-pages, so skip it
+    # here too instead of failing the cleanup step.
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

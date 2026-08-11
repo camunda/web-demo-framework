@@ -5,6 +5,12 @@ import react from "@vitejs/plugin-react";
 // so the engine's `new URL('nanobpmn_engine_bg.wasm', import.meta.url)` survives
 // and Vite emits the binary as a hashed asset.
 export default defineConfig({
+  // GitHub Pages project sites (and PR preview subpaths) are served under a
+  // non-root path, e.g. /web-demo-framework/ or /pr-preview/pr-<n>/. Local
+  // dev/preview keep the default root base; CI sets VITE_BASE_PATH to match
+  // where the build is actually published — see .github/workflows/deploy.yml
+  // and preview.yml, and docs/hosting-and-deployment.md decision 1.
+  base: process.env.VITE_BASE_PATH ?? "/",
   plugins: [react()],
   server: {
     port: 5174,

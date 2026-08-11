@@ -28,7 +28,13 @@ insurance:
   GitHub Pages URL (`https://camunda.github.io/web-demo-framework/`), which
   is already a distinct origin from `camunda.com` and fully automatic. The
   custom domain can be layered on later (one line — see the commented `CNAME`
-  step in the workflow) without touching the pipeline.
+  step in the workflow) without touching the pipeline, **except** for the
+  Vite build `base`: `vite.config.ts` reads it from the `VITE_BASE_PATH` env
+  var (defaulting to `/`), and `deploy.yml` currently sets it to
+  `/web-demo-framework/` to match the project-Pages subpath. If/when the
+  custom domain lands, the site becomes root-served and `VITE_BASE_PATH`
+  should change to `/` (or be dropped) at the same time — otherwise asset
+  URLs stay rooted at the old subpath and 404.
 
 This coordinates with, but does not block on, #18: the CSP and sandbox
 design there applies regardless of which origin serves the bundle, and #18
@@ -44,13 +50,17 @@ can land independently of where the origin ends up pointing.
   `actions/deploy-pages`. A merge to `main` results in an updated public URL
   automatically, with no extra step.
 - **`.github/workflows/preview.yml`** — on every PR (opened / synchronize /
-  reopened / closed): builds the same way, then publishes to a per-PR path
-  (`pr-preview/pr-<number>/`) using
+  reopened / closed): builds the same way (with `VITE_BASE_PATH` set to the
+  matching `pr-preview/pr-<number>/` subpath so preview assets resolve),
+  then publishes to a per-PR path (`pr-preview/pr-<number>/`) using
   [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action),
   which needs only the built-in `GITHUB_TOKEN` — no external hosting account.
   Closing the PR tears the preview down. With many parallel issues in flight,
   a reviewer gets a clickable, real deployed page before merge instead of
-  only a diff.
+  only a diff. **Same-repo PRs only:** fork PRs get a read-only
+  `GITHUB_TOKEN` that can't push to `gh-pages`, so both the build and close
+  jobs are gated to skip PRs whose head repo isn't this one, rather than
+  failing noisily.
 
 Both workflows run the existing `npm run build`, so they inherit whatever a
 future CI/tests task (tracked separately) adds to that script; they don't

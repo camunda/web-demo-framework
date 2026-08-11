@@ -37,6 +37,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Published at https://<org>.github.io/<repo>/, a project Pages
+          # site, so asset URLs must be rooted under /<repo>/ or they 404.
+          # If/when the custom domain (decision 1) lands, this becomes the
+          # site root and VITE_BASE_PATH should change to "/".
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
       # If/when a custom domain is approved (decision 1 in the hosting
       # doc), drop a CNAME file into the published output here, e.g.:
       #   - run: echo "demos.camunda.io" > dist/CNAME
