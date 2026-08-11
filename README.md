@@ -150,7 +150,8 @@ Deployment decisions (where this is hosted, how CI publishes it, repo
 visibility, versioning against the docs, and who owns the docs-side links)
 are recorded in [`docs/hosting-and-deployment.md`](docs/hosting-and-deployment.md).
 `.github/workflows/deploy.yml` publishes `main` automatically on every push;
-`.github/workflows/preview.yml` publishes a preview URL for every PR.
+`.github/workflows/preview.yml` publishes a preview URL for every PR from the
+same repository (previews are skipped for fork PRs; see the hosting doc).
 
 ## Adding an example
 
