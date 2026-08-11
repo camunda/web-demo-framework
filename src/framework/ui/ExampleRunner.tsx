@@ -123,14 +123,14 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   const [displayVars, setDisplayVars] = useState<Record<string, unknown>>({});
   // The start form's live validity — Run stays disabled while a required
   // start-form field is missing, same as the review form below.
-  const [startFormValid, setStartFormValid] = useState(true);
+  const [startFormValid, setStartFormValid] = useState(false);
   const startFormRef = useRef<FormRendererHandle>(null);
   const [reviewValues, setReviewValues] = useState<Record<string, unknown>>({});
   // The rendered review form's live validity (required fields filled, etc.) —
   // "Complete task" must stay disabled while this is false, and
   // `reviewFormRef.current!.validate()` is the actual gate re-checked at
   // submit time, not just this display flag.
-  const [reviewFormValid, setReviewFormValid] = useState(true);
+  const [reviewFormValid, setReviewFormValid] = useState(false);
   const reviewFormRef = useRef<FormRendererHandle>(null);
 
   const runningRef = useRef(false);

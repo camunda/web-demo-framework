@@ -136,12 +136,29 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
     // a live run updating `context`) — which does need a re-import.
     const lastDataRef = useRef<string | null>(null);
 
+    // Cache of `collectKeys(schema)`, recomputed only when the schema object
+    // itself changes — `handleChanged` runs on every keystroke and walking
+    // the full schema tree each time is wasteful for larger schemas.
+    const schemaKeysRef = useRef<{ schema: FormSchema; keys: Set<string> } | null>(
+      null,
+    );
+    const getSchemaKeys = () => {
+      const currentSchema = schemaRef.current;
+      if (schemaKeysRef.current?.schema !== currentSchema) {
+        schemaKeysRef.current = {
+          schema: currentSchema,
+          keys: collectKeys(currentSchema),
+        };
+      }
+      return schemaKeysRef.current.keys;
+    };
+
     useImperativeHandle(
       ref,
       () => ({
         validate() {
           const form = formRef.current;
-          if (!form) return true;
+          if (!form) return false;
           const errors = form.validate();
           const valid = Object.keys(errors).length === 0;
           onValidityChangeRef.current?.(valid);
@@ -166,7 +183,7 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
         data: Record<string, unknown>;
         errors: Record<string, unknown>;
       }) => {
-        const keys = collectKeys(schemaRef.current);
+        const keys = getSchemaKeys();
         for (const key of keys) {
           if (!Object.is(data[key], valuesRef.current[key])) {
             onChangeRef.current(key, data[key]);
