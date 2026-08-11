@@ -1,0 +1,61 @@
+name: Deploy
+
+# Publishes the production bundle on every push to main. This is the
+# "merged PR results in an updated public URL, automatically" half of
+# issue #19 — see docs/hosting-and-deployment.md for the reasoning.
+#
+# Target: GitHub Pages, served from a Camunda-controlled custom domain
+# (recommended: demos.camunda.io, a separate origin from docs — see
+# docs/hosting-and-deployment.md, decision 1). Until that CNAME/DNS work
+# is approved by infra, this still deploys to the default
+# <org>.github.io/<repo> Pages URL, which is a real, working, automatic
+# public URL — the CNAME can be layered on later without touching this
+# workflow (see the commented-out CNAME example in the build job below).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Published at https://<org>.github.io/<repo>/, a project Pages
+          # site, so asset URLs must be rooted under /<repo>/ or they 404.
+          # If/when the custom domain (decision 1) lands, this becomes the
+          # site root and VITE_BASE_PATH should change to "/".
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+      # If/when a custom domain is approved (decision 1 in the hosting
+      # doc), drop a CNAME file into the published output here, e.g.:
+      #   - run: echo "demos.camunda.io" > dist/CNAME
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

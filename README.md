@@ -144,6 +144,15 @@ visible and make the page about exactly that. **Open product decision.**
   `src/framework/useExampleRun.ts` mirrors the hook over the same session and
   adds it. Delete that file if a later release exposes the command.
 
+## Hosting and deployment
+
+Deployment decisions (where this is hosted, how CI publishes it, repo
+visibility, versioning against the docs, and who owns the docs-side links)
+are recorded in [`docs/hosting-and-deployment.md`](docs/hosting-and-deployment.md).
+`.github/workflows/deploy.yml` publishes `main` automatically on every push;
+`.github/workflows/preview.yml` publishes a preview URL for every PR from the
+same repository (previews are skipped for fork PRs; see the hosting doc).
+
 ## Adding an example
 
 1. Drop the `.bpmn` (and any `.form` JSON) into `src/examples/<id>/`.
