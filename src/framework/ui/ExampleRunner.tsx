@@ -177,10 +177,21 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
           agents[jobType] = makeLiveAgentRouter(specs, brain.chat!, trace);
       } else if (scripted && model.agent) {
         // The scripted brain is one closure today — it only drives the
-        // primary process's first agent host. A model with several hosts and
-        // no live brain runs the rest with no agent handler registered,
-        // which the engine reports as an incident rather than a silent stall.
+        // primary process's first agent host. Every AI Agent host shares one
+        // job type, so without an elementId guard this closure would also be
+        // dispatched for any other host's jobs. Guard explicitly: any host
+        // other than the primary throws, which the engine reports as an
+        // incident on the diagram (not a silent stall, and not silently
+        // driven by the primary host's closure).
+        const primaryElementId = model.agent.elementId;
         agents[model.agent.jobType] = async (job) => {
+          if (job.elementId !== primaryElementId) {
+            throw new Error(
+              `No scripted agent handler for "${job.elementId}" — only "${primaryElementId}" ` +
+                `(the primary process's first agent host) is driven by the scripted brain. ` +
+                `Use a live brain to exercise more than one host.`,
+            );
+          }
           const result = await scripted!(job);
           const tools = (result.activateElements ?? [])
             .map((a) => a.elementId)

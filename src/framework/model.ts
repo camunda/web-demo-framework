@@ -263,8 +263,10 @@ function inputsOf(el: Element): Record<string, string> {
 }
 
 /**
- * Every AI Agent ad-hoc sub-process directly inside `process` (not nested
- * inside another process — callers pass one `<bpmn:process>` at a time).
+ * Every AI Agent ad-hoc sub-process anywhere within `process`'s subtree
+ * (`getElementsByTagNameNS` returns all descendants, not just direct
+ * children — so this also matches one nested inside another sub-process).
+ * Never crosses into another `<bpmn:process>` — callers pass one at a time.
  */
 function agentHostsOf(process: Element): Element[] {
   return Array.from(process.getElementsByTagNameNS(BPMN_NS, "adHocSubProcess")).filter(
@@ -300,7 +302,8 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
       message:
         `Process "${processLabel}" hosts ${agentHosts.length} AI Agent sub-processes ` +
         `(${agentHosts.map((h) => h.getAttribute("id")).join(", ")}). Each gets its ` +
-        `own independent agent state (turn counter, called tools) — they don't share a run.`,
+        `own independent agent state (turn counter, called tools) — the run itself is ` +
+        `shared across hosts, but each host's agent state within it is not.`,
     });
   }
 

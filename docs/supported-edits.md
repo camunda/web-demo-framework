@@ -27,13 +27,13 @@ behalf.
 | Edit handler code in the panel | Recompiled on next Run; a syntax error is reported next to the editor as a compile diagnostic, not a runtime throw. |
 | A `userTask`/start-event `formId` with no matching form schema | "… references form "…", which has no matching schema" — reported at draft-build time (i.e. as soon as the model/forms change), not when the task opens. |
 | A diagram with **two `<bpmn:process>` elements** | Fully supported: `model.ts` parses every process independently (`ModelInfo.processes`), and reports which one is primary via a `"warning"` diagnostic — never silently drops the second. Pass `parseModel(xml, { processId })` to target a non-default one. |
-| A diagram with **two (or more) AI Agent sub-processes** | Fully supported for the **live brain**: `compile.ts`/`liveAgent.ts`'s `makeLiveAgentRouter` registers one wrapper per job type (all AI Agent hosts share `io.camunda.agenticai:aiagent-job-worker:1`) and dispatches by `job.elementId` underneath, so each host gets its own turn counter and called-tools set. A `"warning"` diagnostic names every host found. |
+| A diagram with **two (or more) AI Agent sub-processes** | Fully supported for the **live brain**: `liveAgent.ts`'s `makeLiveAgentRouter` registers one wrapper per job type (all AI Agent hosts share `io.camunda.agenticai:aiagent-job-worker:1`) and dispatches by `job.elementId` underneath, so each host gets its own turn counter and called-tools set. `model.ts` emits a `"warning"` diagnostic whenever a process hosts more than one agent host, naming every host found in that process. |
 
 ## Explicitly unsupported today (diagnostics-only, not full support)
 
 | Edit | What the reader sees |
 | --- | --- |
-| Multiple AI Agent hosts **with the scripted brain** (no live brain configured) | Only the primary process's first agent host gets an agent handler; any other host has none registered, which the engine reports as an **incident on the diagram** (not a silent stall), rather than the scripted agent driving both. Use a live brain to exercise more than one host today. |
+| Multiple AI Agent hosts **with the scripted brain** (no live brain configured) | Only the primary process's first agent host is driven by the scripted brain; any other host sharing its job type is guarded by `elementId` and throws instead, which the engine reports as an **incident on the diagram** (not a silent stall, and not silently driven by the primary host's closure). Use a live brain to exercise more than one host today. |
 | A model with **zero** `<bpmn:process>` elements | `parseModel` throws "No `<bpmn:process>` in the diagram", surfaced as a single top-level `"error"` diagnostic; there's nothing else to resolve. |
 | Structural edits that break the underlying XML (mismatched tags, invalid namespaces) | `parseModel` throws "Invalid BPMN XML: …" via the browser's `DOMParser`, surfaced the same way. |
 | Removing the ad-hoc sub-process construct entirely from an agentic model | Not specifically diagnosed beyond "no agent host found" (the process behaves as fully non-agentic) — there's no dedicated message pointing at "you used to have an agent here." |
