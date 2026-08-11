@@ -14,9 +14,10 @@ import reviewForm from "./review.form.json";
  * no FEEL, no `&#10;`/`&quot;` escaping to hand-author.
  *
  * `import.meta.glob(..., { eager: true, query: "?raw", import: "default" })`
- * loads every `prompts/*.md` file as a plain string at build time; `.trim()`
+ * loads every `prompts/*.md` file as a plain string at build time; `.trimEnd()`
  * drops the trailing newline every text file ends with, since that's an
- * artifact of the file format, not part of the prompt.
+ * artifact of the file format, not part of the prompt — leading whitespace is
+ * left intact in case it's meaningful (e.g. intentional indentation).
  */
 const promptFiles = import.meta.glob("./prompts/*.md", {
   eager: true,
@@ -26,7 +27,7 @@ const promptFiles = import.meta.glob("./prompts/*.md", {
 const prompts = Object.fromEntries(
   Object.entries(promptFiles).map(([path, content]) => [
     templateNameFromPath(path),
-    content.trim(),
+    content.trimEnd(),
   ]),
 );
 

@@ -166,6 +166,24 @@ describe("substituteTemplates — content-type-aware escaping", () => {
     },
   );
 
+  it("escapes < and > in a FEEL-literal-in-XML-attribute round-trip, since a raw < is illegal XML there", () => {
+    const prompt = "If score < 5 and threshold > 2, flag it.";
+    const xml = agentModelXml('=&#34;{{system-prompt}}&#34;');
+    const { result, unresolved } = substituteTemplates(
+      xml,
+      { "system-prompt": prompt },
+      "xml",
+    );
+    expect(unresolved).toEqual([]);
+
+    const doc = new DOMParser().parseFromString(result, "application/xml");
+    expect(doc.getElementsByTagName("parsererror")).toHaveLength(0);
+
+    const model = parseModel(result);
+    expect(model.agent).not.toBeNull();
+    expect(model.agent!.systemPrompt).toBe(prompt);
+  });
+
   it("a prompt containing '{{' and '}}' as literal text (not a placeholder) is preserved through the FEEL round-trip", () => {
     const prompt = "Use the {{placeholder}} syntax like this in your answer.";
     const xml = agentModelXml('=&#34;{{system-prompt}}&#34;');

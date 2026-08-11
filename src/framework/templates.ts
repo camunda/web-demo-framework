@@ -104,15 +104,6 @@ function escapeXmlAttribute(s: string): string {
 /**
  * A value landing inside a FEEL string literal that itself sits inside an
  * XML attribute already using `&#34;` entities as its FEEL-literal quote
- * delimiters (see module doc). Escape order matters: backslash first (so we
- * don't double-escape the backslash we're about to introduce for the quote),
- * then FEEL's own `\"` for a literal quote, then XML's `&amp;` for ampersand,
- * then `&#10;`/`&#9;` so whitespace survives XML attribute-value
- * normalisation.
- */
-/**
- * A value landing inside a FEEL string literal that itself sits inside an
- * XML attribute already using `&#34;` entities as its FEEL-literal quote
  * delimiters (see module doc). The escaped output is inserted straight into
  * the raw XML text (not the DOM-decoded attribute value), so a literal `"`
  * character must never appear directly — the XML parser would read it as the
@@ -120,7 +111,10 @@ function escapeXmlAttribute(s: string): string {
  * next to it. So a quote becomes a backslash (FEEL's own escape) followed by
  * the `&#34;` *entity* (not a raw quote) — order matters: ampersand escaping
  * must run before any entity we introduce ourselves, or we'd double-escape
- * our own `&#10;`/`&#34;` into `&amp;#10;`/`&amp;#34;`.
+ * our own `&#10;`/`&#34;` into `&amp;#10;`/`&amp;#34;`. `<`/`>` are escaped
+ * last (also after the `&amp;` pass, for the same reason): the value still
+ * lands inside an XML attribute value, where a raw `<` is illegal XML and
+ * would otherwise fail parsing/deploy.
  */
 function escapeFeelLiteral(s: string): string {
   return s
@@ -128,7 +122,9 @@ function escapeFeelLiteral(s: string): string {
     .replace(/&/g, "&amp;") // XML ampersand escape, before we introduce any entities ourselves
     .replace(/"/g, "\\&#34;") // FEEL's \" escape, quote itself as an XML entity, not a raw "
     .replace(/\n/g, "&#10;") // XML attribute-value normalisation would otherwise collapse this
-    .replace(/\t/g, "&#9;");
+    .replace(/\t/g, "&#9;")
+    .replace(/</g, "&lt;") // still an XML attribute value: a raw `<` is illegal XML
+    .replace(/>/g, "&gt;");
 }
 
 /** A JSON string value: the surrounding quotes already exist in the JSON, so escape only the body. */
