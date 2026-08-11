@@ -58,7 +58,13 @@ export default defineConfig({
     allowedHosts: [".ngrok-free.dev", ".ngrok-free.app", ".trycloudflare.com"],
   },
   resolve: {
-    dedupe: ["react", "react-dom"],
+    // `preact` dedupe: `@bpmn-io/form-js` pins its own nested `preact`, while
+    // `diagram-js` (via `bpmn-js`, and later a properties panel) resolves the
+    // hoisted one from a different dependency path. Two copies means two
+    // independent render contexts and a crash reading `undefined.context`.
+    // Dev and prod resolve dependencies differently, so this must hold for
+    // both `npm run dev` and `npm run build`.
+    dedupe: ["react", "react-dom", "preact"],
   },
   optimizeDeps: {
     exclude: [

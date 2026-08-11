@@ -25,7 +25,12 @@ import { makeLiveAgentRouter } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
 import { useBrain } from "../useBrain";
 import { BrainPanel } from "./BrainPanel";
-import { FormRenderer, formDefaults, type FormSchema } from "./FormRenderer";
+import {
+  FormRenderer,
+  formDefaults,
+  type FormRendererHandle,
+  type FormSchema,
+} from "./FormRenderer";
 import { ModelEditor } from "./ModelEditor";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
@@ -67,7 +72,6 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   // would tear down and redeploy the whole session on every character typed,
   // repeatedly wiping the previous run's state mid-edit.
   const [bpmn, setBpmn] = useState(example.bpmn);
-  const run = useExampleRun({ bpmn: example.bpmn });
   const brain = useBrain();
 
   const [sources, setSources] = useState<Record<string, string>>(() =>
@@ -117,7 +121,17 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   const [compileError, setCompileError] = useState<string | null>(null);
   const [log, setLog] = useState<LogLine[]>([]);
   const [displayVars, setDisplayVars] = useState<Record<string, unknown>>({});
+  // The start form's live validity — Run stays disabled while a required
+  // start-form field is missing, same as the review form below.
+  const [startFormValid, setStartFormValid] = useState(true);
+  const startFormRef = useRef<FormRendererHandle>(null);
   const [reviewValues, setReviewValues] = useState<Record<string, unknown>>({});
+  // The rendered review form's live validity (required fields filled, etc.) —
+  // "Complete task" must stay disabled while this is false, and
+  // `reviewFormRef.current!.validate()` is the actual gate re-checked at
+  // submit time, not just this display flag.
+  const [reviewFormValid, setReviewFormValid] = useState(true);
+  const reviewFormRef = useRef<FormRendererHandle>(null);
 
   const runningRef = useRef(false);
   const logIdRef = useRef(0);
@@ -174,8 +188,15 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
     // but re-check here too: `draft.hasErrors` is the single source of truth
-    // for "safe to run", not just a button prop.
-    if (run.phase !== "ready" || runningRef.current || draft.hasErrors) return;
+    // for "safe to run", not just a button prop. Same for the start form's
+    // validity — the button being disabled isn't the actual guarantee.
+    if (
+      run.phase !== "ready" ||
+      runningRef.current ||
+      draft.hasErrors ||
+      (startFormRef.current && !startFormRef.current.validate())
+    )
+      return;
     setCompileError(null);
 
     // The scripted brain's agent code isn't part of the draft's handler
@@ -306,6 +327,10 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
 
   const submitUserTask = useCallback(() => {
     if (!openUserTask) return;
+    // Re-validate synchronously rather than trusting only the last
+    // `onValidityChange` flag — this is the actual submit-time gate; a form
+    // with no linked schema (reviewFormRef unset) has nothing to validate.
+    if (reviewFormRef.current && !reviewFormRef.current.validate()) return;
     const snap = run.completeUserTask(
       openUserTask.key,
       JSON.stringify(reviewValues),
@@ -336,7 +361,12 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
         <div className="controls">
           <Button
             onClick={() => void start()}
-            disabled={run.phase !== "ready" || running || draft.hasErrors}
+            disabled={
+              run.phase !== "ready" ||
+              running ||
+              draft.hasErrors ||
+              (!!startSchema && !startFormValid)
+            }
           >
             ▶ Run
           </Button>
@@ -432,15 +462,22 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                 )}
                 {reviewSchema && (
                   <FormRenderer
+                    ref={reviewFormRef}
                     schema={reviewSchema}
                     values={reviewValues}
                     onChange={(k, v) =>
                       setReviewValues((prev) => ({ ...prev, [k]: v }))
                     }
                     context={displayVars}
+                    onValidityChange={setReviewFormValid}
                   />
                 )}
-                <Button onClick={submitUserTask}>Complete task</Button>
+                <Button
+                  onClick={submitUserTask}
+                  disabled={!!reviewSchema && !reviewFormValid}
+                >
+                  Complete task
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -526,12 +563,14 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
               )}
               {startSchema ? (
                 <FormRenderer
+                  ref={startFormRef}
                   schema={startSchema}
                   values={startValues}
                   onChange={(k, v) =>
                     setStartValues((prev) => ({ ...prev, [k]: v }))
                   }
                   disabled={running}
+                  onValidityChange={setStartFormValid}
                 />
               ) : (
                 <pre className="vars">{safeStringify(startValues, 2)}</pre>

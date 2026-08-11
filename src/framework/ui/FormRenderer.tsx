@@ -1,98 +1,43 @@
-import { evaluate } from "feelin";
 import {
-  Checkbox,
-  Input,
-  Label,
-  RadioGroup,
-  RadioGroupItem,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
-} from "@camunda/design-system";
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
+import { Form } from "@bpmn-io/form-js-viewer";
+import "@bpmn-io/form-js-viewer/dist/assets/form-js.css";
 
 /**
  * Renders a Camunda `.form` schema — the same JSON the model's `formId` points
- * at — so an example's start form and user-task forms come from the model
- * instead of being hand-built per example.
+ * at — via `@bpmn-io/form-js` (viewer only; no editor). This gets every field
+ * type, real conditional visibility, and real validation for free, instead of
+ * the small hand-rolled subset this component used to cover.
  *
- * This is a deliberate proof-of-concept subset: the field types the Camunda
- * examples actually use, plus `{{variable}}` substitution in text blocks. The
- * productionisation path is `@bpmn-io/form-js`, which renders the full schema
- * (and is what Camunda's own console uses) — at the cost of a preact-dedupe
- * dance in Vite that isn't worth it to prove the seam.
+ * `@bpmn-io/form-js-viewer`'s own `Form` class is framework-agnostic (attach
+ * to a container, feed it a schema + data, listen for changes) — this
+ * component is a thin React wrapper around it that keeps the same external
+ * interface the rest of the runner already speaks: `schema` in, `values` out
+ * via `onChange`, plus a `context` payload merged in for `{{…}}` templating.
+ *
+ * Known trap: form-js pins its own nested `preact`, while `diagram-js` (via
+ * `bpmn-js`) resolves the hoisted one from a different dependency path. Two
+ * copies means two independent render contexts and a crash reading
+ * `undefined.context`. Fixed with `resolve.dedupe: ["preact"]` in
+ * vite.config.ts — that holds for both `npm run dev` and `npm run build`,
+ * which resolve dependencies differently.
  */
 
-/** Stand-in for an option whose real value is "" — Radix reserves that. */
-const EMPTY_OPTION = "__empty__";
+/** Opaque — the exact shape is `@bpmn-io/form-js`'s schema JSON. */
+export type FormSchema = Record<string, unknown>;
 
-interface FormComponent {
-  id?: string;
-  type?: string;
-  key?: string;
-  label?: string;
-  description?: string;
-  text?: string;
-  defaultValue?: unknown;
-  values?: { label?: string; value?: string }[];
-  validate?: { required?: boolean };
-}
-
-export interface FormSchema {
-  components?: FormComponent[];
-}
-
-/**
- * Resolve a `{{…}}` template against the live payload using **real FEEL**.
- *
- * `feelin` is the engine bpmn-io's own form-js templating runs on, so a Camunda
- * form's expressions — `{{if markerRecord = null then "none" else
- * markerRecord.geneSymbol + " (RefSeq " + markerRecord.refSeqId + ")"}}` —
- * evaluate here exactly as they would in Tasklist.
- */
-function interpolate(text: string, vars: Record<string, unknown>): string {
-  return text.replace(/\{\{([^}]+)\}\}/g, (whole, expr: string) => {
-    let value: unknown;
-    try {
-      const result: unknown = evaluate(expr.trim(), vars);
-      // feelin 7 returns `{ value, warnings }`; older releases return the value.
-      value =
-        result && typeof result === "object" && "value" in result
-          ? (result as { value: unknown }).value
-          : result;
-    } catch {
-      // A malformed expression is the form author's bug — show it rather than
-      // silently blanking the field.
-      return whole;
-    }
-    if (value === null || value === undefined) return "—";
-    return typeof value === "object" ? JSON.stringify(value) : String(value);
-  });
-}
-
-/** Very small markdown subset: `# heading`, `**bold**`, `*` bullets. */
-function renderText(text: string, key: string) {
-  return (
-    <div className="form-text" key={key}>
-      {text.split("\n").map((line, i) => {
-        const bold = line.split(/(\*\*[^*]+\*\*)/g).map((part, j) =>
-          part.startsWith("**") && part.endsWith("**") ? (
-            <strong key={j}>{part.slice(2, -2)}</strong>
-          ) : (
-            <span key={j}>{part}</span>
-          ),
-        );
-        if (line.startsWith("# "))
-          return <h4 key={i}>{line.replace(/^#\s+/, "")}</h4>;
-        if (line.startsWith("* "))
-          return <li key={i}>{line.replace(/^\*\s+/, "")}</li>;
-        if (!line.trim()) return <br key={i} />;
-        return <p key={i}>{bold}</p>;
-      })}
-    </div>
-  );
+export interface FormRendererHandle {
+  /**
+   * Runs full field validation against the form's current values and
+   * returns whether it's valid. Call this synchronously right before acting
+   * on a "submit"/"complete" affordance — `onValidityChange` alone is enough
+   * to grey out a button, but this is the actual gate.
+   */
+  validate(): boolean;
 }
 
 export interface FormRendererProps {
@@ -100,155 +45,176 @@ export interface FormRendererProps {
   /** Current field values, keyed by the schema's `key`. */
   values: Record<string, unknown>;
   onChange(key: string, value: unknown): void;
-  /** Payload used to resolve `{{…}}` in text blocks. */
+  /** Extra payload merged in (read-only) so `{{…}}` text blocks can reference it. */
   context?: Record<string, unknown>;
   disabled?: boolean;
+  /**
+   * Called whenever the rendered form's validity changes — after import and
+   * after every field edit. Wire this to disable a host "Complete task"
+   * button; a required field left empty must block completion.
+   */
+  onValidityChange?(valid: boolean): void;
 }
 
-export function FormRenderer({
-  schema,
-  values,
-  onChange,
-  context = {},
-  disabled = false,
-}: FormRendererProps) {
-  return (
-    <div className="form">
-      {(schema.components ?? []).map((c, i) => {
-        const id = c.id ?? `field-${i}`;
-        const key = c.key ?? "";
-        const value = key in values ? values[key] : c.defaultValue;
+interface ComponentNode {
+  key?: unknown;
+  components?: unknown;
+}
 
-        switch (c.type) {
-          case "text":
-            return renderText(interpolate(c.text ?? "", context), id);
+function isComponentNode(value: unknown): value is ComponentNode {
+  return typeof value === "object" && value !== null;
+}
 
-          case "textfield":
-          case "number":
-            return (
-              <div className="field" key={id}>
-                <Label htmlFor={id}>{c.label}</Label>
-                <Input
-                  id={id}
-                  type={c.type === "number" ? "number" : "text"}
-                  value={value == null ? "" : String(value)}
-                  disabled={disabled}
-                  onChange={(e) =>
-                    onChange(
-                      key,
-                      c.type === "number"
-                        ? e.target.value === ""
-                          ? null
-                          : Number(e.target.value)
-                        : e.target.value,
-                    )
-                  }
-                />
-                {c.description && <p className="field-hint">{c.description}</p>}
-              </div>
-            );
+/**
+ * `JSON.stringify` with object keys sorted, so two payloads with the same
+ * content but different key insertion order (form-js's internal data model
+ * vs. this component's own `{ ...context, ...values }`) still compare equal.
+ */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, val) => {
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      return Object.fromEntries(
+        Object.keys(val)
+          .sort()
+          .map((k) => [k, (val as Record<string, unknown>)[k]]),
+      );
+    }
+    return val;
+  });
+}
 
-          case "textarea":
-            return (
-              <div className="field" key={id}>
-                <Label htmlFor={id}>{c.label}</Label>
-                <Textarea
-                  id={id}
-                  rows={3}
-                  value={value == null ? "" : String(value)}
-                  disabled={disabled}
-                  onChange={(e) => onChange(key, e.target.value)}
-                />
-                {c.description && <p className="field-hint">{c.description}</p>}
-              </div>
-            );
-
-          case "checkbox":
-            return (
-              <div className="field radio-row" key={id}>
-                <Checkbox
-                  id={id}
-                  checked={Boolean(value)}
-                  disabled={disabled}
-                  onCheckedChange={(v: boolean | string) => onChange(key, !!v)}
-                />
-                <Label htmlFor={id}>{c.label}</Label>
-              </div>
-            );
-
-          case "radio":
-            return (
-              <div className="field" key={id}>
-                <Label>{c.label}</Label>
-                <RadioGroup
-                  value={value == null ? "" : String(value)}
-                  onValueChange={(v: string) => onChange(key, v)}
-                  disabled={disabled}
-                >
-                  {(c.values ?? []).map((o, j) => (
-                    <div className="radio-row" key={j}>
-                      <RadioGroupItem value={o.value ?? ""} id={`${id}-${j}`} />
-                      <Label htmlFor={`${id}-${j}`}>{o.label}</Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-                {c.description && <p className="field-hint">{c.description}</p>}
-              </div>
-            );
-
-          case "select":
-            return (
-              <div className="field" key={id}>
-                <Label htmlFor={id}>{c.label}</Label>
-                <Select
-                  value={
-                    value == null || value === ""
-                      ? EMPTY_OPTION
-                      : String(value)
-                  }
-                  onValueChange={(v: string) =>
-                    onChange(key, v === EMPTY_OPTION ? "" : v)
-                  }
-                  disabled={disabled}
-                >
-                  <SelectTrigger id={id}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(c.values ?? []).map((o, j) => (
-                      <SelectItem
-                        key={j}
-                        // A Camunda form may offer an option whose value is ""
-                        // (the "write your own" escape hatch). Radix reserves
-                        // the empty string for "cleared", so stand in for it.
-                        value={o.value ? o.value : EMPTY_OPTION}
-                      >
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {c.description && <p className="field-hint">{c.description}</p>}
-              </div>
-            );
-
-          default:
-            return (
-              <p className="field-hint" key={id}>
-                (unsupported field type <code>{c.type}</code>)
-              </p>
-            );
-        }
-      })}
-    </div>
-  );
+/** Every field `key` in the schema, walking nested `components` (e.g. groups). */
+function collectKeys(schema: FormSchema): Set<string> {
+  const keys = new Set<string>();
+  const visit = (node: unknown) => {
+    if (!isComponentNode(node)) return;
+    if (typeof node.key === "string") keys.add(node.key);
+    if (Array.isArray(node.components)) node.components.forEach(visit);
+  };
+  visit(schema);
+  return keys;
 }
 
 /** Seed values for a schema, from each field's `defaultValue`. */
 export function formDefaults(schema: FormSchema): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const c of schema.components ?? []) {
-    if (c.key) out[c.key] = c.defaultValue ?? "";
-  }
+  const visit = (node: unknown) => {
+    if (!isComponentNode(node)) return;
+    if (typeof node.key === "string" && "defaultValue" in node) {
+      out[node.key] = (node as { defaultValue?: unknown }).defaultValue ?? "";
+    }
+    if (Array.isArray(node.components)) node.components.forEach(visit);
+  };
+  visit(schema);
   return out;
 }
+
+export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
+  function FormRenderer(
+    { schema, values, onChange, context = {}, disabled = false, onValidityChange },
+    ref,
+  ) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const formRef = useRef<Form | null>(null);
+
+    // Kept fresh every render so the long-lived event listeners registered
+    // once (below) always see the latest props without re-subscribing.
+    const schemaRef = useRef(schema);
+    const valuesRef = useRef(values);
+    const onChangeRef = useRef(onChange);
+    const onValidityChangeRef = useRef(onValidityChange);
+    schemaRef.current = schema;
+    valuesRef.current = values;
+    onChangeRef.current = onChange;
+    onValidityChangeRef.current = onValidityChange;
+
+    // The merged `{ ...context, ...values }` payload the form was last given.
+    // Distinguishes "the reader typed in the form" (form-js echoes that back
+    // to us via onChange, which flows into `values` right back here — must
+    // NOT re-import, that would reset the field mid-keystroke) from "the host
+    // changed `values`/`context` from the outside" (a preset scenario button,
+    // a live run updating `context`) — which does need a re-import.
+    const lastDataRef = useRef<string | null>(null);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        validate() {
+          const form = formRef.current;
+          if (!form) return true;
+          const errors = form.validate();
+          const valid = Object.keys(errors).length === 0;
+          onValidityChangeRef.current?.(valid);
+          return valid;
+        },
+      }),
+      [],
+    );
+
+    // Create the form once and tear it down on unmount.
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const form = new Form({ container });
+      formRef.current = form;
+
+      const handleChanged = ({
+        data,
+        errors,
+      }: {
+        data: Record<string, unknown>;
+        errors: Record<string, unknown>;
+      }) => {
+        const keys = collectKeys(schemaRef.current);
+        for (const key of keys) {
+          if (!Object.is(data[key], valuesRef.current[key])) {
+            onChangeRef.current(key, data[key]);
+          }
+        }
+        // Record what we just fed back out, so the sync effect below
+        // recognises the resulting prop update as our own echo rather than
+        // an external change that needs a full re-import.
+        lastDataRef.current = stableStringify(data);
+        onValidityChangeRef.current?.(Object.keys(errors).length === 0);
+      };
+      form.on("changed", handleChanged);
+
+      return () => {
+        form.off("changed", handleChanged);
+        form.destroy();
+        formRef.current = null;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally created once
+    }, []);
+
+    // Re-import the schema when it changes, or when `values`/`context`
+    // changed from *outside* this component (see lastDataRef above).
+    useEffect(() => {
+      const form = formRef.current;
+      if (!form) return;
+      const data = { ...context, ...values };
+      const serialized = stableStringify(data);
+      if (serialized === lastDataRef.current) return;
+      lastDataRef.current = serialized;
+      form
+        .importSchema(schema, data)
+        .then(() => {
+          const errors = form.validate();
+          onValidityChangeRef.current?.(Object.keys(errors).length === 0);
+        })
+        .catch((e: unknown) => {
+          // A malformed schema is the form author's bug — surface it in the
+          // console rather than leaving a blank panel with no explanation.
+          console.error("form-js failed to import schema", e);
+        });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [schema, values, context]);
+
+    useEffect(() => {
+      formRef.current?.setProperty("disabled", disabled);
+    }, [disabled]);
+
+    return <div className="form" ref={containerRef} />;
+  },
+);
