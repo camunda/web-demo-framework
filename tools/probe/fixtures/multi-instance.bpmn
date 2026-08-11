@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeMultiInstance"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-multi-instance" name="Multi-instance probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToTask</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToTask" sourceRef="Start" targetRef="ProcessItem" />
+    <bpmn:serviceTask id="ProcessItem" name="Process one item">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-process-item" />
+      </bpmn:extensionElements>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="=items" inputElement="item" outputCollection="results" outputElement="=result" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+      <bpmn:incoming>ToTask</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="ProcessItem" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

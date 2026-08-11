@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeCompensation"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-compensation" name="Compensation probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToBooking</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToBooking" sourceRef="Start" targetRef="BookThing" />
+    <bpmn:serviceTask id="BookThing" name="Book a thing" isForCompensation="false">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-book-thing" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToBooking</bpmn:incoming>
+      <bpmn:outgoing>ToFail</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="CompensationBoundary" attachedToRef="BookThing">
+      <bpmn:compensateEventDefinition id="CompensateDef_1" />
+    </bpmn:boundaryEvent>
+    <bpmn:association id="Assoc_1" associationDirection="One" sourceRef="CompensationBoundary" targetRef="UndoBooking" />
+    <bpmn:serviceTask id="UndoBooking" name="Undo the booking" isForCompensation="true">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-undo-booking" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToFail" sourceRef="BookThing" targetRef="ThrowCompensation" />
+    <bpmn:intermediateThrowEvent id="ThrowCompensation" name="Trigger compensation">
+      <bpmn:incoming>ToFail</bpmn:incoming>
+      <bpmn:outgoing>ToEnd</bpmn:outgoing>
+      <bpmn:compensateEventDefinition id="CompensateDef_2" />
+    </bpmn:intermediateThrowEvent>
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="ThrowCompensation" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
