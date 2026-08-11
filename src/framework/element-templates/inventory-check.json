@@ -1,5 +1,5 @@
 {
-  "$schema": "https://unpkg.com/@camunda/zeebe-element-templates-json-schema@0.15.0/resources/schema.json",
+  "$schema": "https://unpkg.com/@camunda/zeebe-element-templates-json-schema@0.45.0/resources/schema.json",
   "name": "Inventory Check (Demo Connector)",
   "id": "io.camunda.connectors.demo.inventory-check:1",
   "version": 1,

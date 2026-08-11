@@ -114,6 +114,13 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   const [availableTemplates, setAvailableTemplates] = useState<
     ElementTemplateDescriptor[]
   >([]);
+  // Bumped on every `applyTemplate` call and folded into the `<select>`'s
+  // `key` below so the control remounts (and its uncontrolled value resets
+  // to the placeholder) after each apply — otherwise the browser leaves the
+  // `<select>` sitting on the just-chosen option, and choosing that same
+  // (often only) option again fires no `onChange`, making it impossible to
+  // re-apply a template after an undo/redo or a no-op first apply.
+  const [applyNonce, setApplyNonce] = useState(0);
   // The last XML this component itself produced via `saveXML()`. `onChange`
   // round-trips through the host's state and comes straight back as the next
   // `value` prop — without this guard, that round-trip would trigger a
@@ -178,10 +185,13 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
       );
     };
     modeler.on("selection.changed", updateSelection);
-    modeler.on("elementTemplates.errors", () => {
+    modeler.on("elementTemplates.errors", (event: unknown) => {
       // Loading the templates themselves failing (malformed JSON) doesn't
       // block editing the rest of the diagram — the "Apply connector
-      // template" control simply offers nothing for any element.
+      // template" control simply offers nothing for any element. Still log
+      // it so a broken template is diagnosable instead of silently
+      // vanishing from the picker.
+      console.warn("ModelEditor: element templates failed to load", event);
     });
 
     let cancelled = false;
@@ -295,6 +305,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     const template = elementTemplates.get(templateId);
     if (!template) return;
     elementTemplates.applyTemplate(selected, template);
+    setApplyNonce((n) => n + 1);
   };
 
   const selectedLabel =
@@ -308,6 +319,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
             <label className="model-editor-template-picker">
               Connector template for <strong>{selectedLabel}</strong>:{" "}
               <select
+                key={`${selected.id ?? ""}-${applyNonce}`}
                 defaultValue=""
                 onChange={(event) => {
                   if (event.target.value) applyTemplate(event.target.value);
