@@ -33,16 +33,29 @@ function stripDevCsp(): Plugin {
 // behaviour, so verify deep-linked routes against a real deployment too, not
 // just `npm run preview`.
 function spaFallback404(): Plugin {
+  let outDir = "dist";
   return {
     name: "spa-fallback-404",
     apply: "build",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
     closeBundle() {
-      const outDir = resolve(process.cwd(), "dist");
+      const resolvedOutDir = resolve(process.cwd(), outDir);
       try {
-        copyFileSync(resolve(outDir, "index.html"), resolve(outDir, "404.html"));
-      } catch {
+        copyFileSync(
+          resolve(resolvedOutDir, "index.html"),
+          resolve(resolvedOutDir, "404.html"),
+        );
+      } catch (err) {
         // Best-effort — a custom outDir or a failed build shouldn't crash the
-        // rest of the pipeline over this fallback file.
+        // rest of the pipeline over this fallback file, but it should be
+        // visible in CI logs rather than silently missing on deploy.
+        this.warn(
+          `spa-fallback-404: could not create 404.html fallback in "${resolvedOutDir}": ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     },
   };

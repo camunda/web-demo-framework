@@ -21,10 +21,29 @@ export interface DeepLinkState {
 
 const HASH_PREFIX = "#s=";
 
+// Keep in sync with `BrainKind` in ./brains/types — used to sanitize
+// hash-supplied values before they reach `useBrain.setKind(...)`.
+const VALID_BRAIN_KINDS: readonly BrainKind[] = ["scripted", "browser", "endpoint"];
+
+function isBrainKind(value: unknown): value is BrainKind {
+  return (
+    typeof value === "string" && (VALID_BRAIN_KINDS as readonly string[]).includes(value)
+  );
+}
+
 function safeParse(raw: string): DeepLinkState {
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") return parsed as DeepLinkState;
+    if (parsed && typeof parsed === "object") {
+      const candidate = parsed as Record<string, unknown>;
+      // Only lift out fields we know about, and only when they're valid —
+      // a crafted hash (e.g. `#s={"brain":"not-a-kind"}`) must not flow
+      // through untouched, since it can reach `BrainPanel`'s
+      // `KINDS.find(...)!` and throw.
+      const state: DeepLinkState = {};
+      if (isBrainKind(candidate.brain)) state.brain = candidate.brain;
+      return state;
+    }
   } catch {
     // Malformed or foreign hash content — treat as "nothing deep-linked"
     // rather than throwing on every page load.

@@ -27,7 +27,15 @@ function stripBase(pathname: string): string {
 export function parseRoute(pathname: string = location.pathname): Route {
   const relative = stripBase(pathname);
   const match = relative.match(/^\/examples\/([^/]+)\/?$/);
-  if (match) return { kind: "example", id: decodeURIComponent(match[1]) };
+  if (match) {
+    try {
+      return { kind: "example", id: decodeURIComponent(match[1]) };
+    } catch {
+      // Malformed percent-encoding (e.g. a stray `%`) — fall back to the
+      // gallery rather than crashing routing/page render.
+      return { kind: "gallery" };
+    }
+  }
   return { kind: "gallery" };
 }
 
