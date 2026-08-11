@@ -6,8 +6,8 @@ import { createRoot } from "react-dom/client";
 // first paint. It's now isolated in `./framework/ui/MonacoEditor.tsx`, which
 // is only pulled into the bundle graph — and only runs its setup — the first
 // time a reader opens a code tab (see the `lazy()` wrapper around it in
-// `ExampleRunner.tsx`). See docs/bundle-budget.md for the code-splitting
-// rationale and the sizes this bought back.
+// `ExampleRunner.tsx`). See `tools/bundle-budget/check.mjs` for the
+// code-splitting rationale and the per-chunk budgets this bought back.
 
 import "@camunda/design-system/styles.css";
 // bpmn-js's own CSS moved to the lazy diagram boundary in ExampleRunner.tsx

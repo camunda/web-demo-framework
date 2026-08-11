@@ -1,5 +1,6 @@
 // Everything Monaco needs, isolated behind one module so it only enters the
-// bundle graph when something actually imports it (see LazyEditor below).
+// bundle graph when something actually imports it (see the `React.lazy()`
+// import in `ExampleRunner.tsx`).
 //
 // This used to be wired up eagerly in `main.tsx`, which put Monaco core, its
 // `?worker` chunks, and every bundled language grammar on the critical path

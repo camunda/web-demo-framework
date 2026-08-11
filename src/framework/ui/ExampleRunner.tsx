@@ -53,11 +53,13 @@ const TEMPLATE_TAB_PREFIX = "__template__:";
 
 // Both the live diagram (bpmn-js, via `@nanobpm/bojtos-react`) and the code
 // editor (Monaco) are multi-MB dependencies that most of a first paint never
-// needs to touch — the reader is looking at a "Booting the engine…" fallback
-// for the diagram and hasn't opened a code tab yet. Loading them via
-// `React.lazy()` moves both out of the initial JS payload and into their own
-// on-demand chunks (see `vite.config.ts`'s `manualChunks` and
-// `tools/bundle-budget/check.mjs`, which enforces separate budgets for each).
+// needs to touch. Loading them via `React.lazy()` keeps them out of the
+// initial JS payload and into their own on-demand chunks (see
+// `vite.config.ts`'s `manualChunks` and `tools/bundle-budget/check.mjs`,
+// which enforces separate budgets for each) — though in practice the Code
+// panel renders immediately and starts fetching the Monaco chunk on first
+// render, and the diagram chunk now starts downloading as soon as this view
+// mounts rather than waiting for the engine to finish booting.
 const BpmnRuntimeView = lazy(async () => {
   // bpmn-js's stylesheets used to load eagerly from main.tsx; they only
   // matter once the diagram itself renders, so they ride along with this
@@ -500,22 +502,26 @@ export function ExampleRunner({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {run.phase === "loading" ? (
-                <div className="diagram-fallback">Booting the engine…</div>
-              ) : (
-                <Suspense
-                  fallback={
-                    <div className="diagram-fallback">Loading diagram…</div>
-                  }
-                >
-                  <BpmnRuntimeView
-                    xml={draft.resolvedBpmn}
-                    activeIds={run.snapshot?.activeElementIds ?? []}
-                    incidentIds={run.snapshot?.incidentElementIds ?? []}
-                    className="diagram"
-                  />
-                </Suspense>
-              )}
+              {/* Render the Suspense boundary unconditionally so the lazy
+                  diagram chunk starts downloading immediately, in parallel
+                  with engine boot, instead of waiting for `run.phase` to
+                  leave "loading" first. */}
+              <Suspense
+                fallback={
+                  <div className="diagram-fallback">
+                    {run.phase === "loading"
+                      ? "Booting the engine…"
+                      : "Loading diagram…"}
+                  </div>
+                }
+              >
+                <BpmnRuntimeView
+                  xml={draft.resolvedBpmn}
+                  activeIds={run.snapshot?.activeElementIds ?? []}
+                  incidentIds={run.snapshot?.incidentElementIds ?? []}
+                  className="diagram"
+                />
+              </Suspense>
             </CardContent>
           </Card>
 

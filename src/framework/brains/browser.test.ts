@@ -128,11 +128,15 @@ describe("estimateAvailableVramMB", () => {
  */
 describe("BrowserBrain WebLLM import stays lazy", () => {
   it("has no static top-level import of @mlc-ai/web-llm", () => {
+    // Matches both `import { X } from "@mlc-ai/web-llm"` and side-effect-only
+    // imports like `import "@mlc-ai/web-llm";` (the `from` clause is optional).
     const staticImport =
-      /^\s*import\s+(?!type\s).*from\s+["']@mlc-ai\/web-llm["']/m;
+      /^\s*import\s+(?!type\s)(?:.*from\s+)?["']@mlc-ai\/web-llm["']/m;
     expect(browserSource).not.toMatch(staticImport);
 
-    const dynamicImport = /await\s+import\(\s*["']@mlc-ai\/web-llm["']\s*\)/;
+    // A dynamic import is lazy whether it's awaited or consumed via
+    // `.then()`, so don't require `await` here.
+    const dynamicImport = /import\(\s*["']@mlc-ai\/web-llm["']\s*\)/;
     expect(browserSource).toMatch(dynamicImport);
   });
 });

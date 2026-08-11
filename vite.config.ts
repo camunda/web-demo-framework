@@ -150,14 +150,18 @@ export default defineConfig({
         // reassign them.
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
+          // Rollup module ids can use platform-specific separators; on
+          // Windows builds these are typically `\` rather than `/`, which
+          // would silently defeat the `includes("/…/")` checks below.
+          const normalizedId = id.replace(/\\/g, "/");
           if (
-            id.includes("/react/") ||
-            id.includes("/react-dom/") ||
-            id.includes("/scheduler/")
+            normalizedId.includes("/react/") ||
+            normalizedId.includes("/react-dom/") ||
+            normalizedId.includes("/scheduler/")
           ) {
             return "vendor-react";
           }
-          if (id.includes("/@camunda/design-system/")) {
+          if (normalizedId.includes("/@camunda/design-system/")) {
             return "vendor-design-system";
           }
           return undefined;
@@ -169,7 +173,14 @@ export default defineConfig({
         // `tools/bundle-budget/check.mjs` can identify them by name instead
         // of an opaque content hash.
         chunkFileNames(chunkInfo) {
-          const facadeId = chunkInfo.facadeModuleId ?? "";
+          // Normalize to POSIX-style separators: `facadeModuleId` can use
+          // `\` on Windows builds, which would otherwise prevent these
+          // `includes("/…/")` checks from matching and leave chunks with
+          // their generic `[name]-[hash].js` fallback name.
+          const facadeId = (chunkInfo.facadeModuleId ?? "").replace(
+            /\\/g,
+            "/",
+          );
           if (
             facadeId.includes("/framework/ui/MonacoEditor.tsx") ||
             facadeId.includes("/monaco-editor/") ||
