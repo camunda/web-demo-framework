@@ -116,8 +116,11 @@ origins only. So:
 - In **local development** (`npm run dev`, page served from `localhost`), the
   endpoint brain's whole value proposition is reaching a local server on an
   arbitrary port, and CSP is not the layer that should fight that on a
-  developer's own machine. The dev server does not need to (and per Vite's
-  own defaults, does not) ship the production CSP.
+  developer's own machine. `index.html` contains the CSP `<meta>` tag
+  unconditionally (Vite serves it as a static file otherwise), so a
+  `strip-dev-csp` Vite plugin (`vite.config.ts`, `apply: "serve"`) removes the
+  tag from the HTML Vite serves in dev; `vite build`/`vite preview` leave it
+  untouched.
 - The sandboxed iframe (`sandbox="allow-scripts"`, no `allow-same-origin`) has
   its own opaque origin and is not a page CSP inherits into automatically for
   `connect-src` purposes in the same way — but since it also can't read this

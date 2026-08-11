@@ -14,18 +14,22 @@ import { runAgentSandboxed, runHandlerSandboxed } from "./sandbox";
  *
  * The reader's source itself never runs here, or anywhere in this page's
  * origin: see docs/security.md. This module only does a **syntax preflight**
- * host-side — evaluating `(source)` as an expression to confirm it produces a
- * function value, exactly as before, so a typo is still reported next to the
- * editor rather than as a mid-run incident — then discards that function
- * object and hands the *source string* to `./sandbox`, which compiles and
- * calls it for real inside a sandboxed, opaque-origin iframe.
+ * host-side — constructing `new Function` to confirm `(source)` parses as a
+ * valid expression, so a typo is still reported next to the editor rather
+ * than as a mid-run incident — and never calls the resulting factory, since
+ * that would execute the reader's source in this page's origin (a crafted
+ * IIFE would run immediately, before any function-ness check could reject
+ * it). Whether the source actually evaluates to a function is checked at run
+ * time inside the sandboxed iframe (see `./sandbox/iframeSource.ts`), which is
+ * a safe place for that evaluation to happen.
  */
 
 function preflight(source: string, what: string): void {
-  const factory = new Function(`"use strict"; return (${source});`);
-  const fn: unknown = factory();
-  if (typeof fn !== "function")
-    throw new Error(`${what} must evaluate to a function.`);
+  try {
+    new Function(`"use strict"; return (${source});`);
+  } catch {
+    throw new Error(`${what} has a syntax error.`);
+  }
 }
 
 export function compileHandler(source: string): ExampleHandler {
