@@ -272,6 +272,9 @@ body {
   display: flex;
   flex-direction: column;
 }
+.brain-recommended-badge {
+  margin-left: 6px;
+}
 .brain-actions {
   display: flex;
   align-items: center;

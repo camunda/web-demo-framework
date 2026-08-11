@@ -2,9 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BrowserBrain,
   DEFAULT_BROWSER_MODEL,
+  isModelCached,
   webgpuAvailable,
+  webgpuUnavailableReason,
 } from "./brains/browser";
-import { DEFAULT_ENDPOINT, EndpointBrain } from "./brains/endpoint";
+import {
+  DEFAULT_ENDPOINT,
+  EndpointBrain,
+  localEndpointBlockedReason,
+  pageIsLocal,
+} from "./brains/endpoint";
 import type { BrainKind, ChatFn } from "./brains/types";
 
 /**
@@ -15,6 +22,12 @@ import type { BrainKind, ChatFn } from "./brains/types";
  * - `browser` — a quantised model on WebGPU (works from a hosted https page).
  * - `endpoint` — any OpenAI-compatible server, Ollama by default (local only:
  *   an https page can't reach `http://localhost`).
+ *
+ * The initial `kind` is chosen by context rather than always defaulting to
+ * "scripted": WebGPU present -> offer the in-browser brain (the only live
+ * option that survives hosting); no WebGPU but the page is local -> surface
+ * the endpoint brain (the best local experience); neither -> scripted, so a
+ * reader never lands on a brain that can't possibly connect.
  */
 
 export type BrainStatus = "idle" | "connecting" | "ready" | "error";
@@ -30,6 +43,12 @@ export interface BrainControls {
   progress: { progress: number; text: string } | null;
   /** True when this browser exposes WebGPU (null until probed). */
   webgpu: boolean | null;
+  /** Why WebGPU isn't usable here, if it isn't (null until probed, or when it is). */
+  webgpuReason: string | null;
+  /** Whether the selected browser model's weights are already cached (null until probed). */
+  browserModelCached: boolean | null;
+  /** Cancel an in-flight browser-brain connect (best-effort — see BrowserBrain.cancelConnect). */
+  cancelConnect(): void;
 
   browserModel: string;
   setBrowserModel(id: string): void;
@@ -45,8 +64,19 @@ export interface BrainControls {
   chat: ChatFn | null;
 }
 
+/** Pick a sensible starting brain for this environment — see module doc. */
+async function chooseDefaultKind(): Promise<BrainKind> {
+  if (await webgpuAvailable()) return "browser";
+  if (pageIsLocal()) return "endpoint";
+  return "scripted";
+}
+
 export function useBrain(): BrainControls {
+  // "scripted" until the environment probe resolves, then swapped to the
+  // context-appropriate default — see chooseDefaultKind(). A reader who
+  // clicks a brain before that resolves just gets what they clicked.
   const [kind, setKindState] = useState<BrainKind>("scripted");
+  const pickedDefault = useRef(false);
   const [status, setStatus] = useState<BrainStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [modelInUse, setModelInUse] = useState<string | null>(null);
@@ -55,6 +85,10 @@ export function useBrain(): BrainControls {
     text: string;
   } | null>(null);
   const [webgpu, setWebgpu] = useState<boolean | null>(null);
+  const [webgpuReason, setWebgpuReason] = useState<string | null>(null);
+  const [browserModelCached, setBrowserModelCached] = useState<boolean | null>(
+    null,
+  );
 
   const [browserModel, setBrowserModel] = useState(DEFAULT_BROWSER_MODEL);
   const [endpointUrl, setEndpointUrl] = useState(DEFAULT_ENDPOINT);
@@ -65,8 +99,28 @@ export function useBrain(): BrainControls {
   const brainRef = useRef<BrowserBrain | EndpointBrain | null>(null);
 
   useEffect(() => {
-    void webgpuAvailable().then(setWebgpu);
+    void webgpuUnavailableReason().then((reason) => {
+      setWebgpuReason(reason);
+      setWebgpu(reason === null);
+      if (!pickedDefault.current) {
+        pickedDefault.current = true;
+        void chooseDefaultKind().then(setKindState);
+      }
+    });
   }, []);
+
+  // Cached-state indication: re-probed whenever the selected model changes,
+  // so a reader sees "already downloaded" before hitting Connect.
+  useEffect(() => {
+    let cancelled = false;
+    setBrowserModelCached(null);
+    void isModelCached(browserModel).then((cached) => {
+      if (!cancelled) setBrowserModelCached(cached);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [browserModel]);
 
   // Free the GPU/engine when the page goes away.
   useEffect(() => () => brainRef.current?.dispose(), []);
@@ -80,11 +134,27 @@ export function useBrain(): BrainControls {
     setChat(null);
   }, []);
 
+  const cancelConnect = useCallback(() => {
+    if (brainRef.current instanceof BrowserBrain) brainRef.current.cancelConnect();
+    setStatus("idle");
+    setProgress(null);
+    setError(null);
+  }, []);
+
   const connect = useCallback(async () => {
     if (kind === "scripted") {
       setChat(null);
       setStatus("ready");
       return;
+    }
+    // Explain up front rather than after a failed attempt.
+    if (kind === "endpoint") {
+      const blocked = localEndpointBlockedReason(endpointUrl);
+      if (blocked) {
+        setError(blocked);
+        setStatus("error");
+        return;
+      }
     }
     setStatus("connecting");
     setError(null);
@@ -104,6 +174,7 @@ export function useBrain(): BrainControls {
         const id = await brain.connect(browserModel, setProgress);
         setModelInUse(id);
         setChat(() => brain.chat);
+        setBrowserModelCached(true);
       } else {
         brainRef.current?.dispose();
         const brain = new EndpointBrain(endpointUrl, apiKey, endpointModel);
@@ -114,7 +185,12 @@ export function useBrain(): BrainControls {
       }
       setStatus("ready");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      if (message === "cancelled") {
+        // cancelConnect() already reset status/error/progress.
+        return;
+      }
+      setError(message);
       setStatus("error");
       setChat(null);
     } finally {
@@ -130,6 +206,9 @@ export function useBrain(): BrainControls {
     modelInUse,
     progress,
     webgpu,
+    webgpuReason,
+    browserModelCached,
+    cancelConnect,
     browserModel,
     setBrowserModel,
     endpointUrl,

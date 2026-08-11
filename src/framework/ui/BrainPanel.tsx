@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Alert,
   AlertDescription,
@@ -12,8 +13,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@camunda/design-system";
-import { BROWSER_MODELS } from "../brains/browser";
-import { localEndpointBlockedReason } from "../brains/endpoint";
+import {
+  BROWSER_MODELS,
+  estimateAvailableVramMB,
+  insufficientVramReason,
+  loadBrowserModelRequirements,
+} from "../brains/browser";
+import { localEndpointBlockedReason, pageIsLocal } from "../brains/endpoint";
 import type { BrainControls } from "../useBrain";
 import type { BrainKind } from "../brains/types";
 
@@ -39,6 +45,22 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
   const active = KINDS.find((k) => k.kind === brain.kind)!;
   // Warn before the user clicks Connect, not after it fails.
   const localBlocked = localEndpointBlockedReason(brain.endpointUrl);
+  const local = pageIsLocal();
+
+  const [models, setModels] = useState(BROWSER_MODELS);
+  useEffect(() => {
+    void loadBrowserModelRequirements().then(setModels);
+  }, []);
+  const selectedModel = models.find((m) => m.id === brain.browserModel);
+  const vramReason = selectedModel
+    ? insufficientVramReason(selectedModel, estimateAvailableVramMB())
+    : null;
+
+  // The recommended brain for this environment, so a reader can see *why*
+  // it's the default rather than guessing: WebGPU present -> browser is the
+  // one live option that survives hosting; local page, no WebGPU -> endpoint.
+  const recommended: BrainKind | null =
+    brain.webgpu === true ? "browser" : local && brain.webgpu === false ? "endpoint" : null;
 
   return (
     <div className="brain">
@@ -51,6 +73,11 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
             onClick={() => brain.setKind(k.kind)}
           >
             {k.label}
+            {k.kind === recommended && (
+              <Badge variant="info" className="brain-recommended-badge">
+                recommended
+              </Badge>
+            )}
           </Button>
         ))}
         {brain.status === "ready" && brain.kind !== "scripted" && (
@@ -77,21 +104,37 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {BROWSER_MODELS.map((m) => (
+                {models.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {/* Cached-state indication: a first run downloads the weights (size
+                shown in the model label above); a later visit reuses them. */}
+            {brain.browserModelCached === true && (
+              <p className="field-hint">
+                Already downloaded in this browser — connecting will be fast.
+              </p>
+            )}
+            {brain.browserModelCached === false && (
+              <p className="field-hint">
+                Not downloaded yet — connecting fetches the weights once, then
+                caches them for next time.
+              </p>
+            )}
           </div>
-          {brain.webgpu === false && (
+          {brain.webgpu === false && brain.webgpuReason && (
             <Alert variant="destructive">
               <AlertTitle>No WebGPU in this browser</AlertTitle>
-              <AlertDescription>
-                Use a recent Chrome/Edge (or Safari 17+) with hardware
-                acceleration on, or pick another brain.
-              </AlertDescription>
+              <AlertDescription>{brain.webgpuReason}</AlertDescription>
+            </Alert>
+          )}
+          {brain.webgpu !== false && vramReason && (
+            <Alert variant="destructive">
+              <AlertTitle>This model may not fit in GPU memory</AlertTitle>
+              <AlertDescription>{vramReason}</AlertDescription>
             </Alert>
           )}
         </div>
@@ -110,7 +153,8 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
             <p className="field-hint">
               Ollama allows <code>localhost</code> origins out of the box; set{" "}
               <code>OLLAMA_ORIGINS</code> only when serving this page from
-              another host.
+              another host. Best for local development — a hosted copy of
+              this page can't reach a server on your machine at all.
             </p>
             {localBlocked && (
               <Alert variant="destructive">
@@ -151,6 +195,11 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
           >
             {brain.status === "ready" ? "Reconnect" : "Connect"}
           </Button>
+          {brain.status === "connecting" && brain.kind === "browser" && (
+            <Button size="sm" variant="secondary" onClick={brain.cancelConnect}>
+              Cancel
+            </Button>
+          )}
           {brain.progress && (
             <span className="field-hint">
               {Math.round(brain.progress.progress * 100)}% —{" "}
