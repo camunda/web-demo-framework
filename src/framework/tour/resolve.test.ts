@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { resolveTourSelector } from "./resolve";
+import { TOUR_ANCHOR } from "./anchors";
 
 describe("resolveTourSelector", () => {
   it("resolves a chrome anchor to a plain data-tour selector", () => {
-    expect(resolveTourSelector({ anchor: "run-button" })).toBe(
+    expect(resolveTourSelector({ anchor: TOUR_ANCHOR.runButton })).toBe(
       '[data-tour="run-button"]',
     );
   });

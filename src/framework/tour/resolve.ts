@@ -1,4 +1,4 @@
-import { anchorSelector } from "./anchors";
+import { anchorSelector, TOUR_ANCHOR } from "./anchors";
 import type { TourTarget } from "./types";
 
 /**
@@ -15,7 +15,7 @@ import type { TourTarget } from "./types";
  */
 export function resolveTourSelector(target: TourTarget): string {
   if ("anchor" in target) return anchorSelector(target.anchor);
-  return `${anchorSelector("diagram")} [data-element-id="${cssEscape(target.elementId)}"]`;
+  return `${anchorSelector(TOUR_ANCHOR.diagram)} [data-element-id="${cssEscape(target.elementId)}"]`;
 }
 
 /** `CSS.escape`, with a manual fallback for environments that lack it (e.g. some jsdom versions). */

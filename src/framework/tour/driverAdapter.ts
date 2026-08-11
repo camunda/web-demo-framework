@@ -68,6 +68,10 @@ export async function startTour(
       // explicit here too since a mixed tour (some click steps, some
       // state-driven) needs it to vary step to step.
       disableActiveInteraction: false,
+      // Honors `TourStep.skipMissingElement` (defaults to `true` — see
+      // `types.ts`) so a step authored with `skipMissingElement: false` can
+      // opt into a hard failure instead of silently skipping.
+      skipMissingElement: step.skipMissingElement ?? true,
     };
   });
 
@@ -75,10 +79,9 @@ export async function startTour(
     steps: driveSteps,
     showProgress: true,
     allowClose: true,
-    // A tour step's element is expected to sometimes be legitimately absent
-    // (an agent-only anchor on a non-agentic example, a renamed element) —
-    // degrade by skipping it rather than surfacing a broken centered
-    // fallback or aborting later steps.
+    // Driver-level default: most steps should degrade by skipping rather
+    // than surfacing a broken centered fallback or aborting later steps.
+    // Per-step `skipMissingElement` above overrides this for a given step.
     skipMissingElement: true,
     onHighlighted: (_element, _step, { index }) => {
       if (index !== undefined) options.onIndexChange?.(index);

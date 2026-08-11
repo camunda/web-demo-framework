@@ -61,7 +61,15 @@ export function useTour(
     }
   }, []);
 
+  // Bumped by every `start()` call (and by `stop()`) so a `startTour()`
+  // promise that resolves after the tour it belongs to has been superseded
+  // (a second `start()` before the first resolved, `stop()`, or unmount) can
+  // tell it's stale and tear itself down instead of calling `setActive(true)`
+  // / beginning to poll on a component/tour that's no longer current.
+  const startTokenRef = useRef(0);
+
   const stop = useCallback(() => {
+    startTokenRef.current += 1;
     stopPolling();
     handleRef.current?.destroy();
     handleRef.current = null;
@@ -70,7 +78,7 @@ export function useTour(
 
   const start = useCallback(() => {
     if (!tour || tour.steps.length === 0 || handleRef.current) return;
-    let cancelled = false;
+    const token = (startTokenRef.current += 1);
 
     void startTour(tour.steps, {
       onIndexChange: (index) => {
@@ -82,7 +90,7 @@ export function useTour(
         setActive(false);
       },
     }).then((handle) => {
-      if (cancelled) {
+      if (token !== startTokenRef.current) {
         handle.destroy();
         return;
       }
@@ -98,10 +106,6 @@ export function useTour(
         }
       }, POLL_MS);
     });
-
-    return () => {
-      cancelled = true;
-    };
     // `tour` identity changes only when the example itself changes (a fresh
     // manifest, not a re-render) — `getSnapshot` deliberately isn't a dep
     // here, since the ref above already keeps the poll loop reading the

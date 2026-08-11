@@ -2,7 +2,7 @@
  * The DOM-anchor registry for guided tours (see `./types.ts`).
  *
  * A tour step that targets runner chrome (as opposed to a BPMN element on the
- * live diagram — see `resolveTourTarget` in `./resolve.ts`) names one of these
+ * live diagram — see `resolveTourSelector` in `./resolve.ts`) names one of these
  * constants, never a literal selector string. `ExampleRunner.tsx` tags the
  * corresponding DOM node with `data-tour={TOUR_ANCHOR.x}`. Deriving both ends
  * from the same constant means a future rename of the attribute value is a
