@@ -4,6 +4,7 @@ import { EXAMPLES } from "./examples";
 import { useRoute } from "./framework/useRoute";
 import { examplePath, galleryPath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
+import { readTourParam } from "./framework/tour";
 
 /**
  * The gallery shell, plus routing:
@@ -24,6 +25,7 @@ import { readDeepLinkState } from "./framework/deepLink";
 export function App() {
   const { route, embed } = useRoute();
   const initialBrainKind = readDeepLinkState().brain;
+  const initialTourId = readTourParam();
 
   const activeId = route.kind === "example" ? route.id : EXAMPLES[0].id;
   const example = EXAMPLES.find((e) => e.id === activeId) ?? EXAMPLES[0];
@@ -82,6 +84,7 @@ export function App() {
         key={example.id}
         example={example}
         initialBrainKind={initialBrainKind}
+        initialTourId={initialTourId}
       />
     </>
   );

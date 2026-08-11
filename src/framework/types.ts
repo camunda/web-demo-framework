@@ -1,5 +1,6 @@
 import type { ActivatedJob } from "@nanobpm/bojtos-react";
 import type { TemplateMap } from "./templates";
+import type { TourDef } from "./tour/types";
 
 /** A line in the run's activity log. */
 export interface TraceEntry {
@@ -143,4 +144,11 @@ export interface ExampleDef {
    * `{{...}}` placeholders at all.
    */
   templates?: TemplateMap;
+  /**
+   * An optional, short guided tour of this example, built on driver.js (see
+   * `src/framework/tour/**`) and offered via a "Take the tour" affordance and
+   * a `?tour=<id>` deep link. Entirely additive: an example with no `tour`
+   * behaves exactly as one without this field at all.
+   */
+  tour?: TourDef;
 }
