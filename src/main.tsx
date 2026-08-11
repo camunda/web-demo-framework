@@ -1,24 +1,18 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-// Bundle Monaco locally (instead of its CDN loader) so the page works offline
-// right after `npm install`.
-import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
-import { loader } from "@monaco-editor/react";
-
-self.MonacoEnvironment = {
-  getWorker(_workerId, label) {
-    if (label === "typescript" || label === "javascript") return new tsWorker();
-    return new editorWorker();
-  },
-};
-loader.config({ monaco });
+// Monaco (core + worker environment + `@monaco-editor/react`'s `loader.config`)
+// used to be bundled and configured right here, on the critical path for
+// first paint. It's now isolated in `./framework/ui/MonacoEditor.tsx`, which
+// is only pulled into the bundle graph — and only runs its setup — the first
+// time a reader opens a code tab (see the `lazy()` wrapper around it in
+// `ExampleRunner.tsx`). See docs/bundle-budget.md for the code-splitting
+// rationale and the sizes this bought back.
 
 import "@camunda/design-system/styles.css";
-import "bpmn-js/dist/assets/diagram-js.css";
-import "bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css";
+// bpmn-js's own CSS moved to the lazy diagram boundary in ExampleRunner.tsx
+// (loaded alongside `@nanobpm/bojtos-react`) — the diagram is no longer on
+// the critical path for first paint, so its stylesheet shouldn't be either.
 import "./styles.css";
 
 import { C4Provider } from "@camunda/design-system";

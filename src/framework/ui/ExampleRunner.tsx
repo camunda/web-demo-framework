@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BpmnRuntimeView, type AgentHandler } from "@nanobpm/bojtos-react";
-import Editor from "@monaco-editor/react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { AgentHandler } from "@nanobpm/bojtos-react";
 import {
   Alert,
   AlertDescription,
@@ -43,6 +50,28 @@ const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
 const TEMPLATE_TAB_PREFIX = "__template__:";
+
+// Both the live diagram (bpmn-js, via `@nanobpm/bojtos-react`) and the code
+// editor (Monaco) are multi-MB dependencies that most of a first paint never
+// needs to touch — the reader is looking at a "Booting the engine…" fallback
+// for the diagram and hasn't opened a code tab yet. Loading them via
+// `React.lazy()` moves both out of the initial JS payload and into their own
+// on-demand chunks (see `vite.config.ts`'s `manualChunks` and
+// `tools/bundle-budget/check.mjs`, which enforces separate budgets for each).
+const BpmnRuntimeView = lazy(async () => {
+  // bpmn-js's stylesheets used to load eagerly from main.tsx; they only
+  // matter once the diagram itself renders, so they ride along with this
+  // same dynamic import instead.
+  await Promise.all([
+    import("bpmn-js/dist/assets/diagram-js.css"),
+    import("bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css"),
+  ]);
+  const { BpmnRuntimeView } = await import("@nanobpm/bojtos-react");
+  return { default: BpmnRuntimeView };
+});
+// Monaco's own setup (worker environment, `loader.config`) lives in
+// `./MonacoEditor` so it only runs once this dynamic import actually resolves.
+const Editor = lazy(() => import("./MonacoEditor"));
 
 function safeStringify(value: unknown, space?: number): string {
   try {
@@ -137,10 +166,12 @@ export function ExampleRunner({
   const startSchema = model.startFormId
     ? ((example.forms?.[model.startFormId] as FormSchema | undefined) ?? null)
     : null;
-  const [startValues, setStartValues] = useState<Record<string, unknown>>(() => ({
-    ...example.seed,
-    ...(startSchema ? formDefaults(startSchema) : {}),
-  }));
+  const [startValues, setStartValues] = useState<Record<string, unknown>>(
+    () => ({
+      ...example.seed,
+      ...(startSchema ? formDefaults(startSchema) : {}),
+    }),
+  );
 
   const [activeTab, setActiveTab] = useState<string>(
     model.agent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
@@ -203,7 +234,9 @@ export function ExampleRunner({
     const completed = new Map(
       run.snapshot.elementStats.map((s) => [s.elementId, s.completed]),
     );
-    return model.agent.tools.filter((t) => (completed.get(t.elementId) ?? 0) === 0);
+    return model.agent.tools.filter(
+      (t) => (completed.get(t.elementId) ?? 0) === 0,
+    );
   }, [model.agent, run.snapshot]);
   const openUserTaskSpec = openUserTask
     ? model.userTasks.find((u) => u.elementId === openUserTask.elementId)
@@ -251,7 +284,10 @@ export function ExampleRunner({
       if (live) {
         const byJobType = new Map<string, AgentSpec[]>();
         for (const spec of model.agents)
-          byJobType.set(spec.jobType, [...(byJobType.get(spec.jobType) ?? []), spec]);
+          byJobType.set(spec.jobType, [
+            ...(byJobType.get(spec.jobType) ?? []),
+            spec,
+          ]);
         for (const [jobType, specs] of byJobType)
           agents[jobType] = makeLiveAgentRouter(specs, brain.chat!, trace);
       } else if (scripted && model.agent) {
@@ -338,7 +374,10 @@ export function ExampleRunner({
       if (snap && snap.completedInstances >= 1)
         trace({ kind: "done", text: "✅ process instance completed" });
       else if (snap && snap.incidentElementIds.length > 0)
-        trace({ kind: "error", text: "A job failed — incident on the diagram" });
+        trace({
+          kind: "error",
+          text: "A job failed — incident on the diagram",
+        });
     } finally {
       runningRef.current = false;
       setRunning(false);
@@ -371,11 +410,13 @@ export function ExampleRunner({
   const statusBadge = useMemo(() => {
     if (run.phase === "loading")
       return <Badge variant="neutral">Booting engine…</Badge>;
-    if (run.phase === "error") return <Badge variant="danger">Engine error</Badge>;
+    if (run.phase === "error")
+      return <Badge variant="danger">Engine error</Badge>;
     if (running) return <Badge variant="info">Running…</Badge>;
     if ((run.snapshot?.incidentElementIds.length ?? 0) > 0)
       return <Badge variant="danger">Incident</Badge>;
-    if (openUserTask) return <Badge variant="warning">Waiting for a human</Badge>;
+    if (openUserTask)
+      return <Badge variant="warning">Waiting for a human</Badge>;
     if ((run.snapshot?.completedInstances ?? 0) >= 1)
       return <Badge variant="success">Completed</Badge>;
     return <Badge variant="neutral">Ready</Badge>;
@@ -398,7 +439,11 @@ export function ExampleRunner({
           >
             ▶ Run
           </Button>
-          <Button variant="secondary" onClick={stop} disabled={run.phase !== "ready"}>
+          <Button
+            variant="secondary"
+            onClick={stop}
+            disabled={run.phase !== "ready"}
+          >
             ↺ Reset
           </Button>
           {statusBadge}
@@ -417,7 +462,9 @@ export function ExampleRunner({
         )}
         {draft.hasErrors && (
           <Alert variant="destructive">
-            <AlertTitle>Run is disabled — the diagram has unresolved references</AlertTitle>
+            <AlertTitle>
+              Run is disabled — the diagram has unresolved references
+            </AlertTitle>
             <AlertDescription>
               <ul className="diagnostics">
                 {draft.diagnostics
@@ -456,12 +503,18 @@ export function ExampleRunner({
               {run.phase === "loading" ? (
                 <div className="diagram-fallback">Booting the engine…</div>
               ) : (
-                <BpmnRuntimeView
-                  xml={draft.resolvedBpmn}
-                  activeIds={run.snapshot?.activeElementIds ?? []}
-                  incidentIds={run.snapshot?.incidentElementIds ?? []}
-                  className="diagram"
-                />
+                <Suspense
+                  fallback={
+                    <div className="diagram-fallback">Loading diagram…</div>
+                  }
+                >
+                  <BpmnRuntimeView
+                    xml={draft.resolvedBpmn}
+                    activeIds={run.snapshot?.activeElementIds ?? []}
+                    incidentIds={run.snapshot?.incidentElementIds ?? []}
+                    className="diagram"
+                  />
+                </Suspense>
               )}
             </CardContent>
           </Card>
@@ -482,8 +535,8 @@ export function ExampleRunner({
                     <AlertTitle>The agent didn't finish its checks</AlertTitle>
                     <AlertDescription>
                       It completed without running{" "}
-                      {unrunTools.map((t) => t.label || t.elementId).join(", ")}.
-                      The process took the default path to this task, so the
+                      {unrunTools.map((t) => t.label || t.elementId).join(", ")}
+                      . The process took the default path to this task, so the
                       findings below have no value to report.
                     </AlertDescription>
                   </Alert>
@@ -610,127 +663,135 @@ export function ExampleRunner({
             <CardHeader>
               <CardTitle>Code</CardTitle>
               <CardDescription>
-                One handler per BPMN element. Return variables to merge, or throw
-                to fail the job.
+                One handler per BPMN element. Return variables to merge, or
+                throw to fail the job.
               </CardDescription>
             </CardHeader>
             <Separator />
             <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                  <TabsTrigger value={MODEL_TAB}>model (XML)</TabsTrigger>
-                  {model.agent && (
-                    <TabsTrigger value={AGENT_TAB}>agent (scripted)</TabsTrigger>
-                  )}
-                  {example.handlers.map((h) => (
-                    <TabsTrigger key={h.elementId} value={h.elementId}>
-                      {model.tasks.find((t) => t.elementId === h.elementId)
-                        ?.label ?? h.elementId}
-                    </TabsTrigger>
-                  ))}
-                  {Object.keys(templateSources).map((name) => (
-                    <TabsTrigger
-                      key={name}
-                      value={TEMPLATE_TAB_PREFIX + name}
-                    >
-                      {name}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-
-                <TabsContent value={MODEL_TAB}>
-                  <div className="editor-meta">
-                    <strong>BPMN XML</strong>
-                    <code>hand-edit the diagram — Run re-checks it below</code>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setBpmn(example.bpmn)}
-                      disabled={bpmn === example.bpmn}
-                    >
-                      Revert to original
-                    </Button>
-                  </div>
-                  <ModelEditor value={bpmn} onChange={setBpmn} />
-                </TabsContent>
-
-                {model.agent && (
-                  <TabsContent value={AGENT_TAB}>
-                    <div className="editor-meta">
-                      <strong>{model.agent.label}</strong>
-                      <code>
-                        {brain.kind === "scripted" || !brain.chat
-                          ? "in use"
-                          : "unused — a live brain is connected"}
-                      </code>
-                    </div>
-                    <div className="editor-wrap">
-                      <Editor
-                        height="360px"
-                        defaultLanguage="javascript"
-                        value={agentSource}
-                        onChange={(v) => setAgentSource(v ?? "")}
-                        options={editorOptions}
-                      />
-                    </div>
-                  </TabsContent>
-                )}
-
-                {example.handlers.map((h) => (
-                  <TabsContent key={h.elementId} value={h.elementId}>
-                    <div className="editor-meta">
-                      <strong>
+              <Suspense
+                fallback={
+                  <div className="editor-fallback">Loading editor…</div>
+                }
+              >
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                  <TabsList>
+                    <TabsTrigger value={MODEL_TAB}>model (XML)</TabsTrigger>
+                    {model.agent && (
+                      <TabsTrigger value={AGENT_TAB}>
+                        agent (scripted)
+                      </TabsTrigger>
+                    )}
+                    {example.handlers.map((h) => (
+                      <TabsTrigger key={h.elementId} value={h.elementId}>
                         {model.tasks.find((t) => t.elementId === h.elementId)
                           ?.label ?? h.elementId}
-                      </strong>
-                      <code>{h.standsInFor ?? h.elementId}</code>
-                    </div>
-                    <div className="editor-wrap">
-                      <Editor
-                        height="360px"
-                        defaultLanguage="javascript"
-                        value={sources[h.elementId]}
-                        onChange={(v) =>
-                          setSources((prev) => ({
-                            ...prev,
-                            [h.elementId]: v ?? "",
-                          }))
-                        }
-                        options={editorOptions}
-                      />
-                    </div>
-                  </TabsContent>
-                ))}
+                      </TabsTrigger>
+                    ))}
+                    {Object.keys(templateSources).map((name) => (
+                      <TabsTrigger key={name} value={TEMPLATE_TAB_PREFIX + name}>
+                        {name}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
 
-                {/*
-                 * Prompts as editable assets: each `{{name}}` template gets
-                 * its own tab, edited as plain text — not JS, and not the raw
-                 * FEEL/XML it's substituted into. A change here reaches the
-                 * agent on the next run, through the same draft-definition
-                 * pipeline as any other edit (see templates.ts / draft.ts).
-                 */}
-                {Object.keys(templateSources).map((name) => (
-                  <TabsContent key={name} value={TEMPLATE_TAB_PREFIX + name}>
+                  <TabsContent value={MODEL_TAB}>
                     <div className="editor-meta">
-                      <strong>{name}</strong>
-                      <code>prompt / template text — substitutes {"{{" + name + "}}"}</code>
+                      <strong>BPMN XML</strong>
+                      <code>hand-edit the diagram — Run re-checks it below</code>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setBpmn(example.bpmn)}
+                        disabled={bpmn === example.bpmn}
+                      >
+                        Revert to original
+                      </Button>
                     </div>
-                    <div className="editor-wrap">
-                      <Editor
-                        height="360px"
-                        defaultLanguage="markdown"
-                        value={templateSources[name]}
-                        onChange={(v) =>
-                          setTemplateSources((prev) =>
-                            createTemplateMap(prev, { [name]: v ?? "" }),
-                          )
-                        }
-                        options={editorOptions}
-                      />
-                    </div>
+                    <ModelEditor value={bpmn} onChange={setBpmn} />
                   </TabsContent>
-                ))}
-              </Tabs>
+
+                  {model.agent && (
+                    <TabsContent value={AGENT_TAB}>
+                      <div className="editor-meta">
+                        <strong>{model.agent.label}</strong>
+                        <code>
+                          {brain.kind === "scripted" || !brain.chat
+                            ? "in use"
+                            : "unused — a live brain is connected"}
+                        </code>
+                      </div>
+                      <div className="editor-wrap">
+                        <Editor
+                          height="360px"
+                          defaultLanguage="javascript"
+                          value={agentSource}
+                          onChange={(v) => setAgentSource(v ?? "")}
+                          options={editorOptions}
+                        />
+                      </div>
+                    </TabsContent>
+                  )}
+
+                  {example.handlers.map((h) => (
+                    <TabsContent key={h.elementId} value={h.elementId}>
+                      <div className="editor-meta">
+                        <strong>
+                          {model.tasks.find((t) => t.elementId === h.elementId)
+                            ?.label ?? h.elementId}
+                        </strong>
+                        <code>{h.standsInFor ?? h.elementId}</code>
+                      </div>
+                      <div className="editor-wrap">
+                        <Editor
+                          height="360px"
+                          defaultLanguage="javascript"
+                          value={sources[h.elementId]}
+                          onChange={(v) =>
+                            setSources((prev) => ({
+                              ...prev,
+                              [h.elementId]: v ?? "",
+                            }))
+                          }
+                          options={editorOptions}
+                        />
+                      </div>
+                    </TabsContent>
+                  ))}
+
+                  {/*
+                   * Prompts as editable assets: each `{{name}}` template gets
+                   * its own tab, edited as plain text — not JS, and not the raw
+                   * FEEL/XML it's substituted into. A change here reaches the
+                   * agent on the next run, through the same draft-definition
+                   * pipeline as any other edit (see templates.ts / draft.ts).
+                   */}
+                  {Object.keys(templateSources).map((name) => (
+                    <TabsContent key={name} value={TEMPLATE_TAB_PREFIX + name}>
+                      <div className="editor-meta">
+                        <strong>{name}</strong>
+                        <code>
+                          prompt / template text — substitutes{" "}
+                          {"{{" + name + "}}"}
+                        </code>
+                      </div>
+                      <div className="editor-wrap">
+                        <Editor
+                          height="360px"
+                          defaultLanguage="markdown"
+                          value={templateSources[name]}
+                          onChange={(v) =>
+                            setTemplateSources((prev) =>
+                              createTemplateMap(prev, { [name]: v ?? "" }),
+                            )
+                          }
+                          options={editorOptions}
+                        />
+                      </div>
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              </Suspense>
             </CardContent>
           </Card>
 
