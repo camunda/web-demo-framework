@@ -134,12 +134,21 @@ export function useBrain(): BrainControls {
     setChat(null);
   }, []);
 
+  /** Tear down the active brain instance and clear its live chat/model state. */
+  const disconnect = useCallback(() => {
+    brainRef.current?.dispose();
+    brainRef.current = null;
+    setChat(null);
+    setModelInUse(null);
+  }, []);
+
   const cancelConnect = useCallback(() => {
     if (brainRef.current instanceof BrowserBrain) brainRef.current.cancelConnect();
+    disconnect();
     setStatus("idle");
     setProgress(null);
     setError(null);
-  }, []);
+  }, [disconnect]);
 
   const connect = useCallback(async () => {
     if (kind === "scripted") {
@@ -151,6 +160,7 @@ export function useBrain(): BrainControls {
     if (kind === "endpoint") {
       const blocked = localEndpointBlockedReason(endpointUrl);
       if (blocked) {
+        disconnect();
         setError(blocked);
         setStatus("error");
         return;
@@ -196,7 +206,7 @@ export function useBrain(): BrainControls {
     } finally {
       setProgress(null);
     }
-  }, [kind, browserModel, endpointUrl, endpointModel, apiKey]);
+  }, [kind, browserModel, endpointUrl, endpointModel, apiKey, disconnect]);
 
   return {
     kind,

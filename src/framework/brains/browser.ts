@@ -100,11 +100,15 @@ export const DEFAULT_BROWSER_MODEL = BROWSER_MODELS[0].id;
  * Fill in real `vramRequiredMB` / `requiredFeatures` for the curated shortlist
  * from WebLLM's own `prebuiltAppConfig`. Call once before showing model
  * requirements in the UI; safe to call repeatedly (cached after the first).
+ *
+ * Returns a fresh array (and fresh model objects) rather than mutating
+ * `BROWSER_MODELS` in place — callers that store the result in React state
+ * (e.g. `setModels(...)`) need a new reference to reliably trigger a
+ * re-render once the async load resolves.
  */
 export async function loadBrowserModelRequirements(): Promise<BrowserModel[]> {
   await loadRequirements();
-  for (const m of BROWSER_MODELS) Object.assign(m, lookupRequirements(m.id));
-  return BROWSER_MODELS;
+  return BROWSER_MODELS.map((m) => ({ ...m, ...lookupRequirements(m.id) }));
 }
 
 /** True when this browser exposes the WebGPU adapter WebLLM needs. */
@@ -227,9 +231,14 @@ export class BrowserBrain {
     } catch (e) {
       if (myGeneration !== this.generation)
         throw new Error("cancelled");
+      const needsShaderF16 = BROWSER_MODELS.find(
+        (m) => m.id === modelId,
+      )?.requiredFeatures?.includes("shader-f16");
       throw new Error(
         `Couldn't load ${modelId} in the browser (${e instanceof Error ? e.message : String(e)}). ` +
-          "This model needs WebGPU with shader-f16; try a smaller model or the endpoint brain.",
+          (needsShaderF16
+            ? "This model needs WebGPU with shader-f16; try a smaller model or the endpoint brain."
+            : "Try a smaller model, check your connection, or use the endpoint brain instead."),
       );
     }
     if (myGeneration !== this.generation) {
