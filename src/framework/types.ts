@@ -1,4 +1,5 @@
 import type { ActivatedJob } from "@nanobpm/bojtos-react";
+import type { TemplateMap } from "./templates";
 
 /** A line in the run's activity log. */
 export interface TraceEntry {
@@ -77,4 +78,14 @@ export interface ExampleDef {
    * for a model with an agent.
    */
   scriptedAgent?: string;
+  /**
+   * Prompt (and other) text assets, by template name, substituted into `bpmn`
+   * as `{{name}}` placeholders before both deploy and `parseModel` — see
+   * `src/framework/templates.ts`. Convention: one file per template under
+   * `prompts/<name>.md`, name being the file stem, loaded with
+   * `import.meta.glob(...)` and merged with `createTemplateMap`. Optional —
+   * an example with no templates behaves exactly as one whose `bpmn` has no
+   * `{{...}}` placeholders at all.
+   */
+  templates?: TemplateMap;
 }

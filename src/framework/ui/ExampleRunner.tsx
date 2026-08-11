@@ -28,11 +28,14 @@ import { BrainPanel } from "./BrainPanel";
 import { FormRenderer, formDefaults, type FormSchema } from "./FormRenderer";
 import { ModelEditor } from "./ModelEditor";
 import type { ExampleDef, TraceEntry } from "../types";
+import { createTemplateMap, type TemplateMap } from "../templates";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
 const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
+/** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
+const TEMPLATE_TAB_PREFIX = "__template__:";
 
 function safeStringify(value: unknown, space?: number): string {
   try {
@@ -71,6 +74,14 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
     Object.fromEntries(example.handlers.map((h) => [h.elementId, h.source])),
   );
   const [agentSource, setAgentSource] = useState(example.scriptedAgent ?? "");
+  // Prompts/templates, editable in their own tab (see templates.ts):
+  // `{{name}}` placeholders in `example.bpmn` are substituted from here,
+  // falling back to `example.templates`, before the model is ever parsed or
+  // deployed — a prompt edit flows through the exact same draft-definition
+  // pipeline as a handler edit.
+  const [templateSources, setTemplateSources] = useState<TemplateMap>(() =>
+    createTemplateMap(example.templates),
+  );
 
   // The atomic "draft run definition": the parsed model, every handler and
   // form resolved (or not) against what's actually on offer, and the
@@ -80,10 +91,15 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
   // unsupported edit (a renamed tool element, a second process) surfaces via
   // these same diagnostics rather than a new one-off error path.
   const draft = useMemo(
-    () => buildDraftRunDefinition(example, sources, bpmn),
-    [example, sources, bpmn],
+    () => buildDraftRunDefinition(example, sources, bpmn, templateSources),
+    [example, sources, bpmn, templateSources],
   );
   const model = draft.model;
+
+  // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
+  // not `example.bpmn` directly — so what runs and what's shown is exactly
+  // what the diagnostics above are about.
+  const run = useExampleRun({ bpmn: draft.resolvedBpmn });
 
   // The start form comes from the model's start-event `formId`, if it has one.
   const startSchema = model.startFormId
@@ -383,7 +399,7 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                 <div className="diagram-fallback">Booting the engine…</div>
               ) : (
                 <BpmnRuntimeView
-                  xml={bpmn}
+                  xml={draft.resolvedBpmn}
                   activeIds={run.snapshot?.activeElementIds ?? []}
                   incidentIds={run.snapshot?.incidentElementIds ?? []}
                   className="diagram"
@@ -545,6 +561,14 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                         ?.label ?? h.elementId}
                     </TabsTrigger>
                   ))}
+                  {Object.keys(templateSources).map((name) => (
+                    <TabsTrigger
+                      key={name}
+                      value={TEMPLATE_TAB_PREFIX + name}
+                    >
+                      {name}
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
 
                 <TabsContent value={MODEL_TAB}>
@@ -604,6 +628,35 @@ export function ExampleRunner({ example }: { example: ExampleDef }) {
                             ...prev,
                             [h.elementId]: v ?? "",
                           }))
+                        }
+                        options={editorOptions}
+                      />
+                    </div>
+                  </TabsContent>
+                ))}
+
+                {/*
+                 * Prompts as editable assets: each `{{name}}` template gets
+                 * its own tab, edited as plain text — not JS, and not the raw
+                 * FEEL/XML it's substituted into. A change here reaches the
+                 * agent on the next run, through the same draft-definition
+                 * pipeline as any other edit (see templates.ts / draft.ts).
+                 */}
+                {Object.keys(templateSources).map((name) => (
+                  <TabsContent key={name} value={TEMPLATE_TAB_PREFIX + name}>
+                    <div className="editor-meta">
+                      <strong>{name}</strong>
+                      <code>prompt / template text — substitutes {"{{" + name + "}}"}</code>
+                    </div>
+                    <div className="editor-wrap">
+                      <Editor
+                        height="360px"
+                        defaultLanguage="markdown"
+                        value={templateSources[name]}
+                        onChange={(v) =>
+                          setTemplateSources((prev) =>
+                            createTemplateMap(prev, { [name]: v ?? "" }),
+                          )
                         }
                         options={editorOptions}
                       />
