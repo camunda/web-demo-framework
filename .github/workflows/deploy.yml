@@ -10,7 +10,7 @@ name: Deploy
 # is approved by infra, this still deploys to the default
 # <org>.github.io/<repo> Pages URL, which is a real, working, automatic
 # public URL — the CNAME can be layered on later without touching this
-# workflow (see the `cname` step below).
+# workflow (see the commented-out CNAME example in the build job below).
 
 on:
   push:

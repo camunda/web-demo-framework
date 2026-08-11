@@ -12,7 +12,8 @@ import react from "@vitejs/plugin-react";
 // - ensure a leading slash for relative-looking values (e.g. `web-demo-framework/`
 //   -> `/web-demo-framework/`), since a base without a leading slash is treated
 //   as relative and can produce incorrect asset URLs on GitHub Pages. Absolute
-//   URLs (e.g. `https://...`) are left untouched.
+//   URLs (e.g. `https://...`) are left untouched except for the same trailing
+//   slash normalization applied to every base value.
 const rawBasePath = process.env.VITE_BASE_PATH?.trim() || "/";
 const isAbsoluteUrl = /^[a-z][a-z\d+\-.]*:\/\//i.test(rawBasePath);
 const withLeadingSlash =
