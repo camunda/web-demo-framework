@@ -1,10 +1,71 @@
 import { createRef } from "react";
 import { act, render, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BpmnModdle as BpmnModdleType } from "bpmn-moddle";
 import * as BpmnModdleModule from "bpmn-moddle";
 import zeebeModdleDescriptor from "zeebe-bpmn-moddle/resources/zeebe.json";
-import { ModelEditor } from "./ModelEditor";
+
+/**
+ * `bpmn-js-properties-panel`/`bpmn-js-element-templates`/
+ * `camunda-bpmn-js-behaviors` ship pre-built CJS bundles that `require()`
+ * their own transitive `bpmn-js`/`min-dash` copies at runtime by bare,
+ * extension-less, or (for a hoisted `min-dash` under
+ * `bpmn-js-properties-panel/node_modules`) pure-ESM-only specifiers. A real
+ * bundler (Vite's production build, webpack, rollup — see `npm run build`,
+ * which passes) resolves all of this at build time with no issue; Vitest's
+ * SSR module runner, once it hands a CJS entry file off to Node's own
+ * `require()`, can hit Node's *native* module resolver/loader for those
+ * nested requires, which — unlike a bundler — doesn't append missing
+ * extensions and can't `require()` an ESM-only package at all. That's a gap
+ * in the test *runner*, not in this component: these libraries are additive
+ * DI modules and a services lookup, not something this seam's own logic
+ * depends on being real in a jsdom test. Mock them with the minimal shape
+ * `ModelEditor` actually calls, and keep exercising the *real* `bpmn-js`
+ * `Modeler` end to end below.
+ */
+vi.mock("bpmn-js-properties-panel", () => ({
+  BpmnPropertiesPanelModule: {},
+  BpmnPropertiesProviderModule: {},
+  ZeebePropertiesProviderModule: {},
+}));
+
+vi.mock("camunda-bpmn-js-behaviors/lib/camunda-cloud", () => ({
+  default: {},
+}));
+
+vi.mock("bpmn-js-element-templates", () => {
+  class FakeElementTemplates {
+    static $inject: string[] = [];
+    private templates: Array<{ id: string; appliesTo?: string[] }> = [];
+    set(templates: Array<{ id: string; appliesTo?: string[] }>) {
+      this.templates = templates;
+    }
+    getAll(element: { type?: string } | null) {
+      return this.templates.filter(
+        (template) =>
+          !template.appliesTo ||
+          !element?.type ||
+          template.appliesTo.includes(element.type),
+      );
+    }
+    get(id: string) {
+      return this.templates.find((template) => template.id === id) ?? null;
+    }
+    applyTemplate() {
+      // No-op: the real package's application logic is exercised by
+      // `npm run build`'s production bundle, not this jsdom unit test.
+    }
+  }
+  return {
+    CloudElementTemplatesCoreModule: {
+      __init__: ["elementTemplates"],
+      elementTemplates: ["type", FakeElementTemplates],
+    },
+    CloudElementTemplatesPropertiesProviderModule: {},
+  };
+});
+
+const { ModelEditor } = await import("./ModelEditor");
 
 // The published `@types/bpmn-moddle` declares a named `BpmnModdle` export,
 // but the package itself ships a plain CJS default export at runtime (no
@@ -141,6 +202,26 @@ describe("ModelEditor component", () => {
     expect(
       container.querySelector('[data-element-id="Agent_1"]'),
     ).not.toBeNull();
+  });
+
+  it("renders a properties panel container alongside the canvas", async () => {
+    const onChange = () => {};
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={onChange} />,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-element-id]").length,
+      ).toBeGreaterThan(0),
+    );
+    expect(
+      container.querySelector(".model-editor-properties"),
+    ).not.toBeNull();
+    // Before anything is selected, the toolbar tells the reader what to do
+    // rather than showing an empty/confusing template picker.
+    expect(container.textContent).toContain(
+      "Select an element to see its properties and connector templates.",
+    );
   });
 
   it("reimports when `value` changes externally (e.g. Revert to original)", async () => {

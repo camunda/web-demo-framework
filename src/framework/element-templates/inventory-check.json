@@ -1,0 +1,80 @@
+{
+  "$schema": "https://unpkg.com/@camunda/zeebe-element-templates-json-schema@0.15.0/resources/schema.json",
+  "name": "Inventory Check (Demo Connector)",
+  "id": "io.camunda.connectors.demo.inventory-check:1",
+  "version": 1,
+  "description": "Looks up stock for an item at a warehouse endpoint before the order continues. A demo-only element template showing how a connector template configures a service task through the properties panel instead of hand-edited XML.",
+  "documentationRef": "https://docs.camunda.io/docs/components/connectors/",
+  "category": {
+    "id": "connectors",
+    "name": "Connectors"
+  },
+  "appliesTo": ["bpmn:Task"],
+  "elementType": {
+    "value": "bpmn:ServiceTask"
+  },
+  "groups": [
+    {
+      "id": "endpoint",
+      "label": "Warehouse endpoint"
+    },
+    {
+      "id": "lookup",
+      "label": "Lookup parameters"
+    }
+  ],
+  "properties": [
+    {
+      "type": "Hidden",
+      "value": "check-inventory",
+      "binding": {
+        "type": "zeebe:taskDefinition:type"
+      }
+    },
+    {
+      "label": "Warehouse URL",
+      "description": "Base URL of the warehouse inventory service.",
+      "group": "endpoint",
+      "type": "String",
+      "value": "https://warehouse.internal/api/inventory",
+      "feel": "optional",
+      "binding": {
+        "type": "zeebe:input",
+        "name": "warehouseUrl"
+      }
+    },
+    {
+      "label": "Request timeout (ms)",
+      "group": "endpoint",
+      "type": "String",
+      "value": "5000",
+      "feel": "optional",
+      "binding": {
+        "type": "zeebe:input",
+        "name": "timeoutMs"
+      }
+    },
+    {
+      "label": "SKU",
+      "description": "The item to check stock for. Usually bound to a process variable via FEEL, e.g. =order.sku.",
+      "group": "lookup",
+      "type": "String",
+      "feel": "optional",
+      "binding": {
+        "type": "zeebe:input",
+        "name": "sku"
+      }
+    },
+    {
+      "label": "Minimum stock threshold",
+      "group": "lookup",
+      "type": "String",
+      "value": "1",
+      "feel": "optional",
+      "binding": {
+        "type": "zeebe:input",
+        "name": "minStock"
+      }
+    }
+  ]
+}
