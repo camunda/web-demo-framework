@@ -1,3 +1,11 @@
+// This file is the runner's single top-level component, so almost every
+// feature slice touches it — across the epic that first built out the
+// example fan-out, eight separate sub-issues edited it in parallel (deep
+// links, template tabs, code-splitting, the modeler tab, turn correlation,
+// …). Keep edits additive (new state slices, new Suspense-wrapped branches,
+// wrapping rather than replacing existing JSX) so parallel PRs rebase
+// mechanically instead of textually conflicting. See AGENTS.md for other
+// repo-wide gotchas worth reading before a multi-slice change here.
 import {
   lazy,
   Suspense,
