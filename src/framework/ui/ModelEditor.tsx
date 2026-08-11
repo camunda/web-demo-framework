@@ -335,17 +335,25 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   useEffect(() => {
     const modeler = modelerRef.current;
     if (!modeler) return;
-    // One frame later: the class change has to land and lay out before the
-    // canvas can measure anything useful.
-    const frame = requestAnimationFrame(() => {
+    const refit = () => {
       const canvas = modeler.get<{
         resized: () => void;
         zoom: (mode: string) => void;
       }>("canvas");
       canvas.resized();
       canvas.zoom("fit-viewport");
-    });
-    return () => cancelAnimationFrame(frame);
+    };
+    // One frame later: the class change has to land and lay out before the
+    // canvas can measure anything useful.
+    const frame = requestAnimationFrame(refit);
+    // While expanded, the overlay's box can change again independently of
+    // the `expanded` toggle (window resize, device rotation) — keep the
+    // canvas in sync with it or the viewport goes stale.
+    if (expanded) window.addEventListener("resize", refit);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (expanded) window.removeEventListener("resize", refit);
+    };
   }, [expanded]);
 
   const selectedLabel =

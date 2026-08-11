@@ -361,7 +361,7 @@ body {
   color: var(--muted-foreground, #6b7280);
 }
 /* The template picker takes the slack so the expand button sits right. */
-.model-editor-toolbar > :first-child {
+.model-editor-template-picker {
   flex: 1 1 auto;
   min-width: 0;
 }
