@@ -38,11 +38,21 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # Published at https://<org>.github.io/<repo>/, a project Pages
-          # site, so asset URLs must be rooted under /<repo>/ or they 404.
-          # If/when the custom domain (decision 1) lands, this becomes the
-          # site root and VITE_BASE_PATH should change to "/".
-          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          # Where the built assets are rooted. This repo is **internal**, and an
+          # access-controlled Pages site is served from the ROOT of a generated
+          # host (https://<random>.pages.github.io/) — not from /<repo>/. The
+          # /<repo>/ project-path convention applies only to a *public* repo on
+          # <org>.github.io. Rooting assets under /<repo>/ made every asset 404,
+          # and Pages answered each one with its HTML 404 page, so the browser
+          # refused the stylesheets on MIME grounds:
+          #   Refused to apply style from '.../web-demo-framework/assets/index-*.css'
+          #   because its MIME type ('text/html') is not a supported stylesheet
+          #   MIME type
+          # A custom domain (decision 1) is also served at the root, so "/" stays
+          # correct there. Set the PAGES_BASE_PATH repo variable to override —
+          # e.g. "/web-demo-framework/" if this repo is ever made public and
+          # served as a project site.
+          VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH || '/' }}
       # If/when a custom domain is approved (decision 1 in the hosting
       # doc), drop a CNAME file into the published output here, e.g.:
       #   - run: echo "demos.camunda.io" > dist/CNAME
