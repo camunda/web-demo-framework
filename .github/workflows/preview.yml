@@ -28,10 +28,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -41,10 +37,17 @@ jobs:
     # Fork PRs get a read-only GITHUB_TOKEN and can't push to gh-pages, so
     # this job would fail noisily on every fork PR. Same-repo branches only;
     # see docs/hosting-and-deployment.md for the documented limitation.
+    #
+    # This job only reads the PR branch (default read-only permissions) and
+    # uploads the build output as an artifact — it never holds a token that
+    # can write to the repo, so untrusted `npm ci`/`npm run build` scripts
+    # from the PR branch can't use write credentials even if compromised.
+    # The separate `publish` job below is the only one with `contents: write`
+    # and it never executes PR-branch code.
     if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    outputs:
-      built: ${{ steps.build.outcome }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,13 +55,33 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - id: build
-        run: npm run build
+      - run: npm run build
         env:
           # Preview is published under pr-preview/pr-<number>/ on gh-pages,
           # so asset URLs must be rooted at that subpath or the preview
           # renders without JS/CSS.
           VITE_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-dist
+          path: dist/
+
+  publish:
+    # Runs with the write-scoped token, but never checks out or executes
+    # PR-branch code — it only downloads the already-built artifact from the
+    # `build` job and hands it to the publish action.
+    needs: build
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-dist
+          path: dist/
       - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           source-dir: dist/
