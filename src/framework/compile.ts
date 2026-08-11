@@ -78,9 +78,14 @@ export function buildWorkers(
   trace: Trace,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
-  const labels = new Map(model.tasks.map((t) => [t.elementId, t.label]));
+  // Cover every process, not just the primary one: call activities (or a
+  // runner starting a non-primary processId) can activate jobs from
+  // secondary processes, and draft.ts already requires their handlers to
+  // exist, so the worker map must be able to serve them too.
+  const allTasks = model.processes.flatMap((p) => p.tasks);
+  const labels = new Map(allTasks.map((t) => [t.elementId, t.label]));
 
-  for (const task of model.tasks) {
+  for (const task of allTasks) {
     if (workers[task.jobType]) continue; // one wrapper per job type
     workers[task.jobType] = async (job) => {
       const handler = byElement[job.elementId];

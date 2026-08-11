@@ -55,6 +55,24 @@ export interface AgentSpec {
   tools: ToolSpec[];
 }
 
+/**
+ * A diagnostic naming a specific unresolved reference, unsupported construct,
+ * or unknown job type — always pointing at the responsible element or
+ * resource, so a reader sees exactly what's missing and where instead of a
+ * console warning or a mid-run incident.
+ *
+ * `"error"` must gate Run; `"warning"` is a heads-up (a structural choice the
+ * framework made on the reader's behalf, e.g. which of several processes is
+ * primary) that doesn't block anything.
+ */
+export interface Diagnostic {
+  severity: "error" | "warning";
+  message: string;
+  elementId?: string;
+  formId?: string;
+  jobType?: string;
+}
+
 /** Any element that produces a job a handler must serve. */
 export interface TaskSpec {
   elementId: string;
@@ -72,16 +90,55 @@ export interface UserTaskSpec {
   formId?: string;
 }
 
-export interface ModelInfo {
+/** Everything read out of one `<bpmn:process>`. */
+export interface ProcessSpec {
   processId: string;
   processName: string;
-  /** Every job-bearing element, tools included. */
+  /** Every job-bearing element in this process, tools included. */
   tasks: TaskSpec[];
-  /** The agent host, or null for a plain (non-agentic) process. */
-  agent: AgentSpec | null;
+  /**
+   * Every AI Agent ad-hoc sub-process hosting an agent in this process.
+   * Ordinarily zero or one; a diagram with several gets one entry per host,
+   * each with its own tool set — see {@link ModelInfo.agents}.
+   */
+  agents: AgentSpec[];
   userTasks: UserTaskSpec[];
   /** The `formId` bound to the start event, if any. */
   startFormId?: string;
+}
+
+export interface ModelInfo {
+  /** Every `<bpmn:process>` found in the diagram, parsed independently. */
+  processes: ProcessSpec[];
+  /**
+   * Parse-time diagnostics: unresolved references, unsupported constructs, and
+   * unknown job types, each naming the responsible element/resource. Resolution
+   * against an example's handlers/forms happens one layer up, in `draft.ts`.
+   */
+  diagnostics: Diagnostic[];
+
+  // --- Convenience view onto the primary process, for existing callers that
+  // only ever dealt with one process and (at most) one agent host. Points at
+  // `processes[0]` (or the process selected via `parseModel`'s options).
+  processId: string;
+  processName: string;
+  /** Every job-bearing element of the primary process, tools included. */
+  tasks: TaskSpec[];
+  /** The primary process's first agent host, or null if it has none. */
+  agent: AgentSpec | null;
+  /** Every agent host across every process — what a multi-host run needs. */
+  agents: AgentSpec[];
+  userTasks: UserTaskSpec[];
+  /** The `formId` bound to the primary process's start event, if any. */
+  startFormId?: string;
+}
+
+export interface ParseModelOptions {
+  /**
+   * Which `<bpmn:process>` is primary when the diagram has more than one.
+   * Defaults to the first process encountered.
+   */
+  processId?: string;
 }
 
 const BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
@@ -205,40 +262,79 @@ function inputsOf(el: Element): Record<string, string> {
   return out;
 }
 
-export function parseModel(xml: string): ModelInfo {
-  const doc = new DOMParser().parseFromString(xml, "application/xml");
-  const parseError = doc.getElementsByTagName("parsererror")[0];
-  if (parseError) throw new Error(`Invalid BPMN XML: ${parseError.textContent}`);
+/**
+ * Every AI Agent ad-hoc sub-process anywhere within `process`'s subtree
+ * (`getElementsByTagNameNS` returns all descendants, not just direct
+ * children — so this also matches one nested inside another sub-process).
+ * Never crosses into another `<bpmn:process>` — callers pass one at a time.
+ */
+function agentHostsOf(process: Element): Element[] {
+  return Array.from(process.getElementsByTagNameNS(BPMN_NS, "adHocSubProcess")).filter(
+    (el) => (jobTypeOf(el) ?? "").startsWith(AGENT_JOB_TYPE_PREFIX),
+  );
+}
 
-  const process = doc.getElementsByTagNameNS(BPMN_NS, "process")[0];
-  if (!process) throw new Error("No <bpmn:process> in the diagram.");
+function agentSpecOf(adHoc: Element, tools: ToolSpec[]): AgentSpec {
+  const inputs = inputsOf(adHoc);
+  const maxCalls = Number(
+    (inputs["data.limits.maxModelCalls"] ?? "").replace(/^=/, ""),
+  );
+  return {
+    elementId: adHoc.getAttribute("id") ?? "agent",
+    label: adHoc.getAttribute("name") ?? "Agent",
+    jobType: jobTypeOf(adHoc)!,
+    systemPrompt: feelLiteralText(inputs["data.systemPrompt.prompt"]),
+    userPrompt: feelLiteralText(inputs["data.userPrompt.prompt"]),
+    maxModelCalls: Number.isFinite(maxCalls) && maxCalls > 0 ? maxCalls : 10,
+    tools,
+  };
+}
 
-  const adHoc = doc.getElementsByTagNameNS(BPMN_NS, "adHocSubProcess")[0] ?? null;
-  const isAgentHost =
-    adHoc != null && (jobTypeOf(adHoc) ?? "").startsWith(AGENT_JOB_TYPE_PREFIX);
+/** Parse one `<bpmn:process>` in isolation — everything scoped to its subtree. */
+function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec {
+  const processId = process.getAttribute("id") ?? "";
+  const processLabel = process.getAttribute("name") ?? processId;
+  const agentHosts = agentHostsOf(process);
+  if (agentHosts.length > 1) {
+    diagnostics.push({
+      severity: "warning",
+      elementId: agentHosts.map((h) => h.getAttribute("id")).join(", "),
+      message:
+        `Process "${processLabel}" hosts ${agentHosts.length} AI Agent sub-processes ` +
+        `(${agentHosts.map((h) => h.getAttribute("id")).join(", ")}). Each gets its ` +
+        `own independent agent state (turn counter, called tools) — the run itself is ` +
+        `shared across hosts, but each host's agent state within it is not.`,
+    });
+  }
 
   const tasks: TaskSpec[] = [];
-  const tools: ToolSpec[] = [];
+  const toolsByHost = new Map<Element, ToolSpec[]>(agentHosts.map((h) => [h, []]));
 
-  // Every activity in the process, tools included. The agent container itself is
-  // handled separately — it takes an AgentHandler, not a JobHandler.
+  // Every activity in the process, tools included. Agent host containers
+  // themselves are handled separately — they take an AgentHandler, not a
+  // JobHandler.
   for (const el of Array.from(process.getElementsByTagName("*"))) {
     if (el.namespaceURI !== BPMN_NS) continue;
-    if (el === adHoc) continue;
+    if (agentHosts.includes(el)) continue;
     const jobType = jobTypeOf(el);
     const id = el.getAttribute("id");
     if (!jobType || !id) continue;
-    const isTool = isAgentHost && adHoc!.contains(el);
+    // A tool nested inside two AI Agent hosts (one inside another) matches
+    // `.contains()` for both; attribute it to the innermost one — the
+    // candidate every other containing candidate also contains — not
+    // whichever comes first in document order.
+    const containing = agentHosts.filter((h) => h.contains(el));
+    const host = containing.find((h) => containing.every((other) => other === h || other.contains(h)));
     const spec: TaskSpec = {
       elementId: id,
       label: el.getAttribute("name") ?? id,
       jobType,
       documentation: documentationOf(el),
-      isTool,
+      isTool: host != null,
     };
     tasks.push(spec);
-    if (isTool) {
-      tools.push({
+    if (host) {
+      toolsByHost.get(host)!.push({
         elementId: id,
         label: spec.label,
         jobType,
@@ -248,22 +344,7 @@ export function parseModel(xml: string): ModelInfo {
     }
   }
 
-  let agent: AgentSpec | null = null;
-  if (isAgentHost && adHoc) {
-    const inputs = inputsOf(adHoc);
-    const maxCalls = Number(
-      (inputs["data.limits.maxModelCalls"] ?? "").replace(/^=/, ""),
-    );
-    agent = {
-      elementId: adHoc.getAttribute("id") ?? "agent",
-      label: adHoc.getAttribute("name") ?? "Agent",
-      jobType: jobTypeOf(adHoc)!,
-      systemPrompt: feelLiteralText(inputs["data.systemPrompt.prompt"]),
-      userPrompt: feelLiteralText(inputs["data.userPrompt.prompt"]),
-      maxModelCalls: Number.isFinite(maxCalls) && maxCalls > 0 ? maxCalls : 10,
-      tools,
-    };
-  }
+  const agents = agentHosts.map((host) => agentSpecOf(host, toolsByHost.get(host)!));
 
   const userTasks: UserTaskSpec[] = Array.from(
     process.getElementsByTagNameNS(BPMN_NS, "userTask"),
@@ -273,18 +354,56 @@ export function parseModel(xml: string): ModelInfo {
     formId: zeebeEls(el, "formDefinition")[0]?.getAttribute("formId") ?? undefined,
   }));
 
-  const startEvent = doc.getElementsByTagNameNS(BPMN_NS, "startEvent")[0];
+  const startEvent = process.getElementsByTagNameNS(BPMN_NS, "startEvent")[0];
   const startFormId = startEvent
     ? (zeebeEls(startEvent, "formDefinition")[0]?.getAttribute("formId") ??
       undefined)
     : undefined;
 
+  return { processId, processName: processLabel, tasks, agents, userTasks, startFormId };
+}
+
+export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  const parseError = doc.getElementsByTagName("parsererror")[0];
+  if (parseError) throw new Error(`Invalid BPMN XML: ${parseError.textContent}`);
+
+  const processEls = Array.from(doc.getElementsByTagNameNS(BPMN_NS, "process"));
+  if (processEls.length === 0) throw new Error("No <bpmn:process> in the diagram.");
+
+  const diagnostics: Diagnostic[] = [];
+  const processes = processEls.map((el) => parseProcess(el, diagnostics));
+
+  let primary = opts.processId
+    ? processes.find((p) => p.processId === opts.processId)
+    : undefined;
+  if (opts.processId && !primary) {
+    diagnostics.push({
+      severity: "warning",
+      message: `Requested process "${opts.processId}" not found — falling back to "${processes[0].processId}".`,
+    });
+  }
+  primary ??= processes[0];
+
+  if (processes.length > 1) {
+    diagnostics.push({
+      severity: "warning",
+      message:
+        `Diagram has ${processes.length} <bpmn:process> elements ` +
+        `(${processes.map((p) => p.processId).join(", ")}); using "${primary.processId}" ` +
+        `as the active process. Pass a processId to parseModel to target another.`,
+    });
+  }
+
   return {
-    processId: process.getAttribute("id") ?? "",
-    processName: process.getAttribute("name") ?? process.getAttribute("id") ?? "",
-    tasks,
-    agent,
-    userTasks,
-    startFormId,
+    processes,
+    diagnostics,
+    processId: primary.processId,
+    processName: primary.processName,
+    tasks: primary.tasks,
+    agent: primary.agents[0] ?? null,
+    agents: processes.flatMap((p) => p.agents),
+    userTasks: primary.userTasks,
+    startFormId: primary.startFormId,
   };
 }
