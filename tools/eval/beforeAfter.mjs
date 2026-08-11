@@ -73,6 +73,9 @@ export function demonstrateArgumentPolicyFix() {
 
   return {
     before: { collision: beforeCollision, typeMismatch: beforeTypeMismatch },
-    after: { collision: afterCollision.variablesOut, typeMismatch: afterTypeMismatch.variablesOut },
+    after: {
+      collision: { ...afterCollision.variablesOut, diagnostics: afterCollision.diagnostics },
+      typeMismatch: { ...afterTypeMismatch.variablesOut, diagnostics: afterTypeMismatch.diagnostics },
+    },
   };
 }

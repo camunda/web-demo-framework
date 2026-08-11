@@ -12,7 +12,16 @@
 // This hook doesn't execute or transform any code — it only appends `.ts` to
 // a specifier that doesn't already resolve, then defers to Node's normal
 // resolution/loading for everything else.
-import { registerHooks } from "node:module";
+import * as nodeModule from "node:module";
+
+if (typeof nodeModule.registerHooks !== "function") {
+  throw new Error(
+    "tools/eval requires Node's `module.registerHooks` (unflagged since Node 20.6/22.15/23.5) to resolve " +
+      "extensionless TypeScript imports. Please run `npm run eval` with a supported Node version.",
+  );
+}
+
+const { registerHooks } = nodeModule;
 
 registerHooks({
   resolve(specifier, context, nextResolve) {

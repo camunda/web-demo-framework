@@ -21,6 +21,13 @@ export const complianceToolStubs = {
   ComputeComplianceScore: (_vars, args) => {
     const a = Number(args.intA);
     const b = Number(args.intB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) {
+      // A required arg is missing or was rejected upstream by the argument
+      // policy — refuse to produce a score rather than silently returning
+      // NaN, which would let scenarios pass while masking the bug they're
+      // meant to catch.
+      return { toolCallResult: "missing or invalid argument(s)" };
+    }
     const score = a + b;
     return { complianceScore: score, toolCallResult: `score ${score}` };
   },

@@ -91,8 +91,9 @@ export const scenarios = [
       const reasons = [];
       if (result.activatedOrder.includes("id: VerifyGeneticMarker"))
         reasons.push("decorated name was activated verbatim instead of rejected");
-      if (result.activatedOrder.filter((id) => id === "VerifyGeneticMarker").length !== 1)
-        reasons.push(`expected VerifyGeneticMarker to run exactly once, ran ${result.activatedOrder.length} times`);
+      const verifyCount = result.activatedOrder.filter((id) => id === "VerifyGeneticMarker").length;
+      if (verifyCount !== 1)
+        reasons.push(`expected VerifyGeneticMarker to run exactly once, ran ${verifyCount} times`);
       if (!includesTrace(result.trace, "doesn't exist"))
         reasons.push("expected a trace entry naming the unrecognised tool");
       return reasons;
@@ -232,6 +233,10 @@ export const scenarios = [
         reasons.push('expected "intA" to be rejected rather than merged as a string');
       if (!includesTrace(result.trace, "declared as number"))
         reasons.push("expected a trace entry naming the type mismatch");
+      if (Number.isNaN(result.variables.complianceScore) || "complianceScore" in result.variables)
+        reasons.push(
+          `expected the rejected "intA" to prevent complianceScore from being computed, got ${JSON.stringify(result.variables.complianceScore)}`,
+        );
       return reasons;
     },
   },

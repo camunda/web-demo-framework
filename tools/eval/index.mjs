@@ -49,7 +49,11 @@ async function main() {
   );
   console.log(
     `  after:  collision resolved to first activation (code=${JSON.stringify(after.collision.code)}, ` +
-      `1 diagnostic); type mismatch rejected (${"intA" in after.typeMismatch ? "still present — BUG" : "intA absent, 1 diagnostic"})`,
+      `${after.collision.diagnostics.length} diagnostic(s)); type mismatch rejected (${
+        "intA" in after.typeMismatch
+          ? "still present — BUG"
+          : `intA absent, ${after.typeMismatch.diagnostics.length} diagnostic(s)`
+      })`,
   );
 
   if (passed !== outcomes.length) process.exitCode = 1;
