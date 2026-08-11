@@ -73,8 +73,12 @@ function buildRows(log: TraceLogLine[]): Row[] {
 }
 
 function safeStringify(value: unknown): string {
+  // Preserve `undefined`/`null` explicitly rather than folding `undefined`
+  // into `{}` — a handler/tool that actually returned `undefined` should
+  // show that, not an empty object it never produced.
+  if (value === undefined) return "undefined";
   try {
-    return JSON.stringify(value ?? {});
+    return JSON.stringify(value);
   } catch {
     return "[unserializable value]";
   }
@@ -133,6 +137,19 @@ function TurnCard({
     (e) => e.kind === "agent" && !e.elementId,
   );
   const errors = group.entries.filter((e) => e.kind === "error");
+  // Entries a handler's own `trace()` call emits (kind "tool", including
+  // compile.ts's "▶ label" started line) and any "vars" result that never
+  // paired with an activation above (e.g. a non-agentic handler run inside
+  // an otherwise agentic turn) would otherwise vanish once stamped with a
+  // turn — render them as plain lines within the card, in original order.
+  const activatedElementIds = new Set(activations.map((a) => a.elementId));
+  const loose = group.entries
+    .filter(
+      (e) =>
+        e.kind === "tool" ||
+        (e.kind === "vars" && e.elementId && !activatedElementIds.has(e.elementId)),
+    )
+    .sort((a, b) => a.id - b.id);
 
   return (
     <div className="timeline-turn">
@@ -160,6 +177,13 @@ function TurnCard({
           result={results.find((r) => r.elementId === a.elementId)}
           labelFor={labelFor}
         />
+      ))}
+
+      {loose.map((e) => (
+        <div key={e.id} className={`log-line log-${e.kind}`}>
+          {e.pending ? "⏳ " : ""}
+          {e.text}
+        </div>
       ))}
 
       {errors.map((e) => (

@@ -43,10 +43,19 @@ export function compileAgent(source: string): AgentHandler {
   return (job) => runAgentSandboxed(source, job);
 }
 
-function helpersFor(job: ActivatedJob, trace: Trace): HandlerHelpers {
+function helpersFor(job: ActivatedJob, trace: Trace, turn?: number): HandlerHelpers {
   return {
     sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
-    trace: (text: string) => trace({ kind: "tool", text: `   ${text}` }),
+    // Default `turn`/`elementId` so a handler's own `trace()` calls land in
+    // the same turn/element grouping as the "started"/"result" entries
+    // below, instead of appearing as ungrouped lines that split the turn.
+    trace: (text: string) =>
+      trace({
+        kind: "tool",
+        text: `   ${text}`,
+        elementId: job.elementId,
+        turn,
+      }),
     text: (key, fallback = "") => {
       const v = job.variables[key];
       return typeof v === "string" ? v : v == null ? fallback : String(v);
@@ -60,8 +69,12 @@ function helpersFor(job: ActivatedJob, trace: Trace): HandlerHelpers {
 }
 
 function safeStringify(value: unknown): string {
+  // Preserve `undefined`/`null` explicitly rather than folding `undefined`
+  // into `{}` — a handler that actually returned `undefined` should show
+  // that, not an empty object it never produced.
+  if (value === undefined) return "undefined";
   try {
-    return JSON.stringify(value ?? {});
+    return JSON.stringify(value);
   } catch {
     return "[unserializable value]";
   }
@@ -104,7 +117,7 @@ export function buildWorkers(
       const label = labels.get(job.elementId) ?? job.elementId;
       const turn = turnRef?.current;
       trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
-      const out = await handler(job, helpersFor(job, trace));
+      const out = await handler(job, helpersFor(job, trace, turn));
       trace({
         kind: "vars",
         text: `  ↳ ${safeStringify(out)}`,
