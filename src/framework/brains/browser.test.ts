@@ -7,6 +7,10 @@ import {
   webgpuAvailable,
   webgpuUnavailableReason,
 } from "./browser";
+// `?raw` (a Vite-native import suffix) pulls the file in as a string without
+// needing Node's `fs`/`url` typings, which this browser-focused tsconfig
+// doesn't include.
+import browserSource from "./browser.ts?raw";
 
 describe("webgpuUnavailableReason", () => {
   afterEach(() => {
@@ -107,5 +111,32 @@ describe("estimateAvailableVramMB", () => {
       configurable: true,
     });
     expect(estimateAvailableVramMB()).toBe(8 * 1024);
+  });
+});
+
+/**
+ * Regression guard for issue #9's bundle-size work: WebLLM is a ~6 MB
+ * (~2.1 MB gzip) dependency that must only ever be reached via a dynamic
+ * `import()` inside `BrowserBrain.connect()`, so it stays out of the
+ * initial JS entirely (see `vite.config.ts`'s `vendor-webllm` chunk and
+ * `tools/bundle-budget/check.mjs`). A future edit that hoists
+ * `import { CreateMLCEngine } from "@mlc-ai/web-llm"` to the top of this
+ * file (a static import) would compile fine and pass every functional test,
+ * but would silently drag the whole WebLLM bundle back onto the page's
+ * first paint. Assert against the source text directly, since that's the
+ * one thing that actually determines static vs. dynamic at build time.
+ */
+describe("BrowserBrain WebLLM import stays lazy", () => {
+  it("has no static top-level import of @mlc-ai/web-llm", () => {
+    // Matches both `import { X } from "@mlc-ai/web-llm"` and side-effect-only
+    // imports like `import "@mlc-ai/web-llm";` (the `from` clause is optional).
+    const staticImport =
+      /^\s*import\s+(?!type\s)(?:.*from\s+)?["']@mlc-ai\/web-llm["']/m;
+    expect(browserSource).not.toMatch(staticImport);
+
+    // A dynamic import is lazy whether it's awaited or consumed via
+    // `.then()`, so don't require `await` here.
+    const dynamicImport = /import\(\s*["']@mlc-ai\/web-llm["']\s*\)/;
+    expect(browserSource).toMatch(dynamicImport);
   });
 });

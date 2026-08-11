@@ -78,7 +78,9 @@ function spaFallback404(): Plugin {
 const rawBasePath = process.env.VITE_BASE_PATH?.trim() || "/";
 const isAbsoluteUrl = /^[a-z][a-z\d+\-.]*:\/\//i.test(rawBasePath);
 const withLeadingSlash =
-  isAbsoluteUrl || rawBasePath.startsWith("/") ? rawBasePath : `/${rawBasePath}`;
+  isAbsoluteUrl || rawBasePath.startsWith("/")
+    ? rawBasePath
+    : `/${rawBasePath}`;
 const basePath = withLeadingSlash.endsWith("/")
   ? withLeadingSlash
   : `${withLeadingSlash}/`;
@@ -114,5 +116,90 @@ export default defineConfig({
       "@nanobpm/bojtos-kit",
       "@nanobpm/bojtos-react",
     ],
+  },
+  build: {
+    // Emit a manifest so `tools/bundle-budget/check.mjs` can walk the real
+    // module graph (which chunks are on the initial-load path vs. reachable
+    // only via a dynamic import) instead of guessing from file names.
+    manifest: true,
+    rollupOptions: {
+      output: {
+        // A deliberate vendor split, not an incidental one — but a narrow
+        // one. `manualChunks` groups React and the design system together
+        // because both are *always* on the eager, initial-load path (every
+        // example mounts them on first render), so naming them here can't
+        // change what loads when.
+        //
+        // Monaco, bpmn-js, and WebLLM are deliberately NOT grouped via
+        // `manualChunks` here, even though they're exactly the chunks this
+        // task cares about measuring — grouping a dependency into a named
+        // chunk only by module-id pattern (e.g. "anything under
+        // monaco-editor/") is unsafe once some *other* code also happens to
+        // share a module with it (a runtime helper, a small transitive
+        // dependency, Vite's own `__vitePreload`). Rollup then has to
+        // synthesize a real static import edge from the entry into that
+        // named chunk just to reach the shared bytes, silently dragging the
+        // whole multi-MB chunk back onto the initial-load path — verified by
+        // inspecting `dist/.vite/manifest.json` and the generated
+        // `index.html` while building this out. Rollup's own automatic
+        // chunking already isolates anything reached *only* via a dynamic
+        // `import()` (see `ExampleRunner.tsx`'s `lazy()` calls and
+        // `src/framework/brains/browser.ts`'s WebLLM import) correctly and
+        // safely; `chunkFileNames` below just gives those automatic chunks
+        // readable, stable names instead of relying on `manualChunks` to
+        // reassign them.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          // Rollup module ids can use platform-specific separators; on
+          // Windows builds these are typically `\` rather than `/`, which
+          // would silently defeat the `includes("/…/")` checks below.
+          const normalizedId = id.replace(/\\/g, "/");
+          if (
+            normalizedId.includes("/react/") ||
+            normalizedId.includes("/react-dom/") ||
+            normalizedId.includes("/scheduler/")
+          ) {
+            return "vendor-react";
+          }
+          if (normalizedId.includes("/@camunda/design-system/")) {
+            return "vendor-design-system";
+          }
+          return undefined;
+        },
+        // Rollup already isolates Monaco/bpmn-js/WebLLM into their own
+        // chunks purely because they're reached only via dynamic `import()`
+        // (see the comment above `manualChunks`) — this just renames those
+        // already-correctly-split chunks so `npm run build` output and
+        // `tools/bundle-budget/check.mjs` can identify them by name instead
+        // of an opaque content hash.
+        chunkFileNames(chunkInfo) {
+          // Normalize to POSIX-style separators: `facadeModuleId` can use
+          // `\` on Windows builds, which would otherwise prevent these
+          // `includes("/…/")` checks from matching and leave chunks with
+          // their generic `[name]-[hash].js` fallback name.
+          const facadeId = (chunkInfo.facadeModuleId ?? "").replace(
+            /\\/g,
+            "/",
+          );
+          if (
+            facadeId.includes("/framework/ui/MonacoEditor.tsx") ||
+            facadeId.includes("/monaco-editor/") ||
+            facadeId.includes("/@monaco-editor/")
+          ) {
+            return "assets/vendor-monaco-[hash].js";
+          }
+          if (facadeId.includes("/@mlc-ai/web-llm/")) {
+            return "assets/vendor-webllm-[hash].js";
+          }
+          if (
+            facadeId.includes("/@nanobpm/bojtos-react/") ||
+            facadeId.includes("/bpmn-js/")
+          ) {
+            return "assets/vendor-bpmn-[hash].js";
+          }
+          return "assets/[name]-[hash].js";
+        },
+      },
+    },
   },
 });
