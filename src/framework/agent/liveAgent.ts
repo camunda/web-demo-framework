@@ -144,18 +144,20 @@ async function streamChat(
   key: string,
   messages: ChatMessage[],
   maxNewTokens: number,
+  turn: number,
 ): Promise<string> {
   let acc = "";
-  trace({ kind: "llm", text: "LLM thinking…", key, pending: true });
+  trace({ kind: "llm", text: "LLM thinking…", key, pending: true, turn });
   const raw = await chat(messages, maxNewTokens, (delta) => {
     acc += delta;
-    trace({ kind: "llm", text: `${shorten(acc)} ▍`, key, pending: true });
+    trace({ kind: "llm", text: `${shorten(acc)} ▍`, key, pending: true, turn });
   });
   trace({
     kind: "llm",
     text: shorten(raw || acc) || "(empty reply)",
     key,
     pending: false,
+    turn,
   });
   return raw;
 }
@@ -227,6 +229,7 @@ export function coerceToolArg(
 function resolveArguments(
   resolved: { tool: ToolSpec; args: Record<string, unknown> }[],
   trace: Trace,
+  turn: number,
 ): {
   variablesOut: Record<string, unknown>;
   forHistory: Map<string, Record<string, unknown>>;
@@ -244,6 +247,8 @@ function resolveArguments(
         trace({
           kind: "error",
           text: `🤖 ${tool.elementId}: model supplied no value for "${arg.name}"`,
+          turn,
+          elementId: tool.elementId,
         });
         continue;
       }
@@ -255,6 +260,8 @@ function resolveArguments(
           text:
             `🤖 argument name collision on "${arg.name}": both ${owner} and ${tool.elementId} ` +
             `declare it — ${owner} already claimed it this turn, ${tool.elementId}'s value is dropped`,
+          turn,
+          elementId: tool.elementId,
         });
         continue;
       }
@@ -266,6 +273,8 @@ function resolveArguments(
           text:
             `🤖 ${tool.elementId}: "${arg.name}" is declared as ${arg.type} but the model supplied ` +
             `${JSON.stringify(raw)} — rejected, not passed through`,
+          turn,
+          elementId: tool.elementId,
         });
         continue;
       }
@@ -277,7 +286,29 @@ function resolveArguments(
     forHistory.set(tool.elementId, historyArgs);
   }
 
+
   return { variablesOut, forHistory };
+}
+
+/**
+ * A shared counter, written by the currently-running agent turn and read by
+ * `compile.ts`'s job wrapper, so a tool's "started"/"result" trace entries
+ * land in the same turn group as the "agent" entry that activated it — see
+ * `TraceEntry.turn` and `TraceTimeline.tsx`. Plain mutable object rather than
+ * a return value: the agent and the job-dispatch loop run on two different
+ * call paths (`stepWorkers`) that don't otherwise share state.
+ *
+ * A shared `TurnRef` across multiple agent hosts means their turn numbers
+ * interleave rather than each host counting independently — an acceptable
+ * simplification for what's a display grouping, not a run guarantee.
+ */
+export interface TurnRef {
+  /**
+   * `undefined` until a live agent turn actually runs — so a scripted-brain
+   * or non-agentic run's tool entries stay ungrouped (their `turn` field is
+   * left off entirely) instead of all landing under a spurious "Turn 0".
+   */
+  current: number | undefined;
 }
 
 export interface LiveAgentOptions {
@@ -298,6 +329,8 @@ export interface LiveAgentOptions {
    * a silent default flip.
    */
   allowMultiToolTurns?: boolean;
+  /** See {@link TurnRef}. Optional — omitting it just leaves trace entries ungrouped. */
+  turnRef?: TurnRef;
 }
 
 export function makeLiveAgent(
@@ -306,7 +339,12 @@ export function makeLiveAgent(
   trace: Trace,
   opts: LiveAgentOptions = {},
 ): AgentHandler {
-  const { maxNewTokens = 384, allowRepeats = false, allowMultiToolTurns = false } = opts;
+  const {
+    maxNewTokens = 384,
+    allowRepeats = false,
+    allowMultiToolTurns = false,
+    turnRef,
+  } = opts;
 
   // Per-run state. The engine re-emits the agent job after each activated tool
   // drains, so this closure is the agent's memory across turns.
@@ -316,11 +354,13 @@ export function makeLiveAgent(
 
   return async (job): Promise<AgentResult> => {
     turn += 1;
+    if (turnRef) turnRef.current = turn;
 
     if (turn > spec.maxModelCalls) {
       trace({
         kind: "error",
         text: `Turn budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.`,
+        turn,
       });
       return { completionConditionFulfilled: true };
     }
@@ -349,18 +389,20 @@ export function makeLiveAgent(
         `llm-turn-${turn}`,
         messages,
         maxNewTokens,
+        turn,
       );
     } catch (e) {
       trace({
         kind: "error",
         text: `LLM call failed: ${e instanceof Error ? e.message : String(e)} — completing the agent.`,
+        turn,
       });
       return { completionConditionFulfilled: true };
     }
 
     const json = extractJson(raw);
     if (saysDone(json) && collectToolCalls(json).length === 0) {
-      trace({ kind: "agent", text: "🤖 model says it is done" });
+      trace({ kind: "agent", text: "🤖 model says it is done", turn });
       return { completionConditionFulfilled: true };
     }
 
@@ -374,6 +416,7 @@ export function makeLiveAgent(
       trace({
         kind: "error",
         text: "🤖 model named no tool (and didn't say it was done) — trying again next turn",
+        turn,
       });
       return {};
     }
@@ -399,11 +442,13 @@ export function makeLiveAgent(
       trace({
         kind: "error",
         text: `🤖 model named a tool that doesn't exist: ${unknown.join(", ")} — nothing activated`,
+        turn,
       });
     if (repeats.length)
       trace({
         kind: "error",
         text: `🤖 model asked to re-run ${repeats.join(", ")} — skipped (already run)`,
+        turn,
       });
 
     if (resolved.length === 0) {
@@ -413,7 +458,11 @@ export function makeLiveAgent(
       // hallucinated name terminates a run that might otherwise finish
       // correctly, so give the model another turn instead (still bounded by
       // `spec.maxModelCalls`).
-      trace({ kind: "agent", text: "🤖 nothing activated this turn — trying again next turn" });
+      trace({
+        kind: "agent",
+        text: "🤖 nothing activated this turn — trying again next turn",
+        turn,
+      });
       return {};
     }
 
@@ -422,16 +471,24 @@ export function makeLiveAgent(
     // tool's job, but instance variables are. That single shared instance-root
     // namespace is the reason the merge below has to actively guard against
     // collisions rather than just write — see `resolveArguments`' doc comment.
-    const { variablesOut, forHistory } = resolveArguments(resolved, trace);
+    const { variablesOut, forHistory } = resolveArguments(resolved, trace, turn);
     for (const { tool } of resolved) {
       called.add(tool.elementId);
       history.push(`- ${tool.elementId}(${JSON.stringify(forHistory.get(tool.elementId))})`);
     }
 
-    trace({
-      kind: "agent",
-      text: `🤖 calling ${resolved.map((r) => r.tool.elementId).join(", ")}`,
-    });
+    // One trace entry per activated tool — not a single combined line — so
+    // the trace timeline can show exactly which tool was chosen with which
+    // arguments, rather than a joined name list.
+    for (const { tool } of resolved) {
+      trace({
+        kind: "agent",
+        text: `🤖 calling ${tool.elementId}`,
+        turn,
+        elementId: tool.elementId,
+        args: forHistory.get(tool.elementId) ?? {},
+      });
+    }
 
     return {
       activateElements: resolved.map((r) => ({ elementId: r.tool.elementId })),

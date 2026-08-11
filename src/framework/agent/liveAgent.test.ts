@@ -105,3 +105,49 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
     expect(second.activateElements?.[0]?.elementId).toBe("ToolA");
   });
 });
+
+describe("makeLiveAgent — trace timeline correlation (turn/elementId/args)", () => {
+  it("stamps every entry in a turn with the same turn number, and the activated tool with its elementId + resolved args", async () => {
+    const trace: import("../types").TraceEntry[] = [];
+    const chat = fakeChat([
+      '{"tool": "ToolA", "arguments": {"code": "A1"}, "done": false}',
+    ]);
+    const turnRef = { current: undefined as number | undefined };
+    const agent = makeLiveAgent(makeSpec(), chat, (e) => trace.push(e), {
+      turnRef,
+    });
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    // The LLM reply and the tool activation both belong to turn 1.
+    const llmEntries = trace.filter((e) => e.kind === "llm");
+    const agentEntries = trace.filter((e) => e.kind === "agent" && e.elementId);
+    expect(llmEntries.every((e) => e.turn === 1)).toBe(true);
+    expect(agentEntries).toHaveLength(1);
+    expect(agentEntries[0]).toMatchObject({
+      elementId: "ToolA",
+      args: { code: "A1" },
+      turn: 1,
+    });
+
+    // The shared TurnRef lets a tool's own trace entries (built in
+    // compile.ts) adopt the same turn number.
+    expect(turnRef.current).toBe(1);
+  });
+
+  it("still stamps its own entries with turn even when no TurnRef is supplied (compile.ts's tool entries just won't correlate)", async () => {
+    const trace: import("../types").TraceEntry[] = [];
+    const chat = fakeChat([
+      '{"tool": "ToolA", "arguments": {"code": "A1"}, "done": false}',
+    ]);
+    const agent = makeLiveAgent(makeSpec(), chat, (e) => trace.push(e));
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    // The agent's own entries always carry a turn number (that's what lets
+    // its llm/agent/error entries form one group on their own) — a TurnRef
+    // is only needed to correlate a *separately traced* tool run (compile.ts)
+    // with the turn that activated it.
+    expect(trace.every((e) => e.turn === 1)).toBe(true);
+  });
+});

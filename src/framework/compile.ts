@@ -1,6 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
+import type { TurnRef } from "./agent/liveAgent";
 import { runAgentSandboxed, runHandlerSandboxed } from "./sandbox";
 
 /**
@@ -71,11 +72,18 @@ function safeStringify(value: unknown): string {
  * model's task list and the compiled per-element handlers. An element with no
  * handler throws when activated, which surfaces as an incident on the diagram
  * rather than a silent stall.
+ *
+ * `turnRef`, when supplied, stamps each "started"/"result" trace entry with
+ * the agent turn in progress when the job ran (see `liveAgent.ts`'s
+ * `TurnRef`), so a tool activated by an agent groups with its own result in
+ * the trace timeline. Omit it for a non-agentic example — the entries just
+ * render ungrouped, exactly as before.
  */
 export function buildWorkers(
   model: ModelInfo,
   byElement: Record<string, ExampleHandler>,
   trace: Trace,
+  turnRef?: TurnRef,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
   // Cover every process, not just the primary one: call activities (or a
@@ -94,9 +102,16 @@ export function buildWorkers(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
       const label = labels.get(job.elementId) ?? job.elementId;
-      trace({ kind: "tool", text: `▶ ${label}` });
+      const turn = turnRef?.current;
+      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
       const out = await handler(job, helpersFor(job, trace));
-      trace({ kind: "vars", text: `  ↳ ${safeStringify(out)}` });
+      trace({
+        kind: "vars",
+        text: `  ↳ ${safeStringify(out)}`,
+        elementId: job.elementId,
+        result: out,
+        turn,
+      });
       return out as Record<string, unknown> | undefined;
     };
   }
