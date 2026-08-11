@@ -121,6 +121,15 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   // (often only) option again fires no `onChange`, making it impossible to
   // re-apply a template after an undo/redo or a no-op first apply.
   const [applyNonce, setApplyNonce] = useState(0);
+  // Expand the editor to fill the viewport. 360px of canvas beside a 320px
+  // properties panel is workable for a nudge and cramped for real modelling.
+  //
+  // This is a CSS overlay rather than the Fullscreen API deliberately: the
+  // runner is embeddable (`?embed=1`), and `requestFullscreen()` inside an
+  // iframe is refused unless the *host* page sets `allow="fullscreen"` —
+  // which is not ours to guarantee. A fixed-position overlay fills whatever
+  // box the app is given, embed or not, and leaves Escape handling to us.
+  const [expanded, setExpanded] = useState(false);
   // The last XML this component itself produced via `saveXML()`. `onChange`
   // round-trips through the host's state and comes straight back as the next
   // `value` prop — without this guard, that round-trip would trigger a
@@ -308,11 +317,48 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     setApplyNonce((n) => n + 1);
   };
 
+  // Escape leaves the expanded view. Bound only while expanded, so it can't
+  // swallow Escape from anything else on the page (a properties-panel popup,
+  // a dialog) the rest of the time.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpanded(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expanded]);
+
+  // The canvas doesn't observe its own box, so after the overlay resizes it
+  // the diagram would keep the old viewport — scrollbars, clipped elements,
+  // and a zoom that no longer fits. Tell it, then refit.
+  useEffect(() => {
+    const modeler = modelerRef.current;
+    if (!modeler) return;
+    // One frame later: the class change has to land and lay out before the
+    // canvas can measure anything useful.
+    const frame = requestAnimationFrame(() => {
+      const canvas = modeler.get<{
+        resized: () => void;
+        zoom: (mode: string) => void;
+      }>("canvas");
+      canvas.resized();
+      canvas.zoom("fit-viewport");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [expanded]);
+
   const selectedLabel =
     selected?.businessObject?.name ?? selected?.businessObject?.id ?? null;
 
   return (
-    <div className="model-editor-layout">
+    <div
+      className={
+        expanded
+          ? "model-editor-layout model-editor-layout--expanded"
+          : "model-editor-layout"
+      }
+    >
       <div className="model-editor-toolbar">
         {selected ? (
           availableTemplates.length > 0 ? (
@@ -345,6 +391,14 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
             Select an element to see its properties and connector templates.
           </span>
         )}
+        <button
+          type="button"
+          className="model-editor-expand"
+          aria-pressed={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Exit full screen (Esc)" : "Full screen"}
+        </button>
       </div>
       <div className="model-editor-panes">
         <div

@@ -354,8 +354,51 @@ body {
   gap: 8px;
 }
 .model-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.9em;
   color: var(--muted-foreground, #6b7280);
+}
+/* The template picker takes the slack so the expand button sits right. */
+.model-editor-toolbar > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.model-editor-expand {
+  flex: 0 0 auto;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: inherit;
+}
+.model-editor-expand:hover {
+  border-color: var(--muted-foreground, #6b7280);
+}
+
+/* Expanded ("full screen") editing.
+   A fixed overlay rather than the Fullscreen API: `requestFullscreen()` is
+   refused inside an iframe unless the embedding page sets
+   `allow="fullscreen"`, and this app is embeddable (`?embed=1`). An overlay
+   fills whatever box we're given either way. */
+.model-editor-layout--expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  padding: 12px;
+  background: var(--background, #f7f8fa);
+}
+/* Let the panes take the remaining height instead of the fixed 360px. */
+.model-editor-layout--expanded .model-editor-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.model-editor-layout--expanded .model-editor-canvas,
+.model-editor-layout--expanded .model-editor-properties {
+  height: auto;
 }
 .model-editor-template-picker select {
   font: inherit;
