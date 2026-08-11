@@ -14,8 +14,8 @@
 
 function decodeEntities(s) {
   return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
@@ -35,7 +35,7 @@ export function parseXml(xml) {
     if (lt === -1) break;
 
     const text = xml.slice(i, lt);
-    if (text) current.text += text;
+    if (text) current.text += decodeEntities(text);
 
     if (xml.startsWith("<!--", lt)) {
       const end = xml.indexOf("-->", lt);
@@ -113,11 +113,10 @@ export function prefix(node) {
  * its local name `userTask` with the BPMN element itself), so an unscoped
  * local-name search would double-count them.
  */
-export function findAll(root, names, acc = []) {
-  const set = Array.isArray(names) ? new Set(names) : new Set([names]);
+export function findAll(root, names, acc = [], set = Array.isArray(names) ? new Set(names) : new Set([names])) {
   for (const child of root.children) {
     if (prefix(child) === "bpmn" && set.has(localName(child))) acc.push(child);
-    findAll(child, names, acc);
+    findAll(child, names, acc, set);
   }
   return acc;
 }

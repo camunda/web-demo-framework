@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createBojtosSession, dispatchRound } from "@nanobpm/bojtos-kit";
+import { createBojtosSession } from "@nanobpm/bojtos-kit";
 import { probe, driveToQuiescence, loadWasm } from "./index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));

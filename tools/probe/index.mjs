@@ -102,7 +102,7 @@ export async function driveToQuiescence(session, workers, agents, maxRounds) {
       continue;
     }
     if (snap.timers.length > 0) {
-      const by = Math.max(1, ...snap.timers.map((t) => t.dueInMs));
+      const by = Math.max(1, Math.min(...snap.timers.map((t) => t.dueInMs)));
       session.advanceTime(by);
       continue;
     }
@@ -157,7 +157,14 @@ export async function probe(file, seedJson, workerOverrides = {}) {
     );
 
     const results = [];
-    for (const processId of processIds) {
+    for (const [index, processId] of processIds.entries()) {
+      // Reset + redeploy between processes so a prior process's still-active
+      // instance (e.g. one waiting on a signal/message) can't interfere with
+      // — or be mistakenly unblocked by — this run's probing.
+      if (index > 0) {
+        session.reset();
+        session.deploy(xml);
+      }
       session.createInstance(processId, seedJson);
       const { snapshot, rounds } = await driveToQuiescence(session, workers, agents, 200);
       const instance = snapshot.instances.find((i) => i.processId === processId) ?? null;
