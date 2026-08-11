@@ -38,7 +38,12 @@ insurance:
 
 This coordinates with, but does not block on, #18: the CSP and sandbox
 design there applies regardless of which origin serves the bundle, and #18
-can land independently of where the origin ends up pointing.
+can land independently of where the origin ends up pointing. That said,
+`src/framework/compile.ts` currently uses `new Function` to run reader-supplied
+code in the host origin, so the site deployed by this PR is not
+security-complete or launch-ready until #18's sandbox/CSP lands and is
+verified against the deployed origin — #19's acceptance criteria include that
+verification step.
 
 ## 2. How it deploys
 
