@@ -61,7 +61,11 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
       },
     });
     modelerRef.current = modeler;
-    lastExportedRef.current = null;
+    // Seed this with the initial `value` (not `null`) so the `[value]`
+    // effect below — which also runs on this same mount — sees its own
+    // reimport as already handled and skips it, instead of kicking off a
+    // second, redundant `importXML(value)` racing the one just below.
+    lastExportedRef.current = value;
 
     let cancelled = false;
     const initialImportSeq = ++importSeqRef.current;
@@ -126,19 +130,28 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // every `xml` change, just narrowed to genuinely-external changes here
     // since this view is also the thing producing new values.
     if (value === lastExportedRef.current) return;
+    // Guards against running side effects after this effect has been
+    // superseded (a newer `value` triggered another run) or the component
+    // has unmounted (the mount effect's cleanup calls `modeler.destroy()`)
+    // while this `importXML` is still in flight.
+    let cancelled = false;
     const importSeq = ++importSeqRef.current;
     modeler
       .importXML(value)
       .then(() => {
-        if (importSeqRef.current !== importSeq) return;
+        if (cancelled || importSeqRef.current !== importSeq) return;
         lastExportedRef.current = null;
         modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
           "fit-viewport",
         );
       })
       .catch((err: unknown) => {
+        if (cancelled) return;
         console.warn("ModelEditor: import failed", err);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
 
   return (
