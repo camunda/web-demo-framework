@@ -5,11 +5,21 @@ import react from "@vitejs/plugin-react";
 // so the engine's `new URL('nanobpmn_engine_bg.wasm', import.meta.url)` survives
 // and Vite emits the binary as a hashed asset.
 
-// Normalize the base path: ensure a trailing slash so a misconfigured env var
-// (e.g. `/web-demo-framework` without the trailing `/`) can't silently emit
-// broken asset URLs like `/web-demo-frameworkassets/...`.
+// Normalize the base path so a misconfigured env var can't silently emit
+// broken asset URLs:
+// - ensure a trailing slash (e.g. `/web-demo-framework` -> `/web-demo-framework/`,
+//   otherwise Vite would emit `/web-demo-frameworkassets/...`).
+// - ensure a leading slash for relative-looking values (e.g. `web-demo-framework/`
+//   -> `/web-demo-framework/`), since a base without a leading slash is treated
+//   as relative and can produce incorrect asset URLs on GitHub Pages. Absolute
+//   URLs (e.g. `https://...`) are left untouched.
 const rawBasePath = process.env.VITE_BASE_PATH?.trim() || "/";
-const basePath = rawBasePath.endsWith("/") ? rawBasePath : `${rawBasePath}/`;
+const isAbsoluteUrl = /^[a-z][a-z\d+\-.]*:\/\//i.test(rawBasePath);
+const withLeadingSlash =
+  isAbsoluteUrl || rawBasePath.startsWith("/") ? rawBasePath : `/${rawBasePath}`;
+const basePath = withLeadingSlash.endsWith("/")
+  ? withLeadingSlash
+  : `${withLeadingSlash}/`;
 
 export default defineConfig({
   // GitHub Pages project sites (and PR preview subpaths) are served under a
