@@ -22,8 +22,8 @@ const LAUNCH_ROCKET = `async (job, { text, num, sleep, trace }) => {
   const fuelLevel = num("fuelLevel", 100);
 
   // Stands in for a job worker on a real cluster calling out to mission
-  // control (or, more realistically, doing the actual work the task names —
-  // here, running the launch sequence and burning fuel).
+  // control (or, more realistically, doing the actual work that the task name
+  // implies — here, running the launch sequence and burning fuel).
   await sleep(600);
 
   if (fuelLevel < 50) {
