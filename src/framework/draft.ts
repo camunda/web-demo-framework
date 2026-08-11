@@ -59,17 +59,22 @@ function emptyModel(): ModelInfo {
 /**
  * Build the draft run definition for `example`, with `sources` (the editor's
  * live, possibly-edited handler code, keyed by element id) taking precedence
- * over the example's own default `handlers`.
+ * over the example's own default `handlers`, and `bpmn` (the editor's live,
+ * possibly-edited model XML) taking precedence over `example.bpmn` — this is
+ * the seam the model-editing XML tab feeds edits through, so a hand-edited
+ * diagram is gated by exactly the same diagnostics as the example's default
+ * one, not a separate one-off error path.
  */
 export function buildDraftRunDefinition(
   example: ExampleDef,
   sources: Record<string, string> = {},
+  bpmn: string = example.bpmn,
 ): DraftRunDefinition {
   const diagnostics: Diagnostic[] = [];
 
   let model: ModelInfo;
   try {
-    model = parseModel(example.bpmn);
+    model = parseModel(bpmn);
   } catch (e) {
     diagnostics.push({
       severity: "error",

@@ -33,24 +33,44 @@ export interface ExampleRunControls {
   ): Promise<RoundResult | null>;
   completeUserTask(userTaskKey: string, variablesJson: string): Snapshot | null;
   reset(): void;
+  /**
+   * Reset the engine and redeploy it with `xml`, replacing whatever was
+   * deployed before (the initial `bpmn` or a prior `redeploy`/`reset`).
+   *
+   * This is the *only* thing that touches the live bojtos session on an
+   * edited model: callers apply a hand-edited diagram by invoking this
+   * explicitly (e.g. on Run), not by re-passing a changed `bpmn` prop on
+   * every keystroke — see the `bpmn` param below for why.
+   */
+  redeploy(xml: string): string[] | null;
 }
 
+/**
+ * @param bpmn The model deployed when the session is (re)created — read once
+ *   per mount, not tracked live. A component that lifts the diagram into an
+ *   editable draft (see `ExampleRunner`'s `model (XML)` tab) must keep that
+ *   draft in its own state and apply it via `redeploy(xml)` on an explicit
+ *   action, not by feeding every keystroke back in here: this hook tears down
+ *   and recreates the whole bojtos session whenever `bpmn` changes identity,
+ *   which would otherwise redeploy/reset on every character typed and wipe
+ *   the previous run's state mid-edit.
+ */
 export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
   const sessionRef = useRef<BojtosSession | null>(null);
   const [phase, setPhase] = useState<EnginePhase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [processIds, setProcessIds] = useState<string[]>([]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const lastAppliedRef = useRef(bpmn);
 
-  const deployInto = useCallback(
-    (session: BojtosSession) => {
-      const res = session.deploy(bpmn);
-      setProcessIds(res.processIds);
-      setSnapshot(null);
-      setError(null);
-    },
-    [bpmn],
-  );
+  const deployInto = useCallback((session: BojtosSession, xml: string) => {
+    const res = session.deploy(xml);
+    lastAppliedRef.current = xml;
+    setProcessIds(res.processIds);
+    setSnapshot(null);
+    setError(null);
+    return res.processIds;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +86,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
           return;
         }
         try {
-          deployInto(session);
+          deployInto(session, bpmn);
         } catch (e) {
           session.free();
           setError(String(e));
@@ -87,7 +107,12 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
       sessionRef.current?.free();
       sessionRef.current = null;
     };
-  }, [deployInto]);
+    // `bpmn` here is the model to (re)deploy when the session itself is
+    // (re)created — e.g. on mount or when the caller remounts for a new
+    // example. It is deliberately not meant to track every edit; see
+    // `redeploy` for applying a hand-edited draft to the live session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bpmn]);
 
   const run = useCallback((fn: (s: BojtosSession) => Snapshot) => {
     const session = sessionRef.current;
@@ -141,11 +166,26 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     if (!session) return;
     try {
       session.reset();
-      deployInto(session);
+      deployInto(session, lastAppliedRef.current);
     } catch (e) {
       setError(String(e));
     }
   }, [deployInto]);
+
+  const redeploy = useCallback(
+    (xml: string) => {
+      const session = sessionRef.current;
+      if (!session) return null;
+      try {
+        session.reset();
+        return deployInto(session, xml);
+      } catch (e) {
+        setError(String(e));
+        return null;
+      }
+    },
+    [deployInto],
+  );
 
   return {
     phase,
@@ -156,5 +196,6 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     stepWorkers,
     completeUserTask,
     reset,
+    redeploy,
   };
 }
