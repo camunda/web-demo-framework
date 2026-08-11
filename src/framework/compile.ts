@@ -1,6 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
+import { runAgentSandboxed, runHandlerSandboxed } from "./sandbox";
 
 /**
  * Turn the example's editor sources into the handlers the dispatch loop runs,
@@ -10,29 +11,36 @@ import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
  * tasks can share `io.camunda:http-json:1`, and a `scriptTask` gets a job typed
  * as its own element id. So the framework registers one wrapper per job type and
  * dispatches on `job.elementId` underneath.
+ *
+ * The reader's source itself never runs here, or anywhere in this page's
+ * origin: see docs/security.md. This module only does a **syntax preflight**
+ * host-side — evaluating `(source)` as an expression to confirm it produces a
+ * function value, exactly as before, so a typo is still reported next to the
+ * editor rather than as a mid-run incident — then discards that function
+ * object and hands the *source string* to `./sandbox`, which compiles and
+ * calls it for real inside a sandboxed, opaque-origin iframe.
  */
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-function compile<T>(source: string, what: string): T {
+function preflight(source: string, what: string): void {
   const factory = new Function(`"use strict"; return (${source});`);
   const fn: unknown = factory();
   if (typeof fn !== "function")
     throw new Error(`${what} must evaluate to a function.`);
-  return fn as T;
 }
 
 export function compileHandler(source: string): ExampleHandler {
-  return compile<ExampleHandler>(source, "Handler code");
+  preflight(source, "Handler code");
+  return (job, helpers) => runHandlerSandboxed(source, job, helpers);
 }
 
 export function compileAgent(source: string): AgentHandler {
-  return compile<AgentHandler>(source, "Agent code");
+  preflight(source, "Agent code");
+  return (job) => runAgentSandboxed(source, job);
 }
 
 function helpersFor(job: ActivatedJob, trace: Trace): HandlerHelpers {
   return {
-    sleep,
+    sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
     trace: (text: string) => trace({ kind: "tool", text: `   ${text}` }),
     text: (key, fallback = "") => {
       const v = job.variables[key];

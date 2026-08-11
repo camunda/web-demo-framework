@@ -24,6 +24,20 @@ import "./styles.css";
 import { C4Provider } from "@camunda/design-system";
 import { App } from "./App";
 
+// Dev-only hook for the sandbox self-test (src/framework/sandbox/selfTest.ts):
+// `await window.__runSandboxSelfTest()` in the devtools console. See
+// docs/security.md for why this is a manual, in-browser check rather than an
+// automated one.
+if (import.meta.env.DEV) {
+  import("./framework/sandbox/selfTest").then(({ runSandboxSelfTest }) => {
+    (
+      window as typeof window & {
+        __runSandboxSelfTest?: typeof runSandboxSelfTest;
+      }
+    ).__runSandboxSelfTest = runSandboxSelfTest;
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <C4Provider>
