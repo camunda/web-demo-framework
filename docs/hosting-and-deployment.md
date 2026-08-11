@@ -36,14 +36,16 @@ insurance:
   should change to `/` (or be dropped) at the same time — otherwise asset
   URLs stay rooted at the old subpath and 404.
 
-This coordinates with, but does not block on, #18: the CSP and sandbox
-design there applies regardless of which origin serves the bundle, and #18
-can land independently of where the origin ends up pointing. That said,
-`src/framework/compile.ts` currently uses `new Function` to run reader-supplied
-code in the host origin, so the site deployed by this PR is not
-security-complete or launch-ready until #18's sandbox/CSP lands and is
-verified against the deployed origin — #19's acceptance criteria include that
-verification step.
+This coordinated with, but did not block on, #18: the CSP and sandbox design
+there applies regardless of which origin serves the bundle. #18 has since
+landed — `src/framework/compile.ts` now runs reader/agent-supplied code
+through the sandbox in `src/framework/sandbox/**` instead of executing it
+directly in the host origin. The site deployed by this PR is not
+security-complete or launch-ready, though, until that sandbox/CSP posture is
+verified against the real deployed origin (not just `npm run dev`/`preview`)
+— #19's acceptance criteria include that verification step; see
+[Verifying the security posture on the real deployment](#verifying-the-security-posture-on-the-real-deployment)
+below.
 
 ## 2. How it deploys
 

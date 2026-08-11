@@ -1,6 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
+import { runAgentSandboxed, runHandlerSandboxed } from "./sandbox";
 
 /**
  * Turn the example's editor sources into the handlers the dispatch loop runs,
@@ -10,29 +11,40 @@ import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
  * tasks can share `io.camunda:http-json:1`, and a `scriptTask` gets a job typed
  * as its own element id. So the framework registers one wrapper per job type and
  * dispatches on `job.elementId` underneath.
+ *
+ * The reader's source itself never runs here, or anywhere in this page's
+ * origin: see docs/security.md. This module only does a **syntax preflight**
+ * host-side — constructing `new Function` to confirm `(source)` parses as a
+ * valid expression, so a typo is still reported next to the editor rather
+ * than as a mid-run incident — and never calls the resulting factory, since
+ * that would execute the reader's source in this page's origin (a crafted
+ * IIFE would run immediately, before any function-ness check could reject
+ * it). Whether the source actually evaluates to a function is checked at run
+ * time inside the sandboxed iframe (see `./sandbox/iframeSource.ts`), which is
+ * a safe place for that evaluation to happen.
  */
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-function compile<T>(source: string, what: string): T {
-  const factory = new Function(`"use strict"; return (${source});`);
-  const fn: unknown = factory();
-  if (typeof fn !== "function")
-    throw new Error(`${what} must evaluate to a function.`);
-  return fn as T;
+function preflight(source: string, what: string): void {
+  try {
+    new Function(`"use strict"; return (${source});`);
+  } catch {
+    throw new Error(`${what} has a syntax error.`);
+  }
 }
 
 export function compileHandler(source: string): ExampleHandler {
-  return compile<ExampleHandler>(source, "Handler code");
+  preflight(source, "Handler code");
+  return (job, helpers) => runHandlerSandboxed(source, job, helpers);
 }
 
 export function compileAgent(source: string): AgentHandler {
-  return compile<AgentHandler>(source, "Agent code");
+  preflight(source, "Agent code");
+  return (job) => runAgentSandboxed(source, job);
 }
 
 function helpersFor(job: ActivatedJob, trace: Trace): HandlerHelpers {
   return {
-    sleep,
+    sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
     trace: (text: string) => trace({ kind: "tool", text: `   ${text}` }),
     text: (key, fallback = "") => {
       const v = job.variables[key];
@@ -66,9 +78,14 @@ export function buildWorkers(
   trace: Trace,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
-  const labels = new Map(model.tasks.map((t) => [t.elementId, t.label]));
+  // Cover every process, not just the primary one: call activities (or a
+  // runner starting a non-primary processId) can activate jobs from
+  // secondary processes, and draft.ts already requires their handlers to
+  // exist, so the worker map must be able to serve them too.
+  const allTasks = model.processes.flatMap((p) => p.tasks);
+  const labels = new Map(allTasks.map((t) => [t.elementId, t.label]));
 
-  for (const task of model.tasks) {
+  for (const task of allTasks) {
     if (workers[task.jobType]) continue; // one wrapper per job type
     workers[task.jobType] = async (job) => {
       const handler = byElement[job.elementId];
