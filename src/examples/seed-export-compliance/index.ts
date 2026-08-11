@@ -207,6 +207,7 @@ export const seedExportCompliance: ExampleDef = {
   title: "Seed export compliance agent",
   blurb:
     "An AI agent picks its own tools to check a shipment, then a gateway routes on its decision — cleared shipments notify the export team, flagged ones go to a human. The LLM recommends; the BPMN process governs.",
+  docsUrl: "https://camunda.com/blog/agentic-ai/",
   bpmn,
   forms: {
     "seed-export-shipment-ready": shipmentReadyForm,

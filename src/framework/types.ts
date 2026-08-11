@@ -62,6 +62,13 @@ export interface ExampleDef {
   id: string;
   title: string;
   blurb: string;
+  /**
+   * The camunda.com docs page this example illustrates, rendered as a visible
+   * link so a reader landing on `/examples/<id>` (see routing.ts) can get back
+   * to the source material. Optional so an example can be added before its
+   * docs page exists.
+   */
+  docsUrl?: string;
   /** The BPMN XML. */
   bpmn: string;
   /** Camunda `.form` schemas by form id, for the start and user-task forms. */
