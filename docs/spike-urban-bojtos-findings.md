@@ -47,9 +47,12 @@ already runs on:
 adapter: deploy both resources, register a worker standing in for
 `workers/greet.ts`, publish the `demo.greet-requested` message the way the
 app's `webhook` trigger would, and assert the process instance completes.
-Run it: `npm run spike:urban` (or `node tools/spike-urban-bojtos/demo.ts`
-directly — it's plain TypeScript Node 26 runs via type-stripping, same as this
-repo's other `tools/*` scripts).
+Run it: `npm run spike:urban` (or `node --experimental-strip-types
+tools/spike-urban-bojtos/demo.ts` directly). This repo's CI is pinned to Node
+22, which requires the `--experimental-strip-types` flag to run plain
+TypeScript directly via type-stripping (unlike this repo's other `tools/*`
+scripts, which are plain `.mjs`); the `spike:urban` npm script already passes
+that flag.
 
 ## The two things that block a full app (as anticipated by the issue)
 

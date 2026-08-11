@@ -159,9 +159,11 @@ function pick(source: Record<string, unknown>, keys: readonly string[]): Record<
  *   in this repo's engine binding (confirmed in `docs/engine-coverage.md`,
  *   issue #15/#6) — appearing to accept a `.dmn` deployment that silently does
  *   nothing would be worse than refusing it outright.
- * - `createInstance` — `awaitCompletion` drains registered workers to
- *   quiescence (bojtos-kit is pull-based; a live engine would push), then
- *   reads the instance back out of the snapshot.
+ * - `createInstance` — when `awaitCompletion` is set, drains registered
+ *   workers to quiescence (bojtos-kit is pull-based; a live engine would
+ *   push) and reads the instance back out of the snapshot; otherwise returns
+ *   immediately without draining, so the caller controls whether workers run
+ *   synchronously.
  * - `cancelInstance` — `session.cancelInstance` directly.
  * - `publishMessage` — `session.correlateMessage`, then drains (any job the
  *   correlation newly unblocks needs serving).
@@ -246,8 +248,8 @@ export class BojtosEngineClient implements EngineClient {
       JSON.stringify(input.variables ?? {}),
     );
     const processInstanceKey = requireCreated(snap.created);
-    await this.#drain();
     if (input.awaitCompletion) {
+      await this.#drain();
       return { processInstanceKey, variables: this.#instanceVariables(processInstanceKey) };
     }
     return { processInstanceKey };

@@ -82,6 +82,7 @@ async function main() {
     console.error("FAIL: no completed process instance found");
     console.error(trace.join("\n"));
     process.exitCode = 1;
+    await client.close();
     return;
   }
   trace.push(`process instance ${instance.processInstanceKey} completed`);

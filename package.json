@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "probe": "node tools/probe/index.mjs",
     "eval": "node --import ./tools/eval/register.mjs tools/eval/index.mjs",
-    "spike:urban": "node tools/spike-urban-bojtos/demo.ts"
+    "spike:urban": "node --experimental-strip-types tools/spike-urban-bojtos/demo.ts"
   },
   "dependencies": {
     "@camunda/design-system": "^0.36.0",
