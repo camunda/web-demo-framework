@@ -319,11 +319,12 @@ export function makeLiveAgentRouter(
   return async (job) => {
     const handler = byElement.get(job.elementId);
     if (!handler) {
-      trace({
-        kind: "error",
-        text: `No agent host registered for "${job.elementId}" — completing the agent.`,
-      });
-      return { completionConditionFulfilled: true };
+      // Fail the job rather than silently completing it: a model/dispatch
+      // mismatch here means the diagram and the router disagree about which
+      // hosts exist, and completing anyway would hide that behind a
+      // seemingly-successful agent turn. Throwing surfaces an incident on the
+      // diagram, consistent with how compile.ts treats a missing tool handler.
+      throw new Error(`No agent host registered for "${job.elementId}"`);
     }
     return handler(job);
   };

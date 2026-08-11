@@ -129,6 +129,8 @@ export function buildDraftRunDefinition(
 
   // Resolve every formId the model references against the example's forms, so
   // a dangling reference is reported here rather than when the user task opens.
+  // Check every process, not just the primary one — a dangling formId in a
+  // secondary process is otherwise invisible to hasErrors (see allTasks above).
   const forms: Record<string, FormSchema> = {};
   const formsAvailable = example.forms ?? {};
   const checkForm = (formId: string | undefined, where: string) => {
@@ -144,9 +146,11 @@ export function buildDraftRunDefinition(
       });
     }
   };
-  checkForm(model.startFormId, "The start event");
-  for (const ut of model.userTasks) {
-    checkForm(ut.formId, `User task "${ut.label}" (${ut.elementId})`);
+  for (const p of model.processes) {
+    checkForm(p.startFormId, `The start event of process "${p.processName}"`);
+    for (const ut of p.userTasks) {
+      checkForm(ut.formId, `User task "${ut.label}" (${ut.elementId})`);
+    }
   }
 
   return {
