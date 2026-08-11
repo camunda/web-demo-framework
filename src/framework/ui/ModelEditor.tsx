@@ -84,7 +84,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
         console.warn("ModelEditor: initial import failed", err);
       });
 
-    const exportChange = () => {
+    const doExport = () => {
       const exportSeq = ++exportSeqRef.current;
       modeler
         .saveXML({ format: true })
@@ -105,10 +105,25 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
           console.warn("ModelEditor: export failed", err);
         });
     };
+    // `commandStack.changed` can fire many times for a single gesture (e.g.
+    // dragging, or a multi-command operation). Coalesce those into a single
+    // export per tick instead of serializing the whole diagram on every
+    // intermediate event — this avoids redundant `saveXML()` calls and the
+    // resulting `onChange`-triggered draft rebuilds causing jank on larger
+    // diagrams.
+    let scheduledExport: ReturnType<typeof setTimeout> | null = null;
+    const exportChange = () => {
+      if (scheduledExport !== null) return;
+      scheduledExport = setTimeout(() => {
+        scheduledExport = null;
+        doExport();
+      }, 0);
+    };
     modeler.on("commandStack.changed", exportChange);
 
     return () => {
       cancelled = true;
+      if (scheduledExport !== null) clearTimeout(scheduledExport);
       modeler.off("commandStack.changed", exportChange);
       modeler.destroy();
       modelerRef.current = null;
