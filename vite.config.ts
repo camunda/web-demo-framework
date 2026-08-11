@@ -197,6 +197,9 @@ export default defineConfig({
           ) {
             return "assets/vendor-bpmn-[hash].js";
           }
+          if (facadeId.includes("/framework/ui/ModelEditor.tsx")) {
+            return "assets/vendor-modeler-[hash].js";
+          }
           return "assets/[name]-[hash].js";
         },
       },
