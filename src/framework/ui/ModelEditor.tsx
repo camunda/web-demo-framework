@@ -42,6 +42,15 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   // reimport on every single edit, resetting the modeler's selection, pan/
   // zoom and undo stack after every click or drag.
   const lastExportedRef = useRef<string | null>(null);
+  // Monotonic sequence counters guarding against out-of-order async
+  // resolution: `saveXML()`/`importXML()` calls can resolve in a different
+  // order than they were started (e.g. rapid edits, or a fast "Revert to
+  // original" following a slower in-flight export). Each call captures its
+  // own sequence number and only applies its result if it's still the most
+  // recently *started* call of its kind by the time it resolves — otherwise
+  // a stale promise could overwrite newer state with older XML.
+  const importSeqRef = useRef(0);
+  const exportSeqRef = useRef(0);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -55,10 +64,11 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     lastExportedRef.current = null;
 
     let cancelled = false;
+    const initialImportSeq = ++importSeqRef.current;
     modeler
       .importXML(value)
       .then(() => {
-        if (cancelled) return;
+        if (cancelled || importSeqRef.current !== initialImportSeq) return;
         modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
           "fit-viewport",
         );
@@ -71,10 +81,16 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
       });
 
     const exportChange = () => {
+      const exportSeq = ++exportSeqRef.current;
       modeler
         .saveXML({ format: true })
         .then(({ xml }: { xml?: string }) => {
-          if (cancelled || xml === undefined) return;
+          if (
+            cancelled ||
+            xml === undefined ||
+            exportSeqRef.current !== exportSeq
+          )
+            return;
           lastExportedRef.current = xml;
           onChangeRef.current(xml);
         })
@@ -110,9 +126,11 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // every `xml` change, just narrowed to genuinely-external changes here
     // since this view is also the thing producing new values.
     if (value === lastExportedRef.current) return;
+    const importSeq = ++importSeqRef.current;
     modeler
       .importXML(value)
       .then(() => {
+        if (importSeqRef.current !== importSeq) return;
         lastExportedRef.current = null;
         modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
           "fit-viewport",
