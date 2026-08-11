@@ -42,7 +42,7 @@ function toolBlock(tool: ToolSpec): string {
   return `${tool.elementId}\n    purpose: ${doc}\n    arguments:\n${args}`;
 }
 
-function systemMessage(spec: AgentSpec): string {
+function systemMessage(spec: AgentSpec, allowMultiToolTurns: boolean): string {
   const authored =
     spec.systemPrompt ||
     "You are an agent driving a business process. Use the tools available to you.";
@@ -52,7 +52,9 @@ function systemMessage(spec: AgentSpec): string {
   const exampleArgs = example?.args.length
     ? `{${example.args.map((a) => `"${a.name}": "…"`).join(", ")}}`
     : "{}";
-  return `${authored}
+
+  if (!allowMultiToolTurns) {
+    return `${authored}
 
 You drive the process by calling exactly one tool at a time. The tool names you
 may use, one per block:
@@ -67,6 +69,32 @@ this shape:
 The value of "tool" must be one of the names listed above, copied character for
 character, with nothing added. When your work is finished, reply exactly
 {"done": true} and no tool.`;
+  }
+
+  // Multi-tool turns: costs the reader one round trip per independent tool on
+  // a slow local model, so a turn may name more than one — but only when the
+  // tools are genuinely independent (neither needs the other's result first).
+  // Kept behind an explicit flag rather than the default: it changes the
+  // reply shape every existing example prompt was written and tuned against.
+  return `${authored}
+
+You drive the process by calling tools. If more than one tool can run right
+now without needing another tool's result first, name all of them in one
+reply — don't spend a turn on each when they don't depend on each other. Only
+list tools whose arguments you can already determine. The tool names you may
+use, one per block:
+
+${spec.tools.map(toolBlock).join("\n\n")}
+
+Reply with JSON only — no prose, no explanation, no markdown fence — in exactly
+this shape:
+
+{"tools": [{"tool": "${example?.elementId ?? "ToolName"}", "arguments": ${exampleArgs}}], "done": false}
+
+List one entry per tool you're calling this turn (often just one). Each
+"tool" value must be one of the names listed above, copied character for
+character, with nothing added. When your work is finished, reply exactly
+{"done": true} and no tools.`;
 }
 
 function userMessage(
@@ -132,6 +160,126 @@ async function streamChat(
   return raw;
 }
 
+/**
+ * Argument namespace and validation policy.
+ *
+ * `fromAi(toolCall.x, "…", "type")` in the model resolves `x` from **instance**
+ * scope, not a per-activation local one (see the comment above where this is
+ * called), so every tool activated in a turn writes its arguments into the
+ * exact same flat namespace. That single shared namespace is a deliberate
+ * engine constraint this framework has to work within, not something a
+ * per-tool prefix could paper over — a prefixed variable name (e.g.
+ * `ToolA.code`) wouldn't be the name the model's `fromAi(toolCall.code, …)`
+ * call is actually looking up. The policy below makes the constraint's
+ * consequences explicit and loud instead of a silent overwrite or a silently
+ * accepted bad value:
+ *
+ * - **Required.** Every declared argument is required — the model has no
+ *   syntax for marking one optional. `undefined`, `null`, or `""` counts as
+ *   not supplied (a small model answering `{"decision": ""}` has skipped the
+ *   argument, and passing `""` through would hide that). A missing argument
+ *   is traced and excluded from the merged variables; the call still proceeds
+ *   with whatever was supplied, so one skipped argument doesn't abort a turn
+ *   that partially worked.
+ * - **Declared-type checking and coercion.** A supplied value is checked
+ *   against the tool's declared type (`string` | `number` | `boolean`,
+ *   defaulting to `string`): a numeric- or boolean-*looking* string coerces
+ *   (`"4"` → `4`, `"true"` → `true`), matching how a small model actually
+ *   replies (everything as a JSON string). Anything that doesn't coerce
+ *   cleanly — e.g. `{"intA": "four"}` — is a **type mismatch**: traced by
+ *   name with the declared type and the value received, and excluded from the
+ *   merged variables (treated the same as missing), never passed through
+ *   unchecked to the handler.
+ * - **Name-collision policy.** Two *different* tools resolved in the same
+ *   turn that both declare an argument with the same name is a genuine
+ *   collision, not a coincidence — the second tool's value would otherwise
+ *   silently overwrite the first's in the shared instance root. First
+ *   activation order wins; every later tool's same-named argument is dropped
+ *   and the collision is traced, naming both tools and which one won.
+ */
+export function coerceToolArg(
+  type: string,
+  raw: unknown,
+): { ok: true; value: unknown } | { ok: false } {
+  switch (type) {
+    case "number": {
+      if (typeof raw === "number" && Number.isFinite(raw)) return { ok: true, value: raw };
+      if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw)))
+        return { ok: true, value: Number(raw) };
+      return { ok: false };
+    }
+    case "boolean": {
+      if (typeof raw === "boolean") return { ok: true, value: raw };
+      if (typeof raw === "string" && /^(true|false)$/i.test(raw.trim()))
+        return { ok: true, value: raw.trim().toLowerCase() === "true" };
+      return { ok: false };
+    }
+    default: {
+      // "string" (and any type we don't otherwise recognise): accept any
+      // scalar, coerced to a string. An object/array is still a mismatch —
+      // that's not what a `fromAi(toolCall.x, …, "string")` argument expects.
+      if (typeof raw === "object") return { ok: false };
+      return { ok: true, value: String(raw) };
+    }
+  }
+}
+
+function resolveArguments(
+  resolved: { tool: ToolSpec; args: Record<string, unknown> }[],
+  trace: Trace,
+): {
+  variablesOut: Record<string, unknown>;
+  forHistory: Map<string, Record<string, unknown>>;
+} {
+  const variablesOut: Record<string, unknown> = {};
+  const claimedBy = new Map<string, string>(); // argument name -> owning tool elementId
+  const forHistory = new Map<string, Record<string, unknown>>();
+
+  for (const { tool, args } of resolved) {
+    const historyArgs: Record<string, unknown> = {};
+    for (const arg of tool.args) {
+      const raw = args[arg.name];
+      const supplied = raw !== undefined && raw !== null && raw !== "";
+      if (!supplied) {
+        trace({
+          kind: "error",
+          text: `🤖 ${tool.elementId}: model supplied no value for "${arg.name}"`,
+        });
+        continue;
+      }
+
+      const owner = claimedBy.get(arg.name);
+      if (owner !== undefined && owner !== tool.elementId) {
+        trace({
+          kind: "error",
+          text:
+            `🤖 argument name collision on "${arg.name}": both ${owner} and ${tool.elementId} ` +
+            `declare it — ${owner} already claimed it this turn, ${tool.elementId}'s value is dropped`,
+        });
+        continue;
+      }
+
+      const coerced = coerceToolArg(arg.type, raw);
+      if (!coerced.ok) {
+        trace({
+          kind: "error",
+          text:
+            `🤖 ${tool.elementId}: "${arg.name}" is declared as ${arg.type} but the model supplied ` +
+            `${JSON.stringify(raw)} — rejected, not passed through`,
+        });
+        continue;
+      }
+
+      variablesOut[arg.name] = coerced.value;
+      historyArgs[arg.name] = coerced.value;
+      claimedBy.set(arg.name, tool.elementId);
+    }
+    forHistory.set(tool.elementId, historyArgs);
+  }
+
+  return { variablesOut, forHistory };
+}
+
 export interface LiveAgentOptions {
   /** Tokens per completion. Small models need room for the JSON. */
   maxNewTokens?: number;
@@ -141,6 +289,15 @@ export interface LiveAgentOptions {
    * on one tool otherwise burns the whole turn budget.
    */
   allowRepeats?: boolean;
+  /**
+   * Ask the model to name more than one independent tool per turn, when it
+   * can — the engine already supports activating several elements from one
+   * agent result (`activateElements: [...]`). Off by default: every existing
+   * example prompt was written and tuned against the one-tool-per-turn shape,
+   * so switching the reply shape out from under it is an opt-in change, not
+   * a silent default flip.
+   */
+  allowMultiToolTurns?: boolean;
 }
 
 export function makeLiveAgent(
@@ -149,7 +306,7 @@ export function makeLiveAgent(
   trace: Trace,
   opts: LiveAgentOptions = {},
 ): AgentHandler {
-  const { maxNewTokens = 384, allowRepeats = false } = opts;
+  const { maxNewTokens = 384, allowRepeats = false, allowMultiToolTurns = false } = opts;
 
   // Per-run state. The engine re-emits the agent job after each activated tool
   // drains, so this closure is the agent's memory across turns.
@@ -180,7 +337,7 @@ export function makeLiveAgent(
       : spec.tools.filter((t) => !called.has(t.elementId));
 
     const messages: ChatMessage[] = [
-      { role: "system", content: systemMessage(spec) },
+      { role: "system", content: systemMessage(spec, allowMultiToolTurns) },
       { role: "user", content: userMessage(spec, variables, history, remaining) },
     ];
 
@@ -209,11 +366,16 @@ export function makeLiveAgent(
 
     const stated = collectToolCalls(json);
     if (stated.length === 0) {
+      // Not "done", but named nothing usable either — a confused or empty
+      // reply. Don't end the whole run over one bad turn: give the model
+      // another chance next turn, same as an all-hallucinated/all-repeat turn
+      // below. `spec.maxModelCalls` (checked at the top of this function) is
+      // the actual backstop against a model that never recovers.
       trace({
         kind: "error",
-        text: "Model named no tool (and didn't say it was done) — completing the agent.",
+        text: "🤖 model named no tool (and didn't say it was done) — trying again next turn",
       });
-      return { completionConditionFulfilled: true };
+      return {};
     }
 
     // Exact-match only. A name that isn't a real element activates nothing.
@@ -245,43 +407,25 @@ export function makeLiveAgent(
       });
 
     if (resolved.length === 0) {
-      trace({ kind: "agent", text: "🤖 nothing left to activate — completing" });
-      return { completionConditionFulfilled: true };
+      // Every stated call was a hallucination and/or a repeat — nothing to
+      // activate this turn, but that's a bad reply, not a considered
+      // decision to stop. Ending the whole agent here would mean one
+      // hallucinated name terminates a run that might otherwise finish
+      // correctly, so give the model another turn instead (still bounded by
+      // `spec.maxModelCalls`).
+      trace({ kind: "agent", text: "🤖 nothing activated this turn — trying again next turn" });
+      return {};
     }
 
     // Tool arguments ride on the agent result, NOT on the activation: variables
     // seeded into an activation's local scope are not visible on the activated
-    // tool's job, but instance variables are.
-    const variablesOut: Record<string, unknown> = {};
-    for (const { tool, args } of resolved) {
-      // An empty string counts as not supplied: a small model that answers
-      // `{"decision": ""}` has skipped the argument, and silently passing "" on
-      // hides that from whoever is watching the run.
-      const supplied = (name: string) => {
-        const v = args[name];
-        return v !== undefined && v !== null && v !== "";
-      };
-      for (const arg of tool.args) {
-        if (supplied(arg.name)) variablesOut[arg.name] = args[arg.name];
-      }
-      const missing = tool.args
-        .filter((a) => !supplied(a.name))
-        .map((a) => a.name);
-      if (missing.length)
-        trace({
-          kind: "error",
-          text: `🤖 ${tool.elementId}: model supplied no value for ${missing.join(", ")}`,
-        });
+    // tool's job, but instance variables are. That single shared instance-root
+    // namespace is the reason the merge below has to actively guard against
+    // collisions rather than just write — see `resolveArguments`' doc comment.
+    const { variablesOut, forHistory } = resolveArguments(resolved, trace);
+    for (const { tool } of resolved) {
       called.add(tool.elementId);
-      history.push(
-        `- ${tool.elementId}(${JSON.stringify(
-          Object.fromEntries(
-            tool.args
-              .map((a) => [a.name, args[a.name]])
-              .filter(([, v]) => v !== undefined),
-          ),
-        )})`,
-      );
+      history.push(`- ${tool.elementId}(${JSON.stringify(forHistory.get(tool.elementId))})`);
     }
 
     trace({
