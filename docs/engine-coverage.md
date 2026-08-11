@@ -66,6 +66,63 @@ doesn't build.
 | Compensation across multiple activities, cancel-on-compensate, nested sub-processes | ⚠️ Assumed | Not probed. The single-activity compensation path above is verified; broader compensation semantics (compensating a whole sub-process, `cancelRemainingInstances`) are not. |
 | Escalation events, non-interrupting boundary events, event sub-processes | ⚠️ Assumed | Not probed — no candidate fixture built yet. Probe before relying on these in an example. |
 
+## Issue #15 finding: DMN business rule example — not pursued
+
+Issue #15 asked for a DMN business-rule example to be brought into the repo,
+contingent on DMN evaluation working end-to-end. It does not, and this section
+records the independent re-verification (engine version unchanged at
+`@nanobpm/engine-wasm@0.3.0` / `@nanobpm/bojtos-kit@0.4.0`) done for that task,
+confirming the row above rather than superseding it.
+
+Re-running the existing fixture reproduces the same incident:
+
+```
+$ npm run probe -- tools/probe/fixtures/dmn-business-rule.bpmn
+
+=== tools/probe/fixtures/dmn-business-rule.bpmn ===
+process ids: probe-dmn
+
+job types by element:
+  (none)
+
+user tasks:
+  (none)
+
+timers:
+  (none)
+
+message subscriptions:
+  (none)
+
+signal subscriptions:
+  (none)
+
+business rule (DMN) tasks:
+  - Decide → decision "probe-decision"
+
+run result:
+  - probe-dmn: completed=false rounds=1 incidents=1
+      ⚠ incident on Decide (decisionEvaluation): no deployed decision with id 'probe-decision' for business rule task 'probe-decision'
+```
+
+Inspecting `@nanobpm/bojtos-kit`'s `BojtosSession` interface directly confirms
+why: `deploy(xml: string): { processIds: string[] }` accepts only BPMN XML —
+there is no `.dmn` (or combined-resource) argument anywhere in the session API
+that a compiled decision table could travel through. The engine's own
+decision-evaluation machinery is real (the incident names the decision id it
+looked for), but nothing in this repo's tooling can get a decision *into* it,
+so a `businessRuleTask` will always raise this incident regardless of the
+model or manifest built around it.
+
+**Decision: closing #15 without adding an example.** Bringing in a `.dmn` file,
+a business rule task, and a manifest as the issue describes would only
+reproduce this same incident in the browser — there is no way to make the
+acceptance criteria's "the decision evaluates in the browser" branch true
+without first building a `.dmn` deploy path, which is out of scope for this
+task (and is the same gap issue #23's spike separately identified for Urban
+app resources). Revisit this example once a `.dmn` deploy path exists in
+`@nanobpm/bojtos-kit` or this repo's tooling.
+
 ## Using the probe on a new example
 
 Before building an example around an unfamiliar construct, run it through the
