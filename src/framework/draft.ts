@@ -21,11 +21,19 @@
 import type { ExampleDef, ExampleHandler } from "./types";
 import { parseModel, type Diagnostic, type ModelInfo } from "./model";
 import { compileHandler } from "./compile";
+import { createTemplateMap, substituteTemplates } from "./templates";
 import type { FormSchema } from "./ui/FormRenderer";
 
 export type { Diagnostic };
 
 export interface DraftRunDefinition {
+  /**
+   * `example.bpmn` with every `{{name}}` prompt-template placeholder
+   * substituted (see `templates.ts`) — this, not `example.bpmn`, is what was
+   * actually parsed and is what must be deployed, so the reader sees and runs
+   * exactly the model the diagnostics below are about.
+   */
+  resolvedBpmn: string;
   /** The parsed model — every process, agent host, task and diagnostic model.ts found. */
   model: ModelInfo;
   /** Compiled handlers, keyed by BPMN element id. Only elements that compiled cleanly appear. */
@@ -59,28 +67,53 @@ function emptyModel(): ModelInfo {
 /**
  * Build the draft run definition for `example`, with `sources` (the editor's
  * live, possibly-edited handler code, keyed by element id) taking precedence
- * over the example's own default `handlers`, and `bpmn` (the editor's live,
+ * over the example's own default `handlers`, `bpmn` (the editor's live,
  * possibly-edited model XML) taking precedence over `example.bpmn` — this is
  * the seam the model-editing XML tab feeds edits through, so a hand-edited
  * diagram is gated by exactly the same diagnostics as the example's default
- * one, not a separate one-off error path.
+ * one, not a separate one-off error path — and `templateSources` (the
+ * editor's live, possibly-edited prompt/template text, keyed by template
+ * name) taking precedence over the example's own default `templates`.
+ *
+ * Substitution runs once, here, against `bpmn` (so a template edit is applied
+ * on top of any hand-edited diagram, not just the example's original one) and
+ * before `parseModel` — so a prompt edit is "just another edit" the
+ * draft-definition pipeline picks up and reports on like any other, and
+ * `model.ts` never has to know templates exist.
  */
 export function buildDraftRunDefinition(
   example: ExampleDef,
   sources: Record<string, string> = {},
   bpmn: string = example.bpmn,
+  templateSources: Record<string, string> = {},
 ): DraftRunDefinition {
   const diagnostics: Diagnostic[] = [];
 
+  const templates = createTemplateMap(example.templates, templateSources);
+  const { result: resolvedBpmn, unresolved } = substituteTemplates(bpmn, templates, "xml");
+  for (const name of unresolved) {
+    diagnostics.push({
+      severity: "warning",
+      message: `Template placeholder "{{${name}}}" has no matching prompt/template content — left in the model as-is, not substituted.`,
+    });
+  }
+
   let model: ModelInfo;
   try {
-    model = parseModel(bpmn);
+    model = parseModel(resolvedBpmn);
   } catch (e) {
     diagnostics.push({
       severity: "error",
       message: e instanceof Error ? e.message : String(e),
     });
-    return { model: emptyModel(), handlers: {}, forms: {}, diagnostics, hasErrors: true };
+    return {
+      resolvedBpmn,
+      model: emptyModel(),
+      handlers: {},
+      forms: {},
+      diagnostics,
+      hasErrors: true,
+    };
   }
   diagnostics.push(...model.diagnostics);
 
@@ -159,6 +192,7 @@ export function buildDraftRunDefinition(
   }
 
   return {
+    resolvedBpmn,
     model,
     handlers,
     forms,

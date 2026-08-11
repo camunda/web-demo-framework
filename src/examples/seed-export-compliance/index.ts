@@ -1,7 +1,35 @@
 import type { ExampleDef } from "../../framework/types";
+import { templateNameFromPath } from "../../framework/templates";
 import bpmn from "./model.bpmn?raw";
 import shipmentReadyForm from "./shipment-ready.form.json";
 import reviewForm from "./review.form.json";
+
+/**
+ * The example's prompts, as their own editable files (see
+ * `src/framework/templates.ts`): `prompts/system-prompt.md` and
+ * `prompts/user-prompt.md` resolve the `{{system-prompt}}` and
+ * `{{user-prompt}}` placeholders inside `model.bpmn`'s FEEL string literals,
+ * substituted once at deploy/parse time. Editing one of these files (or its
+ * live tab in the runner) changes what the agent is told next run — no XML,
+ * no FEEL, no `&#10;`/`&quot;` escaping to hand-author.
+ *
+ * `import.meta.glob(..., { eager: true, query: "?raw", import: "default" })`
+ * loads every `prompts/*.md` file as a plain string at build time; `.trim()`
+ * drops the trailing newline every text file ends with, since that's an
+ * artifact of the file format, not part of the prompt.
+ */
+const promptFiles = import.meta.glob("./prompts/*.md", {
+  eager: true,
+  query: "?raw",
+  import: "default",
+}) as Record<string, string>;
+const prompts = Object.fromEntries(
+  Object.entries(promptFiles).map(([path, content]) => [
+    templateNameFromPath(path),
+    content.trim(),
+  ]),
+);
+
 
 /**
  * Camunda's "Seed export compliance agent": an AI Agent ad-hoc sub-process that
@@ -193,6 +221,7 @@ export const seedExportCompliance: ExampleDef = {
     },
   ],
   scriptedAgent: SCRIPTED_AGENT,
+  templates: prompts,
   handlers: [
     {
       elementId: "VerifyGeneticMarker",
