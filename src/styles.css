@@ -345,6 +345,38 @@ body {
   height: 360px;
 }
 
+/* The modeler's canvas plus the properties panel (bpmn-js-properties-panel +
+   element templates) sitting alongside it, and a small toolbar above both
+   for the "Apply connector template" control. */
+.model-editor-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.model-editor-toolbar {
+  font-size: 0.9em;
+  color: var(--muted-foreground, #6b7280);
+}
+.model-editor-template-picker select {
+  font: inherit;
+}
+.model-editor-panes {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.model-editor-panes .model-editor-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.model-editor-properties {
+  flex: 0 0 320px;
+  height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+}
+
 /* Forms rendered from the model's .form schemas. */
 .form {
   display: flex;
