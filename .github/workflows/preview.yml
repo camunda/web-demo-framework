@@ -67,9 +67,11 @@ jobs:
           path: dist/
 
   publish:
-    # Runs with the write-scoped token, but never checks out or executes
-    # PR-branch code — it only downloads the already-built artifact from the
-    # `build` job and hands it to the publish action.
+    # Runs with the write-scoped token. It checks out the trusted base ref
+    # (not the PR merge ref) purely so the publish action has a git working
+    # tree to operate `gh-pages` from — it never executes PR-branch code; it
+    # only downloads the already-built artifact from the `build` job and
+    # hands it to the publish action.
     needs: build
     if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -78,6 +80,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: preview-dist
@@ -94,6 +98,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
       - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           action: remove

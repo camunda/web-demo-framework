@@ -13,9 +13,11 @@ than left as an unstated assumption.
 **Decision: GitHub Pages, on a Camunda-controlled origin, separate from the
 docs site.**
 
-Reader-supplied code executes in this page (`src/framework/compile.ts` runs
-handler/agent source via `new Function`; see the sandboxing work in
-[#18](https://github.com/camunda/web-demo-framework/issues/18)). Serving the
+Reader-supplied code is evaluated and executed inside a sandboxed iframe
+(`src/framework/sandbox/`), not in this page's origin — `src/framework/compile.ts`
+only does a host-side syntax preflight via `new Function` and never calls the
+resulting factory; see the sandboxing work in
+[#18](https://github.com/camunda/web-demo-framework/issues/18). Serving the
 demo from the same origin as camunda.com's docs would let that code reach
 docs-origin cookies and storage if the sandbox in #18 is ever misconfigured —
 defence in depth, not a replacement for it. A distinct origin is cheap
