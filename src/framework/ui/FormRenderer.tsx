@@ -180,9 +180,14 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
         data,
         errors,
       }: {
-        data: Record<string, unknown>;
-        errors: Record<string, unknown>;
+        // Nullable on purpose: form-js fires `changed` for *any* state change,
+        // including `setProperty` (see the `disabled` effect below), and its
+        // state starts with `data: null`. So this can run before — or instead
+        // of — any `importSchema`, with nothing to read fields off.
+        data: Record<string, unknown> | null;
+        errors: Record<string, unknown> | null;
       }) => {
+        if (!data) return;
         const keys = getSchemaKeys();
         for (const key of keys) {
           if (!Object.is(data[key], valuesRef.current[key])) {
@@ -193,7 +198,7 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
         // recognises the resulting prop update as our own echo rather than
         // an external change that needs a full re-import.
         lastDataRef.current = stableStringify(data);
-        onValidityChangeRef.current?.(Object.keys(errors).length === 0);
+        onValidityChangeRef.current?.(Object.keys(errors ?? {}).length === 0);
       };
       form.on("changed", handleChanged);
 
@@ -201,6 +206,14 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
         form.off("changed", handleChanged);
         form.destroy();
         formRef.current = null;
+        // `lastDataRef` describes what *this* form instance was last given, so
+        // it must not outlive it. Leaving it set meant the next mount's import
+        // effect saw its own payload as "already imported" and skipped
+        // `importSchema` entirely, leaving a schema-less form. React StrictMode
+        // in development mounts, cleans up, and mounts again — which is exactly
+        // that sequence, and why an example with a start form rendered blank in
+        // `npm run dev` while the production build was fine (issue #50).
+        lastDataRef.current = null;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally created once
     }, []);

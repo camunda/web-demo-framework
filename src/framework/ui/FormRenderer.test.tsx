@@ -1,4 +1,4 @@
-import { createRef } from "react";
+import { createRef, StrictMode } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -108,6 +108,71 @@ describe("FormRenderer — conditional visibility", () => {
     await waitFor(() =>
       expect(screen.getByText("Extra field")).toBeInTheDocument(),
     );
+  });
+});
+
+describe("FormRenderer — StrictMode remount (issue #50)", () => {
+  /**
+   * `main.tsx` renders the app inside `<StrictMode>`, so in development every
+   * effect runs mount → cleanup → mount. The form instance is recreated by that
+   * second mount; anything remembered *about* it must not survive the first.
+   *
+   * When it did, the second mount's import effect recognised its own payload as
+   * already-imported and skipped `importSchema`, leaving a form with no schema.
+   * form-js then fired `changed` with `data: null` from the unrelated
+   * `disabled` `setProperty`, and reading a field off it threw
+   * `TypeError: Cannot read properties of null (reading '<first key>')` —
+   * blanking the whole page, since the throw happens inside an effect.
+   */
+  it("imports the schema into the form the second mount created", async () => {
+    const onValidityChange = vi.fn();
+    const ref = createRef<FormRendererHandle>();
+    render(
+      <StrictMode>
+        <FormRenderer
+          ref={ref}
+          schema={VALIDATION_SCHEMA}
+          values={{ decision: "" }}
+          onChange={() => {}}
+          onValidityChange={onValidityChange}
+        />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Decision")).toBeInTheDocument());
+
+    // Asserted through validation rather than rendered output on purpose: a
+    // destroyed form leaves its markup in the container, so fields stay visible
+    // even when the live instance holds no schema. Validation is answered by the
+    // live instance, so an empty required field can only read as invalid if the
+    // schema actually reached it.
+    let valid = true;
+    act(() => {
+      valid = ref.current!.validate();
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("stays mounted when the form reports a change with no data imported", async () => {
+    const onChange = vi.fn();
+    const onValidityChange = vi.fn();
+    render(
+      <StrictMode>
+        <FormRenderer
+          schema={VALIDATION_SCHEMA}
+          values={{ decision: "" }}
+          onChange={onChange}
+          onValidityChange={onValidityChange}
+          disabled
+        />
+      </StrictMode>,
+    );
+
+    // Reaching the rendered field at all means no effect threw on the way here.
+    await waitFor(() => expect(screen.getByText("Decision")).toBeInTheDocument());
+    // A `changed` event carrying `data: null` must not be mistaken for the
+    // reader clearing every field.
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 
