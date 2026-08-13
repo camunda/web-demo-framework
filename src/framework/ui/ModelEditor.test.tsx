@@ -1,6 +1,6 @@
 import { createRef } from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { BpmnModdle as BpmnModdleType } from "bpmn-moddle";
 import * as BpmnModdleModule from "bpmn-moddle";
 import zeebeModdleDescriptor from "zeebe-bpmn-moddle/resources/zeebe.json";
@@ -297,14 +297,36 @@ describe("ModelEditor component", () => {
    * `undefined` there, and `.catch` on `undefined` throws.
    */
   function stubFullscreenApi() {
-    let resolveRequest: (() => void) | undefined;
-    const requestFullscreen = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveRequest = resolve;
-        }),
-    );
-    const exitFullscreen = vi.fn(() => Promise.resolve());
+    // Captured so the stubs can be removed again: these mutate `Element
+    // .prototype` and `document`, which outlive the test that installed them and
+    // would otherwise make later tests order-dependent.
+    const original = {
+      request: Object.getOwnPropertyDescriptor(
+        Element.prototype,
+        "requestFullscreen",
+      ),
+      exit: Object.getOwnPropertyDescriptor(document, "exitFullscreen"),
+      element: Object.getOwnPropertyDescriptor(document, "fullscreenElement"),
+    };
+
+    // Tracks which element the browser considers fullscreen, so the component's
+    // own `document.fullscreenElement === layout` checks see something real.
+    let fullscreenElement: Element | null = null;
+    let pending: (() => void) | undefined;
+
+    const requestFullscreen = vi.fn(function (this: Element) {
+      return new Promise<void>((resolve) => {
+        pending = () => {
+          fullscreenElement = this;
+          resolve();
+        };
+      });
+    });
+    const exitFullscreen = vi.fn(() => {
+      fullscreenElement = null;
+      return Promise.resolve();
+    });
+
     Object.defineProperty(Element.prototype, "requestFullscreen", {
       value: requestFullscreen,
       configurable: true,
@@ -315,10 +337,36 @@ describe("ModelEditor component", () => {
       configurable: true,
       writable: true,
     });
+    Object.defineProperty(document, "fullscreenElement", {
+      get: () => fullscreenElement,
+      configurable: true,
+    });
+
+    // Registered here rather than left to each caller: a test that forgets the
+    // cleanup leaks a fake Fullscreen API into everything after it.
+    onTestFinished(() => {
+      const restore = (
+        target: object,
+        key: string,
+        descriptor: PropertyDescriptor | undefined,
+      ) => {
+        if (descriptor) Object.defineProperty(target, key, descriptor);
+        else delete (target as Record<string, unknown>)[key];
+      };
+      restore(Element.prototype, "requestFullscreen", original.request);
+      restore(document, "exitFullscreen", original.exit);
+      restore(document, "fullscreenElement", original.element);
+    });
+
     return {
       requestFullscreen,
       exitFullscreen,
-      resolveRequest: () => resolveRequest?.(),
+      /** Settles the in-flight request, as the browser would once it is fullscreen. */
+      resolveRequest: () => pending?.(),
+      /** Hands fullscreen to something else, as other UI on the page could. */
+      setFullscreenElement: (element: Element | null) => {
+        fullscreenElement = element;
+      },
     };
   }
 
@@ -392,6 +440,44 @@ describe("ModelEditor component", () => {
       fireEvent.keyDown(window, { key: "Escape" });
     });
     expect(exitFullscreen).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves another element's fullscreen alone", async () => {
+    // Something else on the page can take fullscreen from us — the browser then
+    // fires `fullscreenchange` with a different element in it. Collapsing our
+    // own overlay is right; ending *their* fullscreen is not ours to do.
+    const { exitFullscreen, resolveRequest, setFullscreenElement } =
+      stubFullscreenApi();
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-element-id]").length,
+      ).toBeGreaterThan(0),
+    );
+    const button = container.querySelector(
+      ".model-editor-expand",
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await act(async () => {
+      resolveRequest();
+    });
+
+    const other = document.createElement("div");
+    document.body.appendChild(other);
+    await act(async () => {
+      setFullscreenElement(other);
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+
+    expect(exitFullscreen).not.toHaveBeenCalled();
+    // Our own overlay still closes — the editor is no longer the fullscreen view.
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    other.remove();
   });
 
   it("keeps the same value/onChange contract signature the XML editor used", () => {

@@ -351,10 +351,13 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   const collapse = useCallback(() => {
     fullscreenSeqRef.current += 1;
     setExpanded(false);
-    if (ownsFullscreenRef.current) {
-      ownsFullscreenRef.current = false;
-      exitFullscreen();
-    }
+    if (!ownsFullscreenRef.current) return;
+    ownsFullscreenRef.current = false;
+    // Only leave fullscreen if we are still the element in it. By the time the
+    // `fullscreenchange` handler reaches here the browser has already left it —
+    // or, if something else on the page claimed fullscreen from us, that
+    // element's fullscreen is not ours to end.
+    if (document.fullscreenElement === layoutRef.current) exitFullscreen();
   }, []);
 
   // Escape leaves the expanded view. Bound only while expanded, so it can't
