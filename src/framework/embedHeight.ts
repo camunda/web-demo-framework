@@ -1,21 +1,21 @@
-import { useEffect } from "react";
-
 /**
- * Reports the document's height to the embedding page, so an `?embed=1` iframe
- * can be sized to its content instead of being given a guessed fixed height.
+ * Height reporting for `?embed=1`, so an embedding page can size its iframe to
+ * this document instead of guessing.
  *
- * Without this the host has to pick a height, and whatever it picks is wrong:
- * too short and the runner gets its own scrollbar inside the page's scrollbar
- * (scrolling within scrolling, and the diagram half-visible), too tall and the
- * embed ends in dead space. The host listens for these messages and follows.
+ * Any guessed height is wrong: too short and the runner gets its own scrollbar
+ * inside the page's scrollbar (scrolling within scrolling, and the diagram half
+ * visible), too tall and the embed ends in dead space.
  *
  * Only the height travels, and only to `window.parent` — no page content, no
- * reader input. `targetOrigin` is `"*"` because the framework has no way to
- * know which origin embedded it, and a viewport height is not a secret. The
- * host is expected to verify the *source* (`event.source === iframe
- * .contentWindow`) rather than trust the origin, which is the check that
- * actually establishes it came from this frame.
+ * reader input. `targetOrigin` is `"*"` because the framework has no way to know
+ * which origin embedded it, and a viewport height is not a secret. The host is
+ * expected to verify the *source* of a message — `event.source` against its own
+ * `iframe.contentWindow` — rather than trust an origin, since that is the check
+ * which actually establishes a message came from this frame.
  */
+import { useEffect } from "react";
+
+/** The message this frame posts; the host matches on this `type`. */
 export const EMBED_HEIGHT_MESSAGE = "web-demo-framework:height";
 
 /**
@@ -39,11 +39,6 @@ export function buildEmbedHeightMessage(height: number): EmbedHeightMessage {
 }
 
 /**
- * Posts the document height to the parent on mount and on every change, while
- * `enabled`. A no-op when not embedded (`window.parent === window`), so calling
- * it unconditionally from the app shell is safe.
- */
-/**
  * Marks the document as content-sized while embedded. `styles.css` pins
  * `html`, `body` and `#root` to `height: 100%` so the standalone app fills the
  * window — but that makes their boxes exactly the iframe's height forever,
@@ -52,6 +47,14 @@ export function buildEmbedHeightMessage(height: number): EmbedHeightMessage {
  */
 const AUTO_HEIGHT_CLASS = "embed-height-auto";
 
+/**
+ * Posts the document height to the parent while `enabled`: on mount, whenever a
+ * ResizeObserver sees the document change, and whenever the host asks with
+ * {@link EMBED_HEIGHT_REQUEST}.
+ *
+ * A no-op when not embedded (`window.parent === window`), so calling it
+ * unconditionally from the app shell is safe.
+ */
 export function useEmbedHeightReporter(enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;

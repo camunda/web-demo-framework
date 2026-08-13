@@ -5,10 +5,11 @@ import {
 } from "./embedHeight";
 
 /**
- * The hook itself needs a real ResizeObserver and a parent frame, neither of
- * which jsdom provides (`vitest.setup.ts` stubs the observer as a no-op), so
- * it belongs in a browser smoke test. The message contract is what the host
- * depends on, and that is testable here.
+ * The hook itself needs a parent frame and a `ResizeObserver`, and jsdom has
+ * neither — it does not implement `ResizeObserver` at all, and it computes no
+ * layout for one to report on — so exercising it belongs in a browser smoke
+ * test. The message contract is what a host actually depends on, and that is
+ * testable here.
  */
 describe("buildEmbedHeightMessage", () => {
   it("carries the type the host matches on, and nothing else", () => {
