@@ -13,6 +13,15 @@ body,
   height: 100%;
 }
 
+/* Set on <html> by framework/embedHeight.ts while embedded. The 100% above
+   would otherwise pin these boxes to the iframe's height no matter how tall the
+   content grew, leaving the height reporter with nothing to observe. */
+.embed-height-auto,
+.embed-height-auto body,
+.embed-height-auto #root {
+  height: auto;
+}
+
 body {
   background: var(--background, #f7f8fa);
   color: var(--foreground, #1a1a1a);
@@ -76,7 +85,10 @@ body {
   max-width: none;
   margin: 0;
   padding: 12px;
-  min-height: 100vh;
+  /* Deliberately no `min-height`: the host sizes the iframe to this document's
+     height (see framework/embedHeight.ts). Claiming 100vh would mean claiming
+     the height the host just granted, so the two would ratchet each other
+     upwards instead of settling. */
 }
 
 .runner {

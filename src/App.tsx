@@ -5,6 +5,7 @@ import { useRoute } from "./framework/useRoute";
 import { examplePath, galleryPath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
 import { readTourParam } from "./framework/tour";
+import { useEmbedHeightReporter } from "./framework/embedHeight";
 
 /**
  * The gallery shell, plus routing:
@@ -26,6 +27,9 @@ export function App() {
   const { route, embed } = useRoute();
   const initialBrainKind = readDeepLinkState().brain;
   const initialTourId = readTourParam();
+  // Embedded, the host sizes the iframe from these messages, so the runner
+  // never needs a scrollbar of its own inside the page's.
+  useEmbedHeightReporter(embed);
 
   const activeId = route.kind === "example" ? route.id : EXAMPLES[0].id;
   const example = EXAMPLES.find((e) => e.id === activeId) ?? EXAMPLES[0];
