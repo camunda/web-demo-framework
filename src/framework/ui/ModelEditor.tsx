@@ -381,24 +381,43 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     };
   }, [expanded]);
 
-  // Ask for real full screen once the overlay is up, and keep our state honest
-  // when the browser leaves it without going through our button (Escape, F11,
-  // switching tabs on some platforms).
-  useEffect(() => {
+  // Whether *this* component is the current fullscreen element. Without it,
+  // exiting or collapsing would react to any other element on the page entering
+  // or leaving fullscreen, which is none of this component's business.
+  const ownsFullscreenRef = useRef(false);
+
+  // Toggling happens here rather than in an effect on `expanded`, because
+  // `requestFullscreen()` needs transient user activation: called from an effect
+  // it is at the mercy of when React chooses to flush, and a browser that has
+  // already discarded the activation rejects it outright.
+  const toggleExpanded = () => {
+    const next = !expanded;
+    setExpanded(next);
     const layout = layoutRef.current;
     if (!layout) return;
-    if (expanded && !document.fullscreenElement) {
+    if (next) {
       // Refused when the embedding page omits `allow="fullscreen"` — the CSS
-      // overlay is already applied, so that refusal costs nothing.
-      void layout.requestFullscreen?.().catch(() => {});
-    } else if (!expanded && document.fullscreenElement) {
+      // overlay is applied either way, so that refusal costs nothing.
+      void layout
+        .requestFullscreen?.()
+        .then(() => {
+          ownsFullscreenRef.current = true;
+        })
+        .catch(() => {});
+    } else if (ownsFullscreenRef.current) {
+      ownsFullscreenRef.current = false;
       void document.exitFullscreen?.().catch(() => {});
     }
-  }, [expanded]);
+  };
 
+  // Keep our state honest when the browser leaves fullscreen without going
+  // through the button — Escape, F11, or the platform doing it for us.
   useEffect(() => {
     const onFullscreenChange = () => {
-      if (!document.fullscreenElement) setExpanded(false);
+      if (document.fullscreenElement === layoutRef.current) return;
+      if (!ownsFullscreenRef.current) return;
+      ownsFullscreenRef.current = false;
+      setExpanded(false);
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () =>
@@ -453,7 +472,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
           type="button"
           className="model-editor-expand"
           aria-pressed={expanded}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={toggleExpanded}
         >
           {expanded ? "Exit full screen (Esc)" : "Full screen"}
         </button>

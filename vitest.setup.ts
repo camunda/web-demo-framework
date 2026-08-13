@@ -28,11 +28,13 @@ if (typeof SVGElement !== "undefined") {
   }
 }
 // jsdom implements no `ResizeObserver`, which `ModelEditor.tsx` uses to refit
-// the bpmn-js canvas whenever its box changes. A stub that records the callback
-// and never fires is enough here: these tests assert on structure and the
-// expanded-layout toggle, not on layout geometry jsdom never computes anyway.
+// the bpmn-js canvas whenever its box changes. This stub takes the callback and
+// keeps it, matching the real constructor's signature, but never invokes it:
+// jsdom computes no layout, so there is no box change to report, and these tests
+// assert on structure and the expanded-layout toggle rather than geometry.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
+    constructor(private readonly callback: ResizeObserverCallback) {}
     observe() {}
     unobserve() {}
     disconnect() {}
