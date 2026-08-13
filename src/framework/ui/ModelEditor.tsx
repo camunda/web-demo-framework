@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Modeler from "bpmn-js/lib/Modeler";
 import zeebeModdleDescriptor from "zeebe-bpmn-moddle/resources/zeebe.json";
 import {
@@ -320,17 +320,41 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     setApplyNonce((n) => n + 1);
   };
 
+  // Whether *this* component is the current fullscreen element. Without it,
+  // exiting or collapsing would react to any other element on the page entering
+  // or leaving fullscreen, which is none of this component's business.
+  const ownsFullscreenRef = useRef(false);
+
+  // Bumped by every expand and every collapse, so a `requestFullscreen()` still
+  // in flight can tell it has been superseded. It resolves asynchronously and
+  // nothing cancels it: collapse before it settles and the browser would go
+  // fullscreen with the overlay already closed, claiming ownership of a view the
+  // reader has shut.
+  const fullscreenSeqRef = useRef(0);
+
+  // Collapsing is shared, not inlined, because three paths reach it — the
+  // button, Escape, and the browser leaving fullscreen on its own — and every
+  // one of them has to invalidate an in-flight request.
+  const collapse = useCallback(() => {
+    fullscreenSeqRef.current += 1;
+    setExpanded(false);
+    if (ownsFullscreenRef.current) {
+      ownsFullscreenRef.current = false;
+      void document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
+
   // Escape leaves the expanded view. Bound only while expanded, so it can't
   // swallow Escape from anything else on the page (a properties-panel popup,
   // a dialog) the rest of the time.
   useEffect(() => {
     if (!expanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExpanded(false);
+      if (event.key === "Escape") collapse();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [expanded]);
+  }, [expanded, collapse]);
 
   // The canvas doesn't observe its own box, so unless it's told, the diagram
   // keeps the old viewport after the container grows — the container is bigger,
@@ -381,33 +405,33 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     };
   }, [expanded]);
 
-  // Whether *this* component is the current fullscreen element. Without it,
-  // exiting or collapsing would react to any other element on the page entering
-  // or leaving fullscreen, which is none of this component's business.
-  const ownsFullscreenRef = useRef(false);
-
-  // Toggling happens here rather than in an effect on `expanded`, because
-  // `requestFullscreen()` needs transient user activation: called from an effect
-  // it is at the mercy of when React chooses to flush, and a browser that has
-  // already discarded the activation rejects it outright.
+  // Expanding happens on the click rather than in an effect on `expanded`,
+  // because `requestFullscreen()` needs transient user activation: from an effect
+  // it is at the mercy of when React flushes, and a browser that has already
+  // discarded the activation rejects it outright.
   const toggleExpanded = () => {
-    const next = !expanded;
-    setExpanded(next);
+    if (expanded) {
+      collapse();
+      return;
+    }
+    setExpanded(true);
     const layout = layoutRef.current;
     if (!layout) return;
-    if (next) {
-      // Refused when the embedding page omits `allow="fullscreen"` — the CSS
-      // overlay is applied either way, so that refusal costs nothing.
-      void layout
-        .requestFullscreen?.()
-        .then(() => {
-          ownsFullscreenRef.current = true;
-        })
-        .catch(() => {});
-    } else if (ownsFullscreenRef.current) {
-      ownsFullscreenRef.current = false;
-      void document.exitFullscreen?.().catch(() => {});
-    }
+    const seq = (fullscreenSeqRef.current += 1);
+    // Refused when the embedding page omits `allow="fullscreen"` — the CSS
+    // overlay is applied either way, so that refusal costs nothing.
+    void layout
+      .requestFullscreen?.()
+      .then(() => {
+        if (seq !== fullscreenSeqRef.current) {
+          // Collapsed while this was in flight. Undo it rather than leaving the
+          // browser fullscreen on a view the reader has already closed.
+          void document.exitFullscreen?.().catch(() => {});
+          return;
+        }
+        ownsFullscreenRef.current = true;
+      })
+      .catch(() => {});
   };
 
   // Keep our state honest when the browser leaves fullscreen without going
@@ -416,13 +440,12 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     const onFullscreenChange = () => {
       if (document.fullscreenElement === layoutRef.current) return;
       if (!ownsFullscreenRef.current) return;
-      ownsFullscreenRef.current = false;
-      setExpanded(false);
+      collapse();
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () =>
       document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, []);
+  }, [collapse]);
 
   const selectedLabel =
     selected?.businessObject?.name ?? selected?.businessObject?.id ?? null;
