@@ -289,6 +289,111 @@ describe("ModelEditor component", () => {
     expect(button.textContent).toBe("Full screen");
   });
 
+  /**
+   * jsdom implements no Fullscreen API, so these install one. That absence is
+   * itself worth noting: it is why `requestFullscreen`/`exitFullscreen` are
+   * called through their return values rather than as
+   * `document.exitFullscreen?.().catch(…)` — optional chaining yields
+   * `undefined` there, and `.catch` on `undefined` throws.
+   */
+  function stubFullscreenApi() {
+    let resolveRequest: (() => void) | undefined;
+    const requestFullscreen = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const exitFullscreen = vi.fn(() => Promise.resolve());
+    Object.defineProperty(Element.prototype, "requestFullscreen", {
+      value: requestFullscreen,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(document, "exitFullscreen", {
+      value: exitFullscreen,
+      configurable: true,
+      writable: true,
+    });
+    return {
+      requestFullscreen,
+      exitFullscreen,
+      resolveRequest: () => resolveRequest?.(),
+    };
+  }
+
+  it("exits fullscreen when the request resolves after the reader collapsed", async () => {
+    // `requestFullscreen()` resolves asynchronously and nothing cancels it.
+    // Collapse first and the browser would otherwise go fullscreen on a view
+    // that is already closed, and record itself as owning it.
+    const { requestFullscreen, exitFullscreen, resolveRequest } =
+      stubFullscreenApi();
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-element-id]").length,
+      ).toBeGreaterThan(0),
+    );
+    const button = container.querySelector(
+      ".model-editor-expand",
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+    // Collapsed while the request is still in flight.
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(exitFullscreen).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRequest();
+    });
+
+    expect(exitFullscreen).toHaveBeenCalledTimes(1);
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("exits fullscreen on collapse when it owns it, and only then", async () => {
+    const { exitFullscreen, resolveRequest } = stubFullscreenApi();
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-element-id]").length,
+      ).toBeGreaterThan(0),
+    );
+    const button = container.querySelector(
+      ".model-editor-expand",
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    // Resolving while still expanded is the ordinary path: ownership is taken,
+    // so collapsing has something to release.
+    await act(async () => {
+      resolveRequest();
+    });
+    expect(exitFullscreen).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(exitFullscreen).toHaveBeenCalledTimes(1);
+
+    // Collapsing again must not call it a second time — nothing is owned now.
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(exitFullscreen).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the same value/onChange contract signature the XML editor used", () => {
     // Purely a type-level guard so a future edit can't silently widen the
     // props beyond the deliberately dumb `value` in / `onChange` out seam.

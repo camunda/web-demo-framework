@@ -30,6 +30,19 @@ import inventoryCheckTemplate from "../element-templates/inventory-check.json";
 const ELEMENT_TEMPLATES = [inventoryCheckTemplate];
 
 /**
+ * Leaves fullscreen, tolerating a browser that has no Fullscreen API.
+ *
+ * `document.exitFullscreen?.()` evaluates to `undefined` when the method is
+ * absent, and calling `.catch` on that throws — in exactly the environments the
+ * optional chaining was meant to tolerate. Same for `requestFullscreen` at the
+ * call site below.
+ */
+function exitFullscreen(): void {
+  const exiting = document.exitFullscreen?.();
+  if (exiting) void exiting.catch(() => {});
+}
+
+/**
  * The bpmn-js/moddle types this component talks to (`ElementTemplates`,
  * selection service, the modeler's business object shape) aren't exported by
  * `@types/bpmn-moddle` in a way that covers every property used here, so this
@@ -340,7 +353,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     setExpanded(false);
     if (ownsFullscreenRef.current) {
       ownsFullscreenRef.current = false;
-      void document.exitFullscreen?.().catch(() => {});
+      exitFullscreen();
     }
   }, []);
 
@@ -418,15 +431,17 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     const layout = layoutRef.current;
     if (!layout) return;
     const seq = (fullscreenSeqRef.current += 1);
-    // Refused when the embedding page omits `allow="fullscreen"` — the CSS
-    // overlay is applied either way, so that refusal costs nothing.
-    void layout
-      .requestFullscreen?.()
+    // Absent where the browser has no Fullscreen API; refused where the
+    // embedding page omits `allow="fullscreen"`. The CSS overlay is applied
+    // either way, so neither costs anything.
+    const request = layout.requestFullscreen?.();
+    if (!request) return;
+    void request
       .then(() => {
         if (seq !== fullscreenSeqRef.current) {
           // Collapsed while this was in flight. Undo it rather than leaving the
           // browser fullscreen on a view the reader has already closed.
-          void document.exitFullscreen?.().catch(() => {});
+          exitFullscreen();
           return;
         }
         ownsFullscreenRef.current = true;
