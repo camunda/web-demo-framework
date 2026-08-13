@@ -34,12 +34,8 @@ import { useBrain } from "../useBrain";
 import type { BrainKind } from "../brains/types";
 import { patchDeepLinkState } from "../deepLink";
 import { BrainPanel } from "./BrainPanel";
-import {
-  FormRenderer,
-  formDefaults,
-  type FormRendererHandle,
-  type FormSchema,
-} from "./FormRenderer";
+import type { FormRendererHandle } from "./FormRenderer";
+import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
@@ -81,6 +77,15 @@ const Editor = lazy(() => import("./MonacoEditor"));
 // this file otherwise keeps clear (see `tools/bundle-budget/check.mjs`'s
 // `modeler-on-demand` budget).
 const ModelEditor = lazy(() => import("./ModelEditor"));
+// `@bpmn-io/form-js-viewer` brings luxon, flatpickr, dompurify, marked and the
+// lezer/feel parsers with it — the single largest cluster on what used to be the
+// initial-load path, for a panel only examples with a `.form` ever render. The
+// pure schema helpers it used to export live in `./formSchema` so seeding
+// default values doesn't pull the viewer back in.
+const FormRenderer = lazy(async () => {
+  const { FormRenderer } = await import("./FormRenderer");
+  return { default: FormRenderer };
+});
 
 function safeStringify(value: unknown, space?: number): string {
   try {
@@ -736,16 +741,18 @@ export function ExampleRunner({
                   </Alert>
                 )}
                 {reviewSchema && (
-                  <FormRenderer
-                    ref={reviewFormRef}
-                    schema={reviewSchema}
-                    values={reviewValues}
-                    onChange={(k, v) =>
-                      setReviewValues((prev) => ({ ...prev, [k]: v }))
-                    }
-                    context={displayVars}
-                    onValidityChange={setReviewFormValid}
-                  />
+                  <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+                    <FormRenderer
+                      ref={reviewFormRef}
+                      schema={reviewSchema}
+                      values={reviewValues}
+                      onChange={(k, v) =>
+                        setReviewValues((prev) => ({ ...prev, [k]: v }))
+                      }
+                      context={displayVars}
+                      onValidityChange={setReviewFormValid}
+                    />
+                  </Suspense>
                 )}
                 <Button
                   onClick={submitUserTask}
@@ -850,16 +857,18 @@ export function ExampleRunner({
                 </div>
               )}
               {startSchema ? (
-                <FormRenderer
-                  ref={startFormRef}
-                  schema={startSchema}
-                  values={startValues}
-                  onChange={(k, v) =>
-                    setStartValues((prev) => ({ ...prev, [k]: v }))
-                  }
-                  disabled={running}
-                  onValidityChange={setStartFormValid}
-                />
+                <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+                  <FormRenderer
+                    ref={startFormRef}
+                    schema={startSchema}
+                    values={startValues}
+                    onChange={(k, v) =>
+                      setStartValues((prev) => ({ ...prev, [k]: v }))
+                    }
+                    disabled={running}
+                    onValidityChange={setStartFormValid}
+                  />
+                </Suspense>
               ) : (
                 <pre className="vars">{safeStringify(startValues, 2)}</pre>
               )}

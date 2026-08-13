@@ -6,6 +6,7 @@ import {
 } from "react";
 import { Form } from "@bpmn-io/form-js-viewer";
 import "@bpmn-io/form-js-viewer/dist/assets/form-js.css";
+import { collectKeys, type FormSchema } from "./formSchema";
 
 /**
  * Renders a Camunda `.form` schema — the same JSON the model's `formId` points
@@ -25,10 +26,15 @@ import "@bpmn-io/form-js-viewer/dist/assets/form-js.css";
  * `undefined.context`. Fixed with `resolve.dedupe: ["preact"]` in
  * vite.config.ts — that holds for both `npm run dev` and `npm run build`,
  * which resolve dependencies differently.
+ *
+ * Loaded via `lazy()` from `ExampleRunner.tsx`: form-js pulls luxon, flatpickr,
+ * dompurify, marked and the lezer/feel parsers with it, and only examples with
+ * a `.form` ever render this. Anything the eager path needs belongs in
+ * `./formSchema`, not here — importing this module at all costs that whole
+ * chunk (see `tools/bundle-budget/check.mjs`).
  */
 
-/** Opaque — the exact shape is `@bpmn-io/form-js`'s schema JSON. */
-export type FormSchema = Record<string, unknown>;
+export type { FormSchema };
 
 export interface FormRendererHandle {
   /**
@@ -56,15 +62,6 @@ export interface FormRendererProps {
   onValidityChange?(valid: boolean): void;
 }
 
-interface ComponentNode {
-  key?: unknown;
-  components?: unknown;
-}
-
-function isComponentNode(value: unknown): value is ComponentNode {
-  return typeof value === "object" && value !== null;
-}
-
 /**
  * `JSON.stringify` with object keys sorted, so two payloads with the same
  * content but different key insertion order (form-js's internal data model
@@ -81,32 +78,6 @@ function stableStringify(value: unknown): string {
     }
     return val;
   });
-}
-
-/** Every field `key` in the schema, walking nested `components` (e.g. groups). */
-function collectKeys(schema: FormSchema): Set<string> {
-  const keys = new Set<string>();
-  const visit = (node: unknown) => {
-    if (!isComponentNode(node)) return;
-    if (typeof node.key === "string") keys.add(node.key);
-    if (Array.isArray(node.components)) node.components.forEach(visit);
-  };
-  visit(schema);
-  return keys;
-}
-
-/** Seed values for a schema, from each field's `defaultValue`. */
-export function formDefaults(schema: FormSchema): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const visit = (node: unknown) => {
-    if (!isComponentNode(node)) return;
-    if (typeof node.key === "string" && "defaultValue" in node) {
-      out[node.key] = (node as { defaultValue?: unknown }).defaultValue ?? "";
-    }
-    if (Array.isArray(node.components)) node.components.forEach(visit);
-  };
-  visit(schema);
-  return out;
 }
 
 export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(

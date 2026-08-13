@@ -31,10 +31,17 @@ const manifestPath = path.join(distDir, ".vite", "manifest.json");
  * because there is no distinct `/embed` entry point yet (issue #8 hasn't
  * landed) — both measure the one existing entry, `index.html`. Once issue
  * #8 adds a separate embed bundle, split this into two real entries here.
+ *
+ * The initial-JS budget dropped from 300 to 240 when `@bpmn-io/form-js-viewer`
+ * moved behind a `lazy()` boundary (actual: ~204 kB). A budget left at the old
+ * ceiling would let that 96 kB of headroom be spent again without anyone
+ * noticing — which is how it went over in the first place. ~36 kB of slack is
+ * deliberate: enough for ordinary feature work, not enough to absorb another
+ * multi-hundred-kB dependency landing on the eager path.
  */
 const BUDGETS_KB = {
-  "gallery-initial-js": 300,
-  "embed-initial-js": 300,
+  "gallery-initial-js": 240,
+  "embed-initial-js": 240,
   "monaco-on-demand": 950,
   "webllm-on-demand": 2200,
   "modeler-on-demand": 950,

@@ -1,12 +1,8 @@
 import { createRef, StrictMode } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import {
-  FormRenderer,
-  formDefaults,
-  type FormRendererHandle,
-  type FormSchema,
-} from "./FormRenderer";
+import { FormRenderer, type FormRendererHandle } from "./FormRenderer";
+import { formDefaults, type FormSchema } from "./formSchema";
 
 /**
  * Fixtures covering the behaviour that used to be hand-rolled in this
