@@ -27,6 +27,18 @@ if (typeof SVGElement !== "undefined") {
     SVGElement.prototype.getCTM = () => null;
   }
 }
+// jsdom implements no `ResizeObserver`, which `ModelEditor.tsx` uses to refit
+// the bpmn-js canvas whenever its box changes. A stub that records the callback
+// and never fires is enough here: these tests assert on structure and the
+// expanded-layout toggle, not on layout geometry jsdom never computes anyway.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+
 // `SVGMatrix` and `SVGTransform` are absent from jsdom as *globals*, not just
 // as methods — and `tiny-svg`'s `wrapMatrix` does a bare
 // `transform instanceof SVGMatrix`, which throws `ReferenceError: SVGMatrix is

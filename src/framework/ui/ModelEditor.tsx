@@ -124,12 +124,15 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   // Expand the editor to fill the viewport. 360px of canvas beside a 320px
   // properties panel is workable for a nudge and cramped for real modelling.
   //
-  // This is a CSS overlay rather than the Fullscreen API deliberately: the
-  // runner is embeddable (`?embed=1`), and `requestFullscreen()` inside an
-  // iframe is refused unless the *host* page sets `allow="fullscreen"` —
-  // which is not ours to guarantee. A fixed-position overlay fills whatever
-  // box the app is given, embed or not, and leaves Escape handling to us.
+  // A CSS overlay (`position: fixed; inset: 0`) is the baseline, because
+  // `requestFullscreen()` inside an iframe is refused unless the *host* page
+  // sets `allow="fullscreen"`, which is not ours to guarantee. But when the
+  // host does allow it, the overlay alone is a poor "full screen": embedded, it
+  // fills the iframe's box rather than the display, so the page around it —
+  // scrollbar included — is still there. So: apply the overlay, then *try* the
+  // real thing on top of it, and fall back silently when it's refused.
   const [expanded, setExpanded] = useState(false);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
   // The last XML this component itself produced via `saveXML()`. `onChange`
   // round-trips through the host's state and comes straight back as the next
   // `value` prop — without this guard, that round-trip would trigger a
@@ -329,38 +332,85 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [expanded]);
 
-  // The canvas doesn't observe its own box, so after the overlay resizes it
-  // the diagram would keep the old viewport — scrollbars, clipped elements,
-  // and a zoom that no longer fits. Tell it, then refit.
+  // The canvas doesn't observe its own box, so unless it's told, the diagram
+  // keeps the old viewport after the container grows — the container is bigger,
+  // the drawing isn't, and the only thing that visibly moves is the bpmn.io
+  // logo pinned to the container's corner.
+  //
+  // Watch the box itself rather than the `expanded` flag plus a window resize.
+  // Neither of those is the event that matters: entering or leaving the overlay
+  // fires no `resize` at all when the app is embedded (the iframe's own size
+  // never changes), a single `requestAnimationFrame` can land before the new
+  // layout has settled, and the real Fullscreen API transition finishes later
+  // still. A ResizeObserver fires on the actual thing being waited for, however
+  // the resize was caused.
   useEffect(() => {
     const modeler = modelerRef.current;
-    if (!modeler) return;
+    const canvasEl = containerRef.current;
+    if (!modeler || !canvasEl) return;
     const refit = () => {
       const canvas = modeler.get<{
         resized: () => void;
         zoom: (mode: string) => void;
       }>("canvas");
-      canvas.resized();
-      canvas.zoom("fit-viewport");
+      try {
+        canvas.resized();
+        canvas.zoom("fit-viewport");
+      } catch {
+        // A ResizeObserver reports the element's initial size as soon as it's
+        // observed, which is before the first `importXML` has given the canvas
+        // a root — `fit-viewport` has nothing to fit and throws. Ignore it: the
+        // import fits the viewport itself, and every later resize has a root.
+      }
     };
-    // One frame later: the class change has to land and lay out before the
-    // canvas can measure anything useful.
-    const frame = requestAnimationFrame(refit);
-    // While expanded, the overlay's box can change again independently of
-    // the `expanded` toggle (window resize, device rotation) — keep the
-    // canvas in sync with it or the viewport goes stale.
-    if (expanded) window.addEventListener("resize", refit);
+    const observer = new ResizeObserver(() => refit());
+    observer.observe(canvasEl);
+    return () => observer.disconnect();
+  }, []);
+
+  // Lock the page behind the overlay while it's up. Without this the document
+  // underneath keeps its scrollbar — visible beside a "full screen" editor, and
+  // scrollable, which drags the page around under the overlay.
+  useEffect(() => {
+    if (!expanded) return;
+    const { body } = document;
+    const previous = body.style.overflow;
+    body.style.overflow = "hidden";
     return () => {
-      cancelAnimationFrame(frame);
-      if (expanded) window.removeEventListener("resize", refit);
+      body.style.overflow = previous;
     };
   }, [expanded]);
+
+  // Ask for real full screen once the overlay is up, and keep our state honest
+  // when the browser leaves it without going through our button (Escape, F11,
+  // switching tabs on some platforms).
+  useEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout) return;
+    if (expanded && !document.fullscreenElement) {
+      // Refused when the embedding page omits `allow="fullscreen"` — the CSS
+      // overlay is already applied, so that refusal costs nothing.
+      void layout.requestFullscreen?.().catch(() => {});
+    } else if (!expanded && document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => {});
+    }
+  }, [expanded]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setExpanded(false);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () =>
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
 
   const selectedLabel =
     selected?.businessObject?.name ?? selected?.businessObject?.id ?? null;
 
   return (
     <div
+      ref={layoutRef}
       className={
         expanded
           ? "model-editor-layout model-editor-layout--expanded"
