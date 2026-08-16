@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BrowserBrain,
   DEFAULT_BROWSER_MODEL,
+  isDeviceLostError,
   isModelCached,
   webgpuAvailable,
   webgpuUnavailableReason,
@@ -98,6 +99,34 @@ export function useBrain(): BrainControls {
   const [chat, setChat] = useState<ChatFn | null>(null);
   const brainRef = useRef<BrowserBrain | EndpointBrain | null>(null);
 
+  /**
+   * Wraps a brain's `chat` so a fatal failure mid-run is visible.
+   *
+   * Without this the panel keeps saying "ready" while every call throws: the
+   * agent completes having activated nothing, the process takes its default
+   * path, and the page presents an infrastructure failure as a business
+   * outcome — "the agent flagged this shipment for manual review", with no
+   * findings, because there was never a model behind it.
+   */
+  const watchChat = useCallback((brain: BrowserBrain | EndpointBrain): ChatFn => {
+    return async (...args) => {
+      try {
+        return await brain.chat(...args);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (brain instanceof BrowserBrain && isDeviceLostError(message)) {
+          // `BrowserBrain.chat` has already torn its engine down; reflect that
+          // rather than leaving a Connect button that early-returns "fine".
+          setChat(null);
+          setModelInUse(null);
+          setStatus("error");
+          setError(message);
+        }
+        throw e;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     void webgpuUnavailableReason().then((reason) => {
       setWebgpuReason(reason);
@@ -183,7 +212,7 @@ export function useBrain(): BrainControls {
         brainRef.current = brain;
         const id = await brain.connect(browserModel, setProgress);
         setModelInUse(id);
-        setChat(() => brain.chat);
+        setChat(() => watchChat(brain));
         setBrowserModelCached(true);
       } else {
         brainRef.current?.dispose();
@@ -191,7 +220,7 @@ export function useBrain(): BrainControls {
         brainRef.current = brain;
         const id = await brain.connect();
         setModelInUse(id);
-        setChat(() => brain.chat);
+        setChat(() => watchChat(brain));
       }
       setStatus("ready");
     } catch (e) {
@@ -206,7 +235,15 @@ export function useBrain(): BrainControls {
     } finally {
       setProgress(null);
     }
-  }, [kind, browserModel, endpointUrl, endpointModel, apiKey, disconnect]);
+  }, [
+    kind,
+    browserModel,
+    endpointUrl,
+    endpointModel,
+    apiKey,
+    disconnect,
+    watchChat,
+  ]);
 
   return {
     kind,

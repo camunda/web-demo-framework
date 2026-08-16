@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BROWSER_MODELS,
   DEFAULT_BROWSER_MODEL,
+  deviceLostAdvice,
   estimateAvailableVramMB,
   insufficientVramReason,
+  isDeviceLostError,
   webgpuAvailable,
   webgpuUnavailableReason,
 } from "./browser";
@@ -138,5 +140,73 @@ describe("BrowserBrain WebLLM import stays lazy", () => {
     // `.then()`, so don't require `await` here.
     const dynamicImport = /import\(\s*["']@mlc-ai\/web-llm["']\s*\)/;
     expect(browserSource).toMatch(dynamicImport);
+  });
+});
+
+describe("isDeviceLostError", () => {
+  /**
+   * The strings a lost GPU actually produces, collected from a real failure:
+   * Dawn's D3D12 wording, the WebGPU spec's own, WebLLM's log line, and the
+   * tvmjs error every later call throws once its handles are dead. They arrive
+   * from three different layers, which is why this matches on all of them
+   * rather than one canonical message.
+   */
+  it.each([
+    "ID3D12Device::GetDeviceRemovedReason failed with DXGI_ERROR_DEVICE_HUNG (0x887A0006)",
+    "D3D12 create command queue failed with DXGI_ERROR_DEVICE_REMOVED (0x887A0005)",
+    "Device was lost. This can happen due to insufficient memory or other GPU constraints.",
+    "Detailed error: [object GPUDeviceLostInfo]",
+    "Object has already been disposed",
+  ])("recognises %s", (message) => {
+    expect(isDeviceLostError(message)).toBe(true);
+  });
+
+  it("leaves ordinary failures alone", () => {
+    for (const message of [
+      "Failed to fetch",
+      "HTTP 404 while downloading params_shard_0.bin",
+      "BrowserBrain.chat called before connect()",
+    ]) {
+      expect(isDeviceLostError(message)).toBe(false);
+    }
+  });
+
+  it("gives advice about the GPU rather than the network", () => {
+    // The original message told the reader to check their connection while the
+    // actual cause was a driver reset — which is what sent this diagnosis down
+    // the wrong path for an afternoon.
+    expect(deviceLostAdvice()).toMatch(/driver/i);
+    expect(deviceLostAdvice()).not.toMatch(/check your connection/i);
+  });
+});
+
+/**
+ * Source assertions have to read code, not prose: the comments in `browser.ts`
+ * explain at length why `reload()` is not used, and matching those would make
+ * the guard pass or fail on documentation.
+ */
+function withoutComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+describe("BrowserBrain engine hosting", () => {
+  const code = withoutComments(browserSource);
+
+  it("runs the engine in a worker rather than on the page's thread", () => {
+    // GPU work submitted from the thread that also runs React, bpmn-js and
+    // Monaco is what hung the driver; WebLLM's own demo uses a worker. Assert
+    // on the source, since nothing else distinguishes the two at runtime here.
+    expect(code).toMatch(/CreateWebWorkerMLCEngine/);
+    expect(code).toMatch(/webllm\.worker/);
+    expect(code).not.toMatch(/\bCreateMLCEngine\b/);
+  });
+
+  it("rebuilds the engine on connect instead of reloading a used one", () => {
+    // `engine.reload()` keeps the same device, so a lost one stays lost — and
+    // it can resolve against a dead device, which is how the brain came to
+    // report "connected" over something that threw on first use.
+    expect(code).not.toMatch(/\.reload\(/);
   });
 });

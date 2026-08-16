@@ -16,7 +16,7 @@
 // Run after `npm run build` (see package.json's `budget` script and
 // .github/workflows/ci.yml). Fails (non-zero exit) if any artifact exceeds
 // its gzip budget.
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,6 +44,10 @@ const BUDGETS_KB = {
   "embed-initial-js": 240,
   "monaco-on-demand": 950,
   "webllm-on-demand": 2200,
+  // The engine's worker bundle — a second copy of WebLLM, fetched only when a
+  // reader connects the in-browser brain (see `brains/webllm.worker.ts`). Same
+  // ceiling as the main-thread copy, since it is the same library.
+  "webllm-worker": 2200,
   "modeler-on-demand": 950,
 };
 
@@ -95,6 +99,26 @@ function findDynamicTarget(manifest, matcher) {
   const key = Object.keys(manifest).find(matcher);
   if (!key) return null;
   return key;
+}
+
+/**
+ * Gzip size of emitted files matching `pattern`, found by reading `dist/assets`
+ * rather than the manifest — the only way to measure output the module graph
+ * doesn't describe, such as worker bundles.
+ */
+async function gzipKbOfEmitted(pattern) {
+  const assetsDir = path.join(distDir, "assets");
+  let names;
+  try {
+    names = await readdir(assetsDir);
+  } catch {
+    return 0;
+  }
+  let total = 0;
+  for (const name of names) {
+    if (pattern.test(name)) total += await gzipKb(path.join(assetsDir, name));
+  }
+  return total;
 }
 
 async function sumGzipKb(manifest, keys) {
@@ -155,11 +179,19 @@ async function main() {
       )
     : 0;
 
+  // Workers don't appear in the manifest at all — Vite emits them from
+  // `new Worker(new URL(...))`, not from a module-graph edge — so nothing above
+  // can see them. The WebLLM worker is a second full copy of WebLLM (the main
+  // thread keeps its own for `CreateWebWorkerMLCEngine`, `hasModelInCache` and
+  // the prebuilt config), which is a few MB that would otherwise grow unwatched.
+  const workerKb = await gzipKbOfEmitted(/^webllm\.worker-.*\.js$/);
+
   const measurements = {
     "gallery-initial-js": initialKb,
     "embed-initial-js": initialKb,
     "monaco-on-demand": monacoKb,
     "webllm-on-demand": webllmKb,
+    "webllm-worker": workerKb,
     "modeler-on-demand": modelerKb,
   };
 
