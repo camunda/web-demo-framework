@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import type { SeedImage } from "../types";
 import type { RunImage } from "../imageInput";
 
@@ -30,6 +30,10 @@ export function ImageInputPanel({
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Unique per instance so multiple mounted panels can't collide on the same
+  // DOM ids (which would break aria-labelledby / label-htmlFor associations).
+  const galleryLabelId = useId();
+  const uploadInputId = useId();
 
   const readFile = useCallback(
     (file: File) => {
@@ -63,8 +67,8 @@ export function ImageInputPanel({
     <div className="image-input">
       {imageInput.label && <p className="field-hint">{imageInput.label}</p>}
 
-      <p className="image-input-label" id="seed-photos-label">Seed photos</p>
-      <div className="image-gallery" role="group" aria-labelledby="seed-photos-label">
+      <p className="image-input-label" id={galleryLabelId}>Seed photos</p>
+      <div className="image-gallery" role="group" aria-labelledby={galleryLabelId}>
         {imageInput.seedImages.map((img) => {
           const selected = value?.imageId === img.id;
           return (
@@ -89,7 +93,7 @@ export function ImageInputPanel({
         })}
       </div>
 
-      <label className="image-input-label" htmlFor="image-upload">
+      <label className="image-input-label" htmlFor={uploadInputId}>
         Or upload your own photo
       </label>
       <div
@@ -107,7 +111,7 @@ export function ImageInputPanel({
       >
         <input
           ref={inputRef}
-          id="image-upload"
+          id={uploadInputId}
           type="file"
           accept="image/*"
           disabled={disabled}

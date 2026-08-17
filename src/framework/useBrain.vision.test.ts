@@ -57,4 +57,26 @@ describe("useBrain — vision brain", () => {
     expect(result.current.vision).toBeNull();
     expect(result.current.visionError).toBeTruthy();
   });
+
+  it("switching vision kind after a failed connect resets to idle and clears the error", async () => {
+    const { result } = renderHook(() => useBrain());
+    await waitFor(() =>
+      expect(result.current.visionWebgpuReason).not.toBeNull(),
+    );
+
+    act(() => result.current.setVisionKind("browser-vision"));
+    await act(async () => {
+      await result.current.connectVision();
+    });
+    expect(result.current.visionStatus).toBe("error");
+
+    // Switching kinds tears down the failed brain and clears its state so no
+    // stale error/model lingers for the newly selected kind.
+    act(() => result.current.setVisionKind("scripted-vision"));
+    expect(result.current.visionKind).toBe("scripted-vision");
+    expect(result.current.visionStatus).toBe("idle");
+    expect(result.current.visionError).toBeNull();
+    expect(result.current.visionModelInUse).toBeNull();
+    expect(result.current.vision).toBeNull();
+  });
 });

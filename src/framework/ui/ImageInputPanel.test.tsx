@@ -21,7 +21,7 @@ describe("ImageInputPanel (contract B start affordance)", () => {
     expect(screen.getByText("Pick a car photo")).toBeInTheDocument();
     const gallery = screen.getByRole("group", { name: "Seed photos" });
     expect(within(gallery).getAllByRole("button")).toHaveLength(2);
-    const upload = document.getElementById("image-upload") as HTMLInputElement;
+    const upload = screen.getByLabelText("Or upload your own photo") as HTMLInputElement;
     expect(upload).toBeTruthy();
     expect(upload.getAttribute("accept")).toBe("image/*");
   });
@@ -44,7 +44,7 @@ describe("ImageInputPanel (contract B start affordance)", () => {
       <ImageInputPanel imageInput={IMAGE_INPUT} value={null} onSelect={onSelect} />,
     );
     const file = new File(["binarydata"], "my-car.png", { type: "image/png" });
-    const upload = document.getElementById("image-upload") as HTMLInputElement;
+    const upload = screen.getByLabelText("Or upload your own photo") as HTMLInputElement;
     await act(async () => {
       fireEvent.change(upload, { target: { files: [file] } });
     });

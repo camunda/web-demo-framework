@@ -253,6 +253,12 @@ export function useBrain(): BrainControls {
 
   const setVisionKind = useCallback((next: VisionBrainKind) => {
     pickedVisionDefault.current = true;
+    // Switching kinds cancels any in-flight connect and disposes the vision
+    // brain, so a late-resolving connect can't revive state for the now-stale
+    // selection and GPU/model resources aren't left alive.
+    visionBrainRef.current?.cancelConnect();
+    visionBrainRef.current?.dispose();
+    visionBrainRef.current = null;
     setVisionKindState(next);
     setVisionStatus("idle");
     setVisionError(null);
