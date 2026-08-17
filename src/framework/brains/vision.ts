@@ -149,7 +149,7 @@ interface Florence2Processor {
   post_process_generation(
     text: string,
     task: string,
-    imageSize: { width: number; height: number },
+    imageSize: [number, number],
   ): Record<string, unknown>;
   batch_decode(ids: unknown, opts: { skip_special_tokens: boolean }): string[];
   (image: unknown, prompts: string | string[]): Promise<Record<string, unknown>>;
@@ -169,7 +169,7 @@ export class BrowserVisionBrain implements VisionBrain {
   private modelHandle: Florence2Model | null = null;
   private processor: Florence2Processor | null = null;
   private loadImage:
-    | ((src: unknown) => Promise<{ size: { width: number; height: number } }>)
+    | ((src: unknown) => Promise<{ size: [number, number] }>)
     | null = null;
   /** Bumped on every connect()/cancelConnect() so a stale load can be ignored. */
   private generation = 0;
@@ -178,7 +178,7 @@ export class BrowserVisionBrain implements VisionBrain {
     modelId: string = DEFAULT_VISION_MODEL,
     onProgress?: LoadProgress,
   ): Promise<string> {
-    const blocked = await webgpuUnavailableReason();
+    const blocked = await webgpuUnavailableReason("the scripted-vision fallback");
     if (blocked) throw new Error(blocked);
     if (this.modelHandle && this.model === modelId) return modelId;
 
@@ -201,7 +201,7 @@ export class BrowserVisionBrain implements VisionBrain {
       model: Florence2Model;
       processor: Florence2Processor;
       loadImage: (src: unknown) => Promise<{
-        size: { width: number; height: number };
+        size: [number, number];
       }>;
     };
     try {
@@ -229,7 +229,7 @@ export class BrowserVisionBrain implements VisionBrain {
         model,
         processor,
         loadImage: load_image as unknown as (src: unknown) => Promise<{
-          size: { width: number; height: number };
+          size: [number, number];
         }>,
       };
     } catch (e) {
@@ -272,6 +272,16 @@ export class BrowserVisionBrain implements VisionBrain {
     this.generation++;
   }
 
+  /**
+   * Reads text off `image`. For this Florence-2 backend `prompt` is a **task
+   * token selector**, not a free-form instruction: Florence-2 is driven by a
+   * fixed vocabulary of task tokens (`<OCR>`, `<OCR_WITH_REGION>`, …) that
+   * `construct_prompts` expands — it has no "read only the plate, ignore the
+   * rest" natural-language mode. So a `prompt` that is a `<…>` task token
+   * selects that task; anything else (empty, or a free-form sentence) falls
+   * back to plain `<OCR>`. A caller wanting bounding boxes passes
+   * `OCR_WITH_REGION_TASK`.
+   */
   read: (
     image: VisionImage,
     prompt: string,
@@ -283,6 +293,8 @@ export class BrowserVisionBrain implements VisionBrain {
     if (!model || !processor || !loadImage || !this.model)
       throw new Error("BrowserVisionBrain.read called before connect()");
 
+    // Only a Florence-2 task token drives a task; a free-form prompt Florence-2
+    // can't interpret degrades to plain OCR rather than being fed as garbage.
     const task = prompt && prompt.startsWith("<") ? prompt : OCR_TASK;
     const loaded = await loadImage(image);
     const prompts = processor.construct_prompts(task);
@@ -299,6 +311,9 @@ export class BrowserVisionBrain implements VisionBrain {
     const result = processor.post_process_generation(
       generatedText,
       task,
+      // Transformers.js `load_image` yields a `RawImage` whose `size` is a
+      // `[width, height]` tuple, which is exactly the shape Florence-2's
+      // `post_process_generation` indexes for region scaling — pass it through.
       loaded.size,
     );
     const text = stringifyOcr(result, task);

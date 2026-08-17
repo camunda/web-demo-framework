@@ -14,6 +14,14 @@ interface GPUAdapterLike {
   limits?: Record<string, number>;
 }
 
+/**
+ * The fallback a WebGPU-less reader should reach for, phrased for the text-brain
+ * seam by default. The vision seam has no Endpoint alternative, so `vision.ts`
+ * passes its own hint (`the scripted-vision fallback`) — the message must not
+ * suggest a brain the current seam doesn't offer.
+ */
+const DEFAULT_FALLBACK_HINT = "the Scripted or Endpoint brain";
+
 /** True when this browser exposes the WebGPU adapter the in-browser brains need. */
 export async function webgpuAvailable(): Promise<boolean> {
   return (await webgpuUnavailableReason()) === null;
@@ -21,9 +29,14 @@ export async function webgpuAvailable(): Promise<boolean> {
 
 /**
  * Why WebGPU isn't usable here, if it isn't — checked and explained *before*
- * a Connect attempt rather than surfaced only after one fails.
+ * a Connect attempt rather than surfaced only after one fails. `fallbackHint`
+ * names the alternative to steer the reader to; it defaults to the text-brain
+ * seam's Scripted/Endpoint options, and the vision seam overrides it so the
+ * message never points at a brain that seam can't offer.
  */
-export async function webgpuUnavailableReason(): Promise<string | null> {
+export async function webgpuUnavailableReason(
+  fallbackHint: string = DEFAULT_FALLBACK_HINT,
+): Promise<string | null> {
   const gpu = (
     navigator as unknown as {
       gpu?: { requestAdapter(): Promise<GPUAdapterLike | null> };
@@ -32,19 +45,19 @@ export async function webgpuUnavailableReason(): Promise<string | null> {
   if (!gpu)
     return (
       "This browser doesn't expose WebGPU at all. Use a recent Chrome, Edge, " +
-      "or Safari 17+ with hardware acceleration on, or pick the Scripted or Endpoint brain."
+      `or Safari 17+ with hardware acceleration on, or pick ${fallbackHint}.`
     );
   let adapter: GPUAdapterLike | null;
   try {
     adapter = await gpu.requestAdapter();
   } catch (e) {
-    return `WebGPU adapter request failed (${e instanceof Error ? e.message : String(e)}). Try the Scripted or Endpoint brain instead.`;
+    return `WebGPU adapter request failed (${e instanceof Error ? e.message : String(e)}). Try ${fallbackHint} instead.`;
   }
   if (!adapter)
     return (
       "This browser supports the WebGPU API, but no GPU adapter is available — " +
       "hardware acceleration may be off, or this device/VM has no usable GPU. " +
-      "Pick the Scripted or Endpoint brain instead."
+      `Pick ${fallbackHint} instead.`
     );
   return null;
 }
