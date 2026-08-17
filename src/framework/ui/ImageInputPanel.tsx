@@ -88,6 +88,10 @@ export function ImageInputPanel({
               title={img.label ?? img.id}
               onClick={() => {
                 setUploadPreview(null);
+                // Clear the file input too: browsers don't fire `onChange` when
+                // the same file is re-selected, so without this a user who
+                // switches to a seed can't re-upload the file they just had.
+                if (inputRef.current) inputRef.current.value = "";
                 // Seed pixels are the asset URL a live brain can load directly;
                 // the scripted brain instead matches on `imageId`.
                 onSelect({ imageId: img.id, pixels: img.file });

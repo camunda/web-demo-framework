@@ -55,4 +55,22 @@ describe("ImageInputPanel (contract B start affordance)", () => {
     // so a live brain reads the bytes directly. VisionImage accepts a Blob.
     expect(arg.pixels).toBe(file);
   });
+
+  it("clears the file input when a seed is picked, so the same file can be re-uploaded", async () => {
+    render(
+      <ImageInputPanel imageInput={IMAGE_INPUT} value={null} onSelect={() => {}} />,
+    );
+    const file = new File(["binarydata"], "my-car.png", { type: "image/png" });
+    const upload = screen.getByLabelText("Or upload your own photo") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(upload, { target: { files: [file] } });
+    });
+    // jsdom won't hold a file input's `value`, so spy on the setter to prove the
+    // seed click resets it (browsers otherwise won't re-fire onChange for the
+    // same file).
+    const setValue = vi.fn();
+    Object.defineProperty(upload, "value", { get: () => "", set: setValue, configurable: true });
+    fireEvent.click(within(screen.getByRole("group", { name: "Seed photos" })).getAllByRole("button")[0]);
+    expect(setValue).toHaveBeenCalledWith("");
+  });
 });

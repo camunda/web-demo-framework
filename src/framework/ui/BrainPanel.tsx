@@ -300,6 +300,18 @@ function VisionBrain({ brain }: { brain: BrainControls }) {
 
       <p className="field-hint">{active.hint}</p>
 
+      {/* WebGPU is absent, so `useBrain` defaulted us to the scripted fallback.
+          Surface the reason here too — otherwise the reader only sees *why*
+          after switching to "In-browser (WebGPU)", the option that can't run. */}
+      {brain.visionKind === "scripted-vision" &&
+        brain.webgpu === false &&
+        brain.visionWebgpuReason && (
+          <Alert variant="destructive">
+            <AlertTitle>No WebGPU in this browser</AlertTitle>
+            <AlertDescription>{brain.visionWebgpuReason}</AlertDescription>
+          </Alert>
+        )}
+
       {brain.visionKind === "browser-vision" && (
         <div className="brain-config">
           <div className="field">
