@@ -586,24 +586,28 @@ export function ExampleRunner({
     if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors)
       return;
 
-    let workers = workersRef.current;
-    let agents = agentsRef.current;
-    let snap = run.snapshot;
-
-    if (!canResume) {
-      if (startFormRef.current && !startFormRef.current.validate()) return;
-      setCompileError(null);
-      const prepared = await beginRun();
-      if (!prepared) return;
-      workers = prepared.workers;
-      agents = prepared.agents;
-      snap = prepared.snap;
-      await new Promise((r) => setTimeout(r, BEAT));
-    }
-
+    // Set the in-flight lock *before* the first `await` (matching
+    // `resolveManualControl` above) so a second click landing while
+    // `beginRun()` is still pending can't slip past the check above and
+    // kick off a second redeploy/createInstance.
     runningRef.current = true;
     setRunning(true);
     try {
+      let workers = workersRef.current;
+      let agents = agentsRef.current;
+      let snap = run.snapshot;
+
+      if (!canResume) {
+        if (startFormRef.current && !startFormRef.current.validate()) return;
+        setCompileError(null);
+        const prepared = await beginRun();
+        if (!prepared) return;
+        workers = prepared.workers;
+        agents = prepared.agents;
+        snap = prepared.snap;
+        await new Promise((r) => setTimeout(r, BEAT));
+      }
+
       await driveLoop(workers, agents, snap);
     } finally {
       runningRef.current = false;
@@ -627,29 +631,39 @@ export function ExampleRunner({
     )
       return;
 
-    let workers = workersRef.current;
-    let agents = agentsRef.current;
-    let snap = run.snapshot;
-
-    if (!canResume) {
-      if (startFormRef.current && !startFormRef.current.validate()) return;
-      setCompileError(null);
-      const prepared = await beginRun();
-      if (!prepared) return;
-      workers = prepared.workers;
-      agents = prepared.agents;
-      snap = prepared.snap;
-    }
-
-    if (!snap || snap.completedInstances >= 1) return;
-
+    // Same in-flight lock as `start` above, set before the first `await` —
+    // otherwise a second Step/Run click landing while `beginRun()` is still
+    // pending slips past the check above and starts a second instance.
+    runningRef.current = true;
     setStepping(true);
     try {
+      let workers = workersRef.current;
+      let agents = agentsRef.current;
+      let snap = run.snapshot;
+
+      if (!canResume) {
+        if (startFormRef.current && !startFormRef.current.validate()) return;
+        setCompileError(null);
+        const prepared = await beginRun();
+        if (!prepared) return;
+        workers = prepared.workers;
+        agents = prepared.agents;
+        snap = prepared.snap;
+      }
+
+      if (!snap || snap.completedInstances >= 1) return;
+
       // `takenSequenceFlows` only appends — the flows this one round takes
       // are exactly what lands past this length (see `newSequenceFlows`).
       const prevFlowCount = snap.takenSequenceFlows.length;
       const round = await run.stepWorkers(workers, { agents });
-      if (!round) return;
+      if (!round) {
+        trace({
+          kind: "error",
+          text: "  ↳ step failed — no dispatch round was returned",
+        });
+        return;
+      }
       const vars = round.snapshot.instances[0]?.variables;
       if (vars) setDisplayVars({ ...vars });
       const flows = newSequenceFlows(
@@ -658,6 +672,7 @@ export function ExampleRunner({
       );
       trace(describeRound(round, flows, elementLabels));
     } finally {
+      runningRef.current = false;
       setStepping(false);
     }
   }, [run, stepping, draft.hasErrors, canResume, beginRun, trace, elementLabels]);
