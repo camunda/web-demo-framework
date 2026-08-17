@@ -1,5 +1,11 @@
 import type { MLCEngine, InitProgressReport } from "@mlc-ai/web-llm";
 import type { ChatMessage, LoadProgress, TokenListener } from "./types";
+// The WebGPU probe/reason helpers moved to a shared module so `vision.ts` can
+// reuse them without duplicating; imported for use in connect() below and
+// re-exported so `browser.ts`'s public surface (imported by `useBrain.ts` /
+// `BrainPanel.tsx`) is unchanged.
+import { webgpuAvailable, webgpuUnavailableReason } from "./webgpu";
+export { webgpuAvailable, webgpuUnavailableReason };
 
 /**
  * A real quantised LLM running **in the browser** on WebGPU, via MLC's WebLLM.
@@ -124,46 +130,6 @@ export const DEFAULT_BROWSER_MODEL = BROWSER_MODELS[0].id;
 export async function loadBrowserModelRequirements(): Promise<BrowserModel[]> {
   await loadRequirements();
   return BROWSER_MODELS.map((m) => ({ ...m, ...lookupRequirements(m.id) }));
-}
-
-/** True when this browser exposes the WebGPU adapter WebLLM needs. */
-export async function webgpuAvailable(): Promise<boolean> {
-  return (await webgpuUnavailableReason()) === null;
-}
-
-/**
- * Why WebGPU isn't usable here, if it isn't — checked and explained *before*
- * a Connect attempt rather than surfaced only after one fails.
- */
-export async function webgpuUnavailableReason(): Promise<string | null> {
-  const gpu = (
-    navigator as unknown as {
-      gpu?: { requestAdapter(): Promise<GPUAdapterLike | null> };
-    }
-  ).gpu;
-  if (!gpu)
-    return (
-      "This browser doesn't expose WebGPU at all. Use a recent Chrome, Edge, " +
-      "or Safari 17+ with hardware acceleration on, or pick the Scripted or Endpoint brain."
-    );
-  let adapter: GPUAdapterLike | null;
-  try {
-    adapter = await gpu.requestAdapter();
-  } catch (e) {
-    return `WebGPU adapter request failed (${e instanceof Error ? e.message : String(e)}). Try the Scripted or Endpoint brain instead.`;
-  }
-  if (!adapter)
-    return (
-      "This browser supports the WebGPU API, but no GPU adapter is available — " +
-      "hardware acceleration may be off, or this device/VM has no usable GPU. " +
-      "Pick the Scripted or Endpoint brain instead."
-    );
-  return null;
-}
-
-interface GPUAdapterLike {
-  features?: { has(name: string): boolean };
-  limits?: Record<string, number>;
 }
 
 /**
