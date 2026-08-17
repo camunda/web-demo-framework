@@ -10,11 +10,15 @@ import { storageKeyFor } from "./usePersistentDisclosure";
  * survives a page reload. Independent `sectionId`s never share state.
  */
 
-function renderCard(props: { sectionId: string; defaultOpen?: boolean }) {
+function renderCard(props: {
+  sectionId: string;
+  defaultOpen?: boolean;
+  title?: string;
+}) {
   return render(
     <CollapsibleCard
       sectionId={props.sectionId}
-      title="Process"
+      title={props.title ?? "Process"}
       description="Live token, incidents in red."
       defaultOpen={props.defaultOpen}
     >
@@ -96,15 +100,15 @@ describe("CollapsibleCard", () => {
   });
 
   it("honors defaultOpen=false only until a stored choice exists", () => {
-    renderCard({ sectionId: "code", defaultOpen: false });
+    renderCard({ sectionId: "code", defaultOpen: false, title: "Code" });
     expect(screen.queryByText("Body content")).not.toBeInTheDocument();
 
     // Opening it records a preference that outranks the default next time.
-    fireEvent.click(screen.getByRole("button", { name: /Process/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Code/ }));
     expect(window.localStorage.getItem(storageKeyFor("code"))).toBe("1");
     cleanup();
 
-    renderCard({ sectionId: "code", defaultOpen: false });
+    renderCard({ sectionId: "code", defaultOpen: false, title: "Code" });
     expect(screen.getByText("Body content")).toBeInTheDocument();
   });
 });
