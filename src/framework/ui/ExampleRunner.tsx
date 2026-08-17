@@ -48,7 +48,7 @@ const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
 const TEMPLATE_TAB_PREFIX = "__template__:";
 
-// Both the live diagram (bpmn-js, via `@nanobpm/bojtos-react`) and the code
+// Both the live diagram (bpmn-js, via `./RuntimeDiagram`) and the code
 // editor (Monaco) are multi-MB dependencies that most of a first paint never
 // needs to touch. Loading them via `React.lazy()` keeps them out of the
 // initial JS payload and into their own on-demand chunks (see
@@ -65,8 +65,12 @@ const BpmnRuntimeView = lazy(async () => {
     import("bpmn-js/dist/assets/diagram-js.css"),
     import("bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css"),
   ]);
-  const { BpmnRuntimeView } = await import("@nanobpm/bojtos-react");
-  return { default: BpmnRuntimeView };
+  // `./RuntimeDiagram`, not `@nanobpm/bojtos-react`'s `BpmnRuntimeView`: that
+  // one is a `NavigatedViewer`, so the model pans on drag and zooms on wheel
+  // with no prop to disable it, and it only fits the viewport on import. See
+  // that module's own comment.
+  const { RuntimeDiagram } = await import("./RuntimeDiagram");
+  return { default: RuntimeDiagram };
 });
 // Monaco's own setup (worker environment, `loader.config`) lives in
 // `./MonacoEditor` so it only runs once this dynamic import actually resolves.
