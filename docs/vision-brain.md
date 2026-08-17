@@ -148,7 +148,9 @@ default suite.
 **2. Opt-in real-model eval (`npm run eval:vision`).**
 [`tools/eval-vision/index.mjs`](../tools/eval-vision/index.mjs) loads the *real*
 Florence-2 ONNX model through `@huggingface/transformers` and runs its `<OCR>`
-task against the seed photos, asserting the model genuinely reads each plate.
+task against the seed photos, checking the model genuinely reads the plates. It
+reports the per-plate hit rate and, per its exit criteria, fails only when the
+model reads **none** of the seed plates.
 It is **gated exactly like `npm run eval`**: a separate npm script, **not** part
 of `npm test` and **not** run in CI (which runs typecheck / test / build /
 budget only), because Florence-2 is a multi-hundred-MB download.

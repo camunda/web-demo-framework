@@ -8,7 +8,9 @@
 // the *actual* Florence-2 ONNX model through `@huggingface/transformers` — the
 // very backend `src/framework/brains/vision.ts`'s `BrowserVisionBrain` uses in
 // the browser — and runs its `<OCR>` task against the seed car photos, then
-// checks the model genuinely reads each plate. It reuses the seam's read
+// checks the model genuinely reads the plates (it reports the per-plate hit
+// rate and, per the exit criteria below, fails only when it reads *none* of
+// them). It reuses the seam's read
 // sequence (construct_prompts → processor → generate → batch_decode →
 // post_process_generation) so it exercises exactly what the browser brain does.
 //
