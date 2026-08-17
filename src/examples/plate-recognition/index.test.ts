@@ -125,7 +125,8 @@ describe("manifest wiring (contracts A + B, from images.json)", () => {
     }
   });
 
-  it("registers both user-task forms", () => {
+  it("registers the start form and both user-task forms", () => {
+    expect(plateRecognition.forms).toHaveProperty("plate-recognition-country");
     expect(plateRecognition.forms).toHaveProperty("plate-recognition-confirm");
     expect(plateRecognition.forms).toHaveProperty("plate-recognition-manual");
   });
@@ -145,6 +146,11 @@ describe("BPMN model", () => {
     const userTaskForms = model.userTasks.map((u) => u.formId);
     expect(userTaskForms).toContain("plate-recognition-confirm");
     expect(userTaskForms).toContain("plate-recognition-manual");
+  });
+
+  it("binds the country select as the start form", () => {
+    expect(model.startFormId).toBe("plate-recognition-country");
+    expect(plateRecognition.forms).toHaveProperty("plate-recognition-country");
   });
 
   it("routes the low-confidence read down the manual-entry path via the gateway", () => {
@@ -185,6 +191,68 @@ describe("extract-plate handler (scripted-vision fallback)", () => {
   it("treats 'no image selected' as low-confidence rather than throwing", async () => {
     const out = await runHandler("ExtractPlate", { image: undefined });
     expect(out.plateReadOk).toBe(false);
+  });
+});
+
+describe("extract-plate handler (plate extraction from a live <OCR> transcription)", () => {
+  /**
+   * Drive ExtractPlate with a vision seam that returns a fixed <OCR> string and
+   * the reader's chosen `country` (from the start form) in the run variables.
+   */
+  async function runWithOcr(
+    ocr: string,
+    country = "auto",
+  ): Promise<Record<string, unknown>> {
+    const byElement: Record<string, ExampleHandler> = {
+      ExtractPlate: compile(extractSource),
+    };
+    const support: VisionSupport = {
+      read: async () => ocr,
+      live: true,
+      resolve: () => ({ imageId: "uploaded", pixels: "uploaded.jpg" }),
+    };
+    const workers = buildWorkers(modelFixture(), byElement, noopTrace, undefined, support);
+    return (await workers["extract-plate"]({
+      key: "j",
+      type: "extract-plate",
+      instanceKey: "i",
+      elementId: "ExtractPlate",
+      retries: 1,
+      variables: { country },
+    } as ActivatedJob)) as Record<string, unknown>;
+  }
+
+  // Auto-detect (the start form's default) over noisy dealer/road-sign text.
+  it.each([
+    ["MK70 ORJ dealer name www.example.com", "MK70 ORJ"],
+    ["Big Motors\nD651 RNB\nMOT centre", "D651 RNB"],
+    ["parking permit MS WL 545 zone C", "MS WL 545"],
+    ["taxi IJZ 8992 licensed", "IJZ 8992"],
+    ["front plate MH 12 AB 1234 mumbai", "MH 12 AB 1234"],
+    ["21 BH 2345 AA india series", "21 BH 2345 AA"],
+    ["front 21 BH 2345 reg", "21 BH 2345"],
+    ["IND21 BH 2345 AA", "21 BH 2345 AA"],
+    ["21 BH 2345 AAIND", "21 BH 2345 AA"],
+  ])("auto-detects the plate in %j", async (ocr, plate) => {
+    const out = await runWithOcr(ocr);
+    expect(out.plateReadOk).toBe(true);
+    expect(out.modelPlate).toBe(plate);
+    // The raw, full transcription is still kept for the audit trail.
+    expect(out.plateReadRaw).toBe(ocr);
+  });
+
+  // A chosen country pins the format, so glued-on words the auto heuristics
+  // can't resolve are still pulled apart correctly.
+  it.each([
+    ["uk", "FORDIJZ 8992WOOLSTON CAR CENTRE", "IJZ 8992"],
+    ["india", "IND21 BH 2345 AA", "21 BH 2345 AA"],
+    ["india", "front 21 BH 2345 reg", "21 BH 2345"],
+    ["germany", "parking permit MS WL 545 zone C", "MS WL 545"],
+    ["korea", "plate GWAN EUM seoul", "GWAN EUM"],
+  ])("with country=%s extracts the plate from %j", async (country, ocr, plate) => {
+    const out = await runWithOcr(ocr, country);
+    expect(out.plateReadOk).toBe(true);
+    expect(out.modelPlate).toBe(plate);
   });
 });
 

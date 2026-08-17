@@ -1,0 +1,33 @@
+{
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "exporter": { "name": "Camunda Web Modeler", "version": "9b5d5ef" },
+  "schemaVersion": 19,
+  "id": "plate-recognition-country",
+  "type": "default",
+  "components": [
+    {
+      "text": "# Read a number plate\n\nPick the plate's **country** so the reader knows which format to extract, then start the run. Leave it on **Auto-detect** to let it guess from the shape.",
+      "type": "text",
+      "layout": { "row": "Row_countryHeading", "columns": null },
+      "id": "Field_CountryHeading"
+    },
+    {
+      "label": "Plate country",
+      "description": "The vision model reads all text in the photo; this tells the process which country's plate format to pull out of that reading.",
+      "type": "select",
+      "layout": { "row": "Row_country", "columns": null },
+      "id": "Field_Country",
+      "key": "country",
+      "defaultValue": "auto",
+      "values": [
+        { "label": "Auto-detect (any format)", "value": "auto" },
+        { "label": "United Kingdom", "value": "uk" },
+        { "label": "India", "value": "india" },
+        { "label": "Germany", "value": "germany" },
+        { "label": "South Korea", "value": "korea" }
+      ],
+      "validate": { "required": true }
+    }
+  ]
+}

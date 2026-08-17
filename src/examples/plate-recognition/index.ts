@@ -2,6 +2,7 @@ import type { ExampleDef, SeedImage } from "../../framework/types";
 import bpmn from "./model.bpmn?raw";
 import confirmForm from "./confirm.form.json";
 import manualForm from "./manual.form.json";
+import countryForm from "./country.form.json";
 import manifest from "./images.json";
 
 /**
@@ -86,16 +87,84 @@ const scriptedVision: Record<string, string> = Object.fromEntries(
  * pre-filled confirm form; an empty / low-confidence read (an uploaded photo
  * with no live model, say) goes to the manual-entry path.
  */
-const EXTRACT_PLATE = `async (job, { vision, trace }) => {
+const EXTRACT_PLATE = `async (job, { vision, trace, text }) => {
   const raw = vision ? await vision("<OCR>") : "";
+
+  // Surface the model's untouched <OCR> transcription in the trace timeline, so
+  // it's visible how much of the plate the model actually read before we
+  // extract the plate-shaped token (e.g. Florence-2 base dropping a digit).
+  trace("raw <OCR>: " + JSON.stringify(String(raw)));
+
+  // The reader picks the plate's country on the start form; that variable tells
+  // us which format to pull out of the reading (Florence <OCR> transcribes ALL
+  // text in the photo — dealer names, URLs, road signs — it has no "read only
+  // the plate" mode). "auto" tries every format, most-specific first.
+  const country = text("country", "auto").toLowerCase();
 
   // Normalise to a plate-shaped string: uppercase, drop punctuation, collapse
   // whitespace. Florence's <OCR> may return "MK70ORJ" or "MK70 ORJ".
-  const plate = String(raw)
+  const cleaned = String(raw)
     .toUpperCase()
     .replace(/[^A-Z0-9 ]+/g, " ")
     .replace(/\\s+/g, " ")
     .trim();
+
+  // Indian plates carry an "IND" country code on the blue strip; Florence often
+  // reads it glued to the plate — "IND21 BH 2345 AA" (base) or "21 BH 2345
+  // AAIND" (large). That glue destroys the boundary the plate patterns rely on,
+  // so the leading "21" would be dropped. For the India (and auto) formats,
+  // strip the country code where it abuts the plate.
+  const base =
+    country === "india" || country === "auto"
+      ? cleaned
+          .replace(/\\bIND(?=[0-9])/g, " ")
+          .replace(/(?<=[A-Z])IND\\b/g, " ")
+          .replace(/\\s+/g, " ")
+          .trim()
+      : cleaned;
+
+  // Per-country plate shapes. Single-letter-group patterns (UK "IJZ 8992")
+  // deliberately have no leading anchor so they can be pulled out of a word the
+  // model glued to them ("FORDIJZ 8992..."); multi-group patterns are anchored
+  // with (?<![A-Z])/(?<![0-9]) so a neighbouring word can't masquerade as the
+  // plate's leading group ("FRONT 21..." -> not "NT 21 ..."). If nothing
+  // matches (an unusual plate, or the scripted brain, which already returns a
+  // bare plate) we keep the whole cleaned string.
+  const PATTERNS = {
+    uk: [
+      /[A-Z]{2}[0-9]{2} [A-Z]{3}/, // MK70 ORJ
+      /[A-Z][0-9]{1,3} [A-Z]{3}/,  // D651 RNB
+      /[A-Z]{2,3} [0-9]{1,4}/,     // IJZ 8992 (Northern Ireland)
+    ],
+    india: [
+      /(?<![A-Z])[A-Z]{2} [0-9]{1,2} [A-Z]{1,3} [0-9]{4}/,   // MH 12 AB 1234
+      /(?<![0-9])[0-9]{2} BH [0-9]{4}( [A-Z]{2}(?![A-Z]))?/, // 21 BH 2345 AA
+    ],
+    germany: [
+      /(?<![A-Z])[A-Z]{1,3} [A-Z]{1,2} [0-9]{1,4}/, // MS WL 545
+    ],
+    korea: [
+      /[0-9]{2,3} [A-Z]{1,3} [0-9]{4}/,              // e.g. 12 GA 3456
+      /(?<![A-Z])[A-Z]{2,4} [A-Z]{2,4}(?![A-Z])/,    // e.g. GWAN EUM
+    ],
+    auto: [
+      /(?<![A-Z])[A-Z]{2} [0-9]{1,2} [A-Z]{1,3} [0-9]{4}/,   // India:      MH 12 AB 1234
+      /(?<![0-9])[0-9]{2} BH [0-9]{4}( [A-Z]{2}(?![A-Z]))?/, // India BH:   21 BH 2345 AA
+      /[A-Z]{2}[0-9]{2} [A-Z]{3}/,                           // UK current: MK70 ORJ
+      /[A-Z][0-9]{1,3} [A-Z]{3}/,                            // UK older:   D651 RNB
+      /(?<![A-Z])[A-Z]{1,3} [A-Z]{1,2} [0-9]{1,4}/,          // Germany:    MS WL 545
+      /[A-Z]{2,3} [0-9]{1,4}/,                               // UK NI:      IJZ 8992
+    ],
+  };
+  const patterns = PATTERNS[country] || PATTERNS.auto;
+  let plate = base;
+  for (const re of patterns) {
+    const match = base.match(re);
+    if (match) {
+      plate = match[0];
+      break;
+    }
+  }
 
   // "Couldn't read" is exactly the seam's own no-read signals — the scripted
   // brain's UNKNOWN placeholder, the neutral no-image message, or a mid-run
@@ -153,15 +222,16 @@ export const plateRecognition: ExampleDef = {
   id: "plate-recognition",
   title: "Read a number plate from a photo",
   blurb:
-    "A photo goes into the run, an in-browser vision model reads the number plate on the reader's own GPU, and a human confirms or corrects it before the process records the result. The vision model recommends; the BPMN process governs. No server, no API key — with no model connected it falls back to a deterministic scripted reading.",
+    "Pick the plate's country, then a photo goes into the run, an in-browser vision model reads the number plate on the reader's own GPU, and a human confirms or corrects it before the process records the result. The vision model recommends; the BPMN process governs. No server, no API key — with no model connected it falls back to a deterministic scripted reading.",
   docsUrl:
     "https://docs.camunda.io/docs/components/modeler/forms/camunda-forms-reference/",
   bpmn,
   forms: {
+    "plate-recognition-country": countryForm,
     "plate-recognition-confirm": confirmForm,
     "plate-recognition-manual": manualForm,
   },
-  seed: {},
+  seed: { country: "auto" },
   imageInput: {
     label:
       "Pick a seed photo (its plate is known, so the scripted reader works offline) or upload your own — a live in-browser model reads a photo it has never seen.",
