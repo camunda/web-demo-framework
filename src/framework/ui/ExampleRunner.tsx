@@ -371,6 +371,12 @@ export function ExampleRunner({
         guard++ < 80
       ) {
         const round = await run.stepWorkers(workers, { agents });
+        // Reset can fire while the await above is in flight — `runningRef.current`
+        // is only checked in the `while` condition, so without this the round
+        // that was already dispatched would still trace/update vars after
+        // Reset, letting stale state reappear post-reset. Bail out immediately
+        // and drop this round rather than let it leak into the reset UI.
+        if (!runningRef.current) return snap;
         snap = round?.snapshot ?? snap;
         const vars = snap.instances[0]?.variables;
         if (vars) setDisplayVars({ ...vars });
