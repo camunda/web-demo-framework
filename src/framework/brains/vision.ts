@@ -243,7 +243,9 @@ export class BrowserVisionBrain implements VisionBrain {
     if (myGeneration !== this.generation) {
       // The reader cancelled while this load was in flight. The bytes are
       // cached for next time regardless, but don't surface as "connected".
-      void loaded.model.dispose?.();
+      // Mirror BrowserBrain.teardown(): dispose() may return a Promise, so
+      // swallow a rejected cleanup instead of leaking an unhandled rejection.
+      void Promise.resolve(loaded.model.dispose?.()).catch(() => {});
       throw new Error("cancelled");
     }
     this.modelHandle = loaded.model;
@@ -259,7 +261,9 @@ export class BrowserVisionBrain implements VisionBrain {
     this.processor = null;
     this.loadImage = null;
     this.model = null;
-    void model?.dispose?.();
+    // dispose() may return a Promise; mirror BrowserBrain.teardown() and
+    // swallow a rejected cleanup so it can't leak an unhandled rejection.
+    void Promise.resolve(model?.dispose?.()).catch(() => {});
   }
 
   /**
