@@ -89,6 +89,19 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
   const [processIds, setProcessIds] = useState<string[]>([]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const lastAppliedRef = useRef(bpmn);
+  /**
+   * Monotonic generation token, bumped whenever `reset()`/`redeploy()` reuse
+   * the *same* `BojtosSession` object with a fresh instance (`session.reset()`
+   * followed by `deployInto` on that same session). `stepWorkers`'s existing
+   * `sessionRef.current !== session` guard only catches a session being
+   * *replaced* (e.g. on unmount), not this in-place reset, so a `dispatchRound`
+   * already in flight when Reset fires would otherwise still land its
+   * `setSnapshot(round.snapshot)`/`setError` after the reset had already put
+   * `snapshot`/`error` back to their post-reset values — breaking "Reset
+   * returns to pre-run state". Capturing this token before the `await` and
+   * comparing it after closes that window.
+   */
+  const runGenRef = useRef(0);
 
   const deployInto = useCallback((session: BojtosSession, xml: string) => {
     const res = session.deploy(xml);
@@ -202,15 +215,19 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     async (workers: Record<string, JobHandler>, opts?: DispatchOptions) => {
       const session = sessionRef.current;
       if (!session) return null;
+      const gen = runGenRef.current;
       try {
         const round = await dispatchRound(session, workers, opts);
-        // Bail if the session was replaced/freed while we awaited the round.
-        if (sessionRef.current !== session) return null;
+        // Bail if the session was replaced/freed, or reset/redeployed in
+        // place, while we awaited the round.
+        if (sessionRef.current !== session || runGenRef.current !== gen)
+          return null;
         setSnapshot(round.snapshot);
         setError(null);
         return round;
       } catch (e) {
-        if (sessionRef.current !== session) return null;
+        if (sessionRef.current !== session || runGenRef.current !== gen)
+          return null;
         setSnapshot(session.snapshot());
         setError(String(e));
         return null;
@@ -222,6 +239,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
   const reset = useCallback(() => {
     const session = sessionRef.current;
     if (!session) return;
+    runGenRef.current++;
     try {
       session.reset();
       deployInto(session, lastAppliedRef.current);
@@ -234,6 +252,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     (xml: string) => {
       const session = sessionRef.current;
       if (!session) return null;
+      runGenRef.current++;
       try {
         session.reset();
         return deployInto(session, xml);

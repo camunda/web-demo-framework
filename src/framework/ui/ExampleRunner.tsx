@@ -30,6 +30,7 @@ import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
+import { describeRound, newSequenceFlows } from "../stepSummary";
 import { useBrain } from "../useBrain";
 import type { BrainKind } from "../brains/types";
 import { patchDeepLinkState } from "../deepLink";
@@ -220,6 +221,10 @@ export function ExampleRunner({
     model.agent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
   );
   const [running, setRunning] = useState(false);
+  // True only while a single `⏭ Step` round is in flight — distinct from
+  // `running` (a continuous `driveLoop`), so the status badge and button
+  // disabling can tell "mid-round" apart from "mid-drive".
+  const [stepping, setStepping] = useState(false);
   const [compileError, setCompileError] = useState<string | null>(null);
   const [log, setLog] = useState<LogLine[]>([]);
   const [displayVars, setDisplayVars] = useState<Record<string, unknown>>({});
@@ -236,6 +241,17 @@ export function ExampleRunner({
   const reviewFormRef = useRef<FormRendererHandle>(null);
 
   const runningRef = useRef(false);
+  // Monotonic generation token for `driveLoop`: `runningRef.current` alone
+  // can't tell a stale in-flight round from a brand-new run, because Reset
+  // clears it to `false` and a subsequent Start/manual-resume sets it back
+  // to `true` before the stale round's `await` resolves — the boolean check
+  // would then wrongly let the old round trace/update vars into the new run.
+  // Each call that owns `driveLoop` captures the value *after* bumping this
+  // ref and only proceeds past its `await` if the ref still matches (pattern
+  // borrowed from `ModelEditor`'s `importSeqRef`), so Reset (which also
+  // bumps it) reliably drops late arrivals even once `runningRef.current`
+  // flips back to `true` for a new run.
+  const runSeqRef = useRef(0);
   const logIdRef = useRef(0);
   // Shared with `buildWorkers` (compile.ts) and `makeLiveAgentRouter`
   // (agent/liveAgent.ts) for one run, so a tool's own trace entries land in
@@ -356,19 +372,27 @@ export function ExampleRunner({
       workers: Record<string, JobHandler>,
       agents: Record<string, AgentHandler>,
       initialSnap: Snapshot | null,
+      seq: number,
     ) => {
       let snap = initialSnap;
       let guard = 0;
       while (
-        runningRef.current &&
+        runSeqRef.current === seq &&
         snap &&
         snap.completedInstances < 1 &&
         guard++ < 80
       ) {
         const round = await run.stepWorkers(workers, { agents });
+        // Reset (or a fresh Start/manual-resume that landed while this await
+        // was in flight) can bump `runSeqRef` — checking that instead of the
+        // resettable `runningRef.current` boolean means a stale round is
+        // dropped even if a *new* run has since flipped `runningRef.current`
+        // back to `true`. Bail out immediately and drop this round rather
+        // than let it leak into whichever run is current now.
+        if (runSeqRef.current !== seq) return snap;
         snap = round?.snapshot ?? snap;
         const vars = snap.instances[0]?.variables;
-        if (vars && Object.keys(vars).length) setDisplayVars({ ...vars });
+        if (vars) setDisplayVars({ ...vars });
         if (snap.userTasks.some((t) => t.state === "Created")) {
           trace({
             kind: "human",
@@ -376,7 +400,18 @@ export function ExampleRunner({
           });
           break;
         }
-        if (!round || round.handled === 0) break;
+        if (!round) {
+          // `stepWorkers` returned null on a dispatch error — surface that
+          // explicitly rather than silently stopping as if the run had just
+          // quiesced (see `handled === 0` below), so a Run doesn't go
+          // "Paused" with no explanation.
+          trace({
+            kind: "error",
+            text: "▶ run stopped — no dispatch round was returned",
+          });
+          break;
+        }
+        if (round.handled === 0) break;
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
@@ -402,6 +437,7 @@ export function ExampleRunner({
     async (choice: "complete" | "action") => {
       if (!pendingManualJob || runningRef.current) return;
       const { job, control } = pendingManualJob;
+      const seq = ++runSeqRef.current;
       runningRef.current = true;
       setRunning(true);
       try {
@@ -424,7 +460,7 @@ export function ExampleRunner({
           const vars = snap.instances[0]?.variables;
           if (vars) setDisplayVars({ ...vars });
           await new Promise((r) => setTimeout(r, BEAT));
-          await driveLoop(workersRef.current, agentsRef.current, snap);
+          await driveLoop(workersRef.current, agentsRef.current, snap, seq);
         } else {
           trace({
             kind: "error",
@@ -440,20 +476,16 @@ export function ExampleRunner({
     [pendingManualJob, run, trace, driveLoop],
   );
 
-  const start = useCallback(async () => {
-    // The draft already gates this in the UI (the Run button is disabled),
-    // but re-check here too: `draft.hasErrors` is the single source of truth
-    // for "safe to run", not just a button prop. Same for the start form's
-    // validity — the button being disabled isn't the actual guarantee.
-    if (
-      run.phase !== "ready" ||
-      runningRef.current ||
-      draft.hasErrors ||
-      (startFormRef.current && !startFormRef.current.validate())
-    )
-      return;
-    setCompileError(null);
-
+  /**
+   * Compile the scripted agent, build the `workers`/`agents` maps, reset the
+   * per-run UI state, redeploy the draft XML, and create a fresh instance.
+   * Shared by `start` and `step` — whichever one is pressed first on a fresh
+   * page does this exactly once; the other one, and every step or Run after
+   * it, reuses `workersRef`/`agentsRef` and the live `run.snapshot` instead
+   * of calling this again (see `canResume` in both callbacks below), so
+   * stepping and running always drive the *same* instance.
+   */
+  const beginRun = useCallback(async () => {
     // The scripted brain's agent code isn't part of the draft's handler
     // resolution (it's the LLM stand-in, not a BPMN element handler), so it's
     // still compiled here, next to the editor, before the engine is touched.
@@ -463,7 +495,7 @@ export function ExampleRunner({
         scripted = compileAgent(agentSource);
     } catch (e) {
       setCompileError(e instanceof Error ? e.message : String(e));
-      return;
+      return null;
     }
 
     // Fresh per run, so a tool's trace entries only group with this run's
@@ -526,8 +558,6 @@ export function ExampleRunner({
       }
     }
 
-    runningRef.current = true;
-    setRunning(true);
     setLog([]);
     setReviewValues({});
     const seed = { ...example.seed, ...startValues };
@@ -535,31 +565,24 @@ export function ExampleRunner({
     workersRef.current = workers;
     agentsRef.current = agents;
 
-    try {
-      // Apply the draft XML to the engine now — not on every keystroke (see
-      // `useExampleRun`'s `bpmn` param) — so Run always executes exactly
-      // what's in the editor. `draft.hasErrors` already gated the button
-      // above, so this redeploy is against XML the model parser accepted.
-      const ids = run.redeploy(bpmn);
-      const pid = ids?.[0] ?? model.processId;
-      trace({
-        kind: "start",
-        text: `Starting "${pid}" — ${
-          model.agent
-            ? brain.kind === "scripted" || !brain.chat
-              ? "scripted brain"
-              : `live brain (${brain.modelInUse ?? brain.kind})`
-            : "no agent in this model"
-        }`,
-      });
-      const snap = run.createInstance(pid, JSON.stringify(seed));
-      await new Promise((r) => setTimeout(r, BEAT));
-
-      await driveLoop(workers, agents, snap);
-    } finally {
-      runningRef.current = false;
-      setRunning(false);
-    }
+    // Apply the draft XML to the engine now — not on every keystroke (see
+    // `useExampleRun`'s `bpmn` param) — so Run/Step always execute exactly
+    // what's in the editor. `draft.hasErrors` already gated both buttons
+    // above, so this redeploy is against XML the model parser accepted.
+    const ids = run.redeploy(bpmn);
+    const pid = ids?.[0] ?? model.processId;
+    trace({
+      kind: "start",
+      text: `Starting "${pid}" — ${
+        model.agent
+          ? brain.kind === "scripted" || !brain.chat
+            ? "scripted brain"
+            : `live brain (${brain.modelInUse ?? brain.kind})`
+          : "no agent in this model"
+      }`,
+    });
+    const snap = run.createInstance(pid, JSON.stringify(seed));
+    return { workers, agents, snap };
   }, [
     run,
     example,
@@ -571,12 +594,141 @@ export function ExampleRunner({
     brain,
     trace,
     manualControls,
-    driveLoop,
+  ]);
+
+  /**
+   * A live, not-yet-completed instance already exists (from a prior Run or
+   * from stepping) — `start`/`step` should drive *it* forward with the
+   * workers/agents it was built with, instead of calling `beginRun` and
+   * starting a second one. `run.snapshot` is `null` right after `beginRun`'s
+   * `redeploy` and only becomes non-null once `createInstance` runs, and
+   * `reset()` (Reset) nulls it again — so this same check is what makes
+   * Reset return the page to its pre-run state.
+   */
+  const canResume = !!run.snapshot && run.snapshot.completedInstances < 1;
+  /** The start form (if any) still has a required field unfilled. */
+  const needsStartForm = !canResume && !!startSchema && !startFormValid;
+
+  const start = useCallback(async () => {
+    // The draft already gates this in the UI (the Run button is disabled),
+    // but re-check here too: `draft.hasErrors` is the single source of truth
+    // for "safe to run", not just a button prop. Same for the start form's
+    // validity — the button being disabled isn't the actual guarantee.
+    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors)
+      return;
+
+    // Set the in-flight lock *before* the first `await` (matching
+    // `resolveManualControl` above) so a second click landing while
+    // `beginRun()` is still pending can't slip past the check above and
+    // kick off a second redeploy/createInstance.
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      let workers = workersRef.current;
+      let agents = agentsRef.current;
+      let snap = run.snapshot;
+      const seq = ++runSeqRef.current;
+
+      if (!canResume) {
+        if (startFormRef.current && !startFormRef.current.validate()) return;
+        setCompileError(null);
+        const prepared = await beginRun();
+        if (!prepared) return;
+        workers = prepared.workers;
+        agents = prepared.agents;
+        snap = prepared.snap;
+        await new Promise((r) => setTimeout(r, BEAT));
+      }
+
+      await driveLoop(workers, agents, snap, seq);
+    } finally {
+      runningRef.current = false;
+      setRunning(false);
+    }
+  }, [run, stepping, draft.hasErrors, canResume, beginRun, driveLoop]);
+
+  /**
+   * Advance the *same* run by exactly one dispatch round (see
+   * `useExampleRun.stepWorkers`) instead of driving it to quiescence — the
+   * reader-controlled unit `driveLoop`'s continuous loop otherwise hides.
+   * Reuses `beginRun` on a fresh page, exactly like `start` above, so
+   * stepping from the very first press still creates the instance.
+   */
+  const step = useCallback(async () => {
+    if (
+      run.phase !== "ready" ||
+      runningRef.current ||
+      stepping ||
+      draft.hasErrors
+    )
+      return;
+
+    // Same in-flight lock as `start` above, set before the first `await` —
+    // otherwise a second Step/Run click landing while `beginRun()` is still
+    // pending slips past the check above and starts a second instance.
+    runningRef.current = true;
+    setStepping(true);
+    try {
+      let workers = workersRef.current;
+      let agents = agentsRef.current;
+      let snap = run.snapshot;
+
+      if (!canResume) {
+        if (startFormRef.current && !startFormRef.current.validate()) return;
+        setCompileError(null);
+        const prepared = await beginRun();
+        if (!prepared) return;
+        workers = prepared.workers;
+        agents = prepared.agents;
+        snap = prepared.snap;
+      }
+
+      if (!snap || snap.completedInstances >= 1) return;
+
+      // `takenSequenceFlows` only appends — the flows this one round takes
+      // are exactly what lands past this length (see `newSequenceFlows`).
+      const prevFlowCount = snap.takenSequenceFlows.length;
+      const round = await run.stepWorkers(workers, { agents });
+      if (!round) {
+        trace({
+          kind: "error",
+          text: "⏭ step failed — no dispatch round was returned",
+        });
+        return;
+      }
+      const vars = round.snapshot.instances[0]?.variables;
+      if (vars) setDisplayVars({ ...vars });
+      const flows = newSequenceFlows(
+        round.snapshot.takenSequenceFlows,
+        prevFlowCount,
+      );
+      trace(
+        describeRound(round, flows, elementLabels, manualControls),
+      );
+    } finally {
+      runningRef.current = false;
+      setStepping(false);
+    }
+  }, [
+    run,
+    stepping,
+    draft.hasErrors,
+    canResume,
+    beginRun,
+    trace,
+    elementLabels,
+    manualControls,
   ]);
 
   const stop = useCallback(() => {
     runningRef.current = false;
+    // Bump the generation token so any `driveLoop` round already in flight
+    // (dispatched before Reset was clicked) is dropped even if a new
+    // Start/manual-resume flips `runningRef.current` back to `true` before
+    // that stale round's `await` resolves.
+    runSeqRef.current++;
     setRunning(false);
+    setStepping(false);
     run.reset();
     setLog([]);
     setDisplayVars({});
@@ -603,14 +755,20 @@ export function ExampleRunner({
     if (run.phase === "error")
       return <Badge variant="danger">Engine error</Badge>;
     if (running) return <Badge variant="info">Running…</Badge>;
+    if (stepping) return <Badge variant="info">Stepping…</Badge>;
     if ((run.snapshot?.incidentElementIds.length ?? 0) > 0)
       return <Badge variant="danger">Incident</Badge>;
     if (openUserTask)
       return <Badge variant="warning">Waiting for a human</Badge>;
     if ((run.snapshot?.completedInstances ?? 0) >= 1)
       return <Badge variant="success">Completed</Badge>;
+    // An incomplete run that has quiesced short of completion — via Step, or
+    // via Run stopping on a wait state (timer/message/signal). Reset still
+    // clears this back to "Ready" (see `stop`/`canResume`) — this is not a
+    // stalled run, just a paused one.
+    if (run.snapshot) return <Badge variant="warning">Paused</Badge>;
     return <Badge variant="neutral">Ready</Badge>;
-  }, [run.phase, run.snapshot, running, openUserTask]);
+  }, [run.phase, run.snapshot, running, stepping, openUserTask]);
 
   return (
     <div className="runner">
@@ -624,16 +782,31 @@ export function ExampleRunner({
             disabled={
               run.phase !== "ready" ||
               running ||
+              stepping ||
               draft.hasErrors ||
-              (!!startSchema && !startFormValid)
+              needsStartForm
             }
           >
             ▶ Run
           </Button>
           <Button
             variant="secondary"
+            onClick={() => void step()}
+            disabled={
+              run.phase !== "ready" ||
+              running ||
+              stepping ||
+              draft.hasErrors ||
+              needsStartForm ||
+              (run.snapshot?.completedInstances ?? 0) >= 1
+            }
+          >
+            ⏭ Step
+          </Button>
+          <Button
+            variant="secondary"
             onClick={stop}
-            disabled={run.phase !== "ready"}
+            disabled={run.phase !== "ready" || stepping}
           >
             ↺ Reset
           </Button>
@@ -781,7 +954,7 @@ export function ExampleRunner({
                 <div className="controls">
                   <Button
                     onClick={() => void resolveManualControl("complete")}
-                    disabled={running}
+                    disabled={running || stepping}
                   >
                     {pendingManualJob.control.completeLabel ??
                       "✅ Complete normally"}
@@ -789,7 +962,7 @@ export function ExampleRunner({
                   <Button
                     variant="secondary"
                     onClick={() => void resolveManualControl("action")}
-                    disabled={running}
+                    disabled={running || stepping}
                   >
                     {pendingManualJob.control.action.label}
                   </Button>
