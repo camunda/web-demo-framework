@@ -373,7 +373,7 @@ export function ExampleRunner({
         const round = await run.stepWorkers(workers, { agents });
         snap = round?.snapshot ?? snap;
         const vars = snap.instances[0]?.variables;
-        if (vars && Object.keys(vars).length) setDisplayVars({ ...vars });
+        if (vars) setDisplayVars({ ...vars });
         if (snap.userTasks.some((t) => t.state === "Created")) {
           trace({
             kind: "human",
@@ -651,7 +651,7 @@ export function ExampleRunner({
       const round = await run.stepWorkers(workers, { agents });
       if (!round) return;
       const vars = round.snapshot.instances[0]?.variables;
-      if (vars && Object.keys(vars).length) setDisplayVars({ ...vars });
+      if (vars) setDisplayVars({ ...vars });
       const flows = newSequenceFlows(
         round.snapshot.takenSequenceFlows,
         prevFlowCount,
