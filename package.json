@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "probe": "node tools/probe/index.mjs",
     "eval": "node --import ./tools/eval/register.mjs tools/eval/index.mjs",
+    "eval:vision": "node tools/eval-vision/index.mjs",
     "spike:urban": "node --experimental-strip-types tools/spike-urban-bojtos/demo.ts",
     "budget": "node tools/bundle-budget/check.mjs"
   },
@@ -20,6 +21,7 @@
     "@bpmn-io/form-js-viewer": "^1.24.1",
     "@bpmn-io/properties-panel": "^3.48.0",
     "@camunda/design-system": "^0.36.0",
+    "@huggingface/transformers": "^4.2.0",
     "@mlc-ai/web-llm": "^0.2.84",
     "@monaco-editor/react": "^4.6.0",
     "@nanobpm/bojtos-kit": "^0.6.0",

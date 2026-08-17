@@ -1,7 +1,10 @@
 import { buildSandboxDocument } from "./iframeSource";
 import type {
+  HelperErrorMessage,
+  HelperResultMessage,
   SandboxJob,
   SandboxRequest,
+  SandboxRequestInput,
   SandboxResponse,
 } from "./protocol";
 
@@ -19,10 +22,15 @@ import type {
  * before it settles.
  */
 export function runInSandbox(
-  request: Omit<SandboxRequest, "id">,
-  opts: { timeoutMs?: number; onTrace?: (text: string) => void } = {},
+  request: SandboxRequestInput,
+  opts: {
+    timeoutMs?: number;
+    onTrace?: (text: string) => void;
+    onVision?: (prompt: string) => Promise<string> | string;
+    onImage?: () => Promise<unknown> | unknown;
+  } = {},
 ): Promise<unknown> {
-  const { timeoutMs = 5000, onTrace } = opts;
+  const { timeoutMs = 5000, onTrace, onVision, onImage } = opts;
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   return new Promise((resolve, reject) => {
@@ -60,7 +68,13 @@ export function runInSandbox(
         const job = request.job;
         const toSend: SandboxRequest =
           request.kind === "run-handler"
-            ? { kind: "run-handler", id, source: request.source, job }
+            ? {
+                kind: "run-handler",
+                id,
+                source: request.source,
+                job,
+                hasVision: request.hasVision,
+              }
             : { kind: "run-agent", id, source: request.source, job };
         iframe.contentWindow?.postMessage(toSend, "*");
         return;
@@ -69,11 +83,45 @@ export function runInSandbox(
 
       if (msg.kind === "trace") {
         onTrace?.(msg.text);
+      } else if (msg.kind === "vision-request") {
+        respondToHelper(msg.callId, onVision, "vision", msg.prompt);
+      } else if (msg.kind === "image-request") {
+        respondToHelper(msg.callId, onImage, "image");
       } else if (msg.kind === "result") {
         settle(() => resolve(msg.value));
       } else if (msg.kind === "error") {
         settle(() => reject(new Error(msg.message)));
       }
+    }
+
+    // Run a delegated vision/image helper host-side and post its outcome back
+    // to the iframe, correlated by `callId`. Never lets the run hang: a missing
+    // callback or a thrown callback becomes a `helper-error` the sandbox
+    // rejects on, rather than a promise the handler awaits forever.
+    function respondToHelper<A extends unknown[]>(
+      callId: string,
+      cb: ((...args: A) => unknown) | undefined,
+      what: string,
+      ...args: A
+    ) {
+      const send = (message: HelperResultMessage | HelperErrorMessage) =>
+        iframe.contentWindow?.postMessage(message, "*");
+      if (!cb) {
+        send({ kind: "helper-error", id, callId, message: `${what} helper is not available.` });
+        return;
+      }
+      Promise.resolve()
+        .then(() => cb(...args))
+        .then(
+          (value) => send({ kind: "helper-result", id, callId, value }),
+          (e) =>
+            send({
+              kind: "helper-error",
+              id,
+              callId,
+              message: e instanceof Error ? e.message : String(e),
+            }),
+        );
     }
 
     window.addEventListener("message", onMessage);

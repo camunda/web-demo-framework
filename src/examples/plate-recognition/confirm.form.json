@@ -1,0 +1,31 @@
+{
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "exporter": { "name": "Camunda Web Modeler", "version": "9b5d5ef" },
+  "schemaVersion": 19,
+  "id": "plate-recognition-confirm",
+  "type": "default",
+  "components": [
+    {
+      "text": "# Confirm the number plate\n\nThe in-browser vision model read a plate from the photo. It **recommends**; you **govern** — accept its reading or correct it before it is recorded.",
+      "type": "text",
+      "layout": { "row": "Row_heading", "columns": null },
+      "id": "Field_ConfirmHeading"
+    },
+    {
+      "text": "**Model reading:** {{if modelPlate = null or modelPlate = \"\" then \"(nothing read)\" else modelPlate}}",
+      "type": "text",
+      "layout": { "row": "Row_modelReading", "columns": null },
+      "id": "Field_ModelReading"
+    },
+    {
+      "label": "Number plate",
+      "description": "Edit this if the model misread the plate. What you submit is what gets recorded.",
+      "type": "textfield",
+      "layout": { "row": "Row_plate", "columns": null },
+      "id": "Field_ConfirmPlate",
+      "key": "confirmedPlate",
+      "validate": { "required": true }
+    }
+  ]
+}

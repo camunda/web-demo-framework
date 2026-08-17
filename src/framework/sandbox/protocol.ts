@@ -20,6 +20,14 @@ export interface RunHandlerMessage {
   id: string;
   source: string;
   job: SandboxJob;
+  /**
+   * Whether the host wired vision support for this run (contract B). When true
+   * the sandbox exposes `helpers.vision`/`helpers.image`, which bridge back to
+   * the host (which alone holds this run's image pixels and the active brain)
+   * via `vision-request`/`image-request` messages. Absent/false leaves those
+   * helpers `undefined`, exactly mirroring the host-side `helpersFor`.
+   */
+  hasVision?: boolean;
 }
 
 /** Host → iframe: compile `source` as an `AgentHandler` and run it against `job`. */
@@ -32,7 +40,43 @@ export interface RunAgentMessage {
 
 export type SandboxRequest = RunHandlerMessage | RunAgentMessage;
 
-/** iframe → host: the sandbox's runtime has attached its listener. */
+/**
+ * A `SandboxRequest` before the runner stamps its correlation `id` — kept
+ * distributive over the union so the `run-handler` branch retains `hasVision`
+ * (a plain `Omit<SandboxRequest, "id">` would drop keys not common to both).
+ */
+export type SandboxRequestInput =
+  | Omit<RunHandlerMessage, "id">
+  | Omit<RunAgentMessage, "id">;
+
+/**
+ * Host → iframe: the resolved value of a `helpers.vision`/`helpers.image`
+ * call the sandbox delegated back to the host via a `*-request` message,
+ * correlated by `callId`. The reader's source runs in the sandbox, but these
+ * helpers must execute host-side (only the host holds this run's image and the
+ * active vision brain), so their result crosses back as plain, clone-safe data.
+ */
+export interface HelperResultMessage {
+  kind: "helper-result";
+  id: string;
+  callId: string;
+  value: unknown;
+}
+
+/** Host → iframe: a delegated helper call rejected host-side. */
+export interface HelperErrorMessage {
+  kind: "helper-error";
+  id: string;
+  callId: string;
+  message: string;
+}
+
+export type SandboxHostMessage =
+  | SandboxRequest
+  | HelperResultMessage
+  | HelperErrorMessage;
+
+/** iframe → host: the ready listener has attached. */
 export interface ReadyMessage {
   kind: "ready";
 }
@@ -58,8 +102,25 @@ export interface ErrorMessage {
   message: string;
 }
 
+/** iframe → host: a `helpers.vision(prompt)` call made during a handler's run. */
+export interface VisionRequestMessage {
+  kind: "vision-request";
+  id: string;
+  callId: string;
+  prompt: string;
+}
+
+/** iframe → host: a `helpers.image()` call made during a handler's run. */
+export interface ImageRequestMessage {
+  kind: "image-request";
+  id: string;
+  callId: string;
+}
+
 export type SandboxResponse =
   | ReadyMessage
   | TraceMessage
   | ResultMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | VisionRequestMessage
+  | ImageRequestMessage;

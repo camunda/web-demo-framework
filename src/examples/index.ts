@@ -3,6 +3,7 @@ import { seedExportCompliance } from "./seed-export-compliance";
 import { orderProcess } from "./order-process";
 import { rocketLaunch } from "./rocket-launch";
 import { orderProcessBoundaryEvents } from "./order-process-boundary-events";
+import { plateRecognition } from "./plate-recognition";
 
 /** Every example the gallery offers. Adding one means adding a manifest here. */
 export const EXAMPLES: ExampleDef[] = [
@@ -10,4 +11,5 @@ export const EXAMPLES: ExampleDef[] = [
   seedExportCompliance,
   orderProcess,
   orderProcessBoundaryEvents,
+  plateRecognition,
 ];

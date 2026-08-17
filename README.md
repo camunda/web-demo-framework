@@ -26,17 +26,19 @@ Then open <http://localhost:5174> and press **▶ Run**.
 > including against a real local LLM. Known gaps are listed at the bottom — read
 > them before building on this.
 
-## The two examples
+## The examples
 
-Deliberately different shapes, to prove the runner isn't built around either.
+Deliberately different shapes, to prove the runner isn't built around any one of
+them.
 
 | Example | Shape |
 | --- | --- |
 | Seed export compliance agent | AI Agent ad-hoc sub-process, four connector-backed tools, a gateway on the agent's decision, a human review task, two forms |
 | Order process | Three plain service tasks and a gateway. No agent, no forms, no human step |
+| Read a number plate from a photo | A photo goes into the run, an in-browser **vision** model reads the number plate on the reader's own GPU, a human confirms or corrects it on a pre-filled form, and the process records the result. The model recommends; the process governs — the same shape as the compliance agent, with a vision model in the recommending seat. Offline it falls back to a deterministic scripted reading |
 
-The runner renders no brain panel and no tool manifest for the second one — it
-notices the model has no agent.
+The runner renders no brain panel and no tool manifest for the plain order
+process — it notices the model has no agent.
 
 ## What the framework reads off the diagram
 
@@ -58,18 +60,24 @@ An example manifest (`src/examples/*/index.ts`) supplies only what the diagram
 can't: handler source per element, a seed payload, optional scenarios, and a
 deterministic stand-in for the LLM.
 
-## The three brains
+## The brains
 
-All three satisfy one `ChatFn`, so the agent loop can't tell them apart.
+The three text brains satisfy one `ChatFn`, so the agent loop can't tell them
+apart; the vision brain adds an image→text seam beside them.
 
 | Brain | What it is | Where it works |
 | --- | --- | --- |
 | **Scripted** | No model. The example's editable stand-in decides. | Always, offline |
 | **In-browser** | A quantised model on WebGPU via WebLLM, lazily imported so its bundle only loads on opt-in. | Chrome/Edge/Safari 17+ with WebGPU — **including from a hosted page** |
 | **Endpoint** | Any OpenAI-compatible server; a local Ollama by default. | **Only when the page itself is served from localhost.** Ollama's CORS allowlist covers localhost origins only, so a tunnelled or deployed page is refused. The app detects this and says so instead of blaming the server |
+| **In-browser vision** | Florence-2 (an image→text model) on WebGPU via `@huggingface/transformers`, lazily imported like the WebLLM brain so its multi-hundred-MB weights only download on opt-in (the panel shows the size label first). | Chrome/Edge/Safari 17+ with WebGPU — **including from a hosted page**. WebGPU absent → falls back to a deterministic **scripted-vision** reading with a clear reason, so a reader never lands on a brain that can't connect |
 
-That last row decides what a public page defaults to: **in-browser is the only
-live brain that survives being hosted.**
+That last-but-one row decides what a public page defaults to for text: **in-browser
+is the only live brain that survives being hosted.** The in-browser vision brain
+has the same property — a hosted https page reads a photo with no server and no
+API key — and, WebGPU absent, degrades to the scripted reading rather than
+failing. See [`docs/vision-brain.md`](docs/vision-brain.md) for the vision seam,
+the image-into-a-run plumbing, and the falsifiability probe/eval.
 
 The brain clients are adapted from `camunda/seed-export-compliance-agent-demo`;
 the generic agent loop over them (`src/framework/agent/liveAgent.ts`) is new.
@@ -170,11 +178,12 @@ src/
   framework/
     model.ts          derives tools, arguments, prompts, job types, forms from the BPMN
     agent/liveAgent   generic LLM-driven AgentHandler for any agentic diagram
-    brains/           scripted | in-browser WebGPU | OpenAI-compatible endpoint
+    brains/           scripted | in-browser WebGPU (WebLLM) | endpoint | in-browser vision (Florence-2)
     compile.ts        editor source → handlers, routed by element id
     useExampleRun.ts  engine session + dispatch + user tasks
     ui/               runner shell, brain panel, FEEL-aware form renderer
   examples/
     seed-export-compliance/
     order-process/
+    plate-recognition/   read a number plate from a photo — the in-browser vision demo
 ```
