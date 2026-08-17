@@ -32,8 +32,13 @@ import manifest from "./images.json";
  *
  * The probe deliberately goes through `buildWorkers`/`helpersFor` and the real
  * `makeVisionAccessor` chain (a `VisionSupport` whose `read` is the scripted
- * brain), rather than calling the brain directly — that is the same path the
- * runner takes, so this exercises the whole contract-B seam, not a shortcut.
+ * brain), rather than calling the brain directly — so this exercises the whole
+ * contract-B vision seam, not a shortcut. Note it does NOT reproduce the
+ * runner's sandboxed handler execution: the runner evaluates handler sources in
+ * an isolated iframe (`runHandlerSandboxed`), whereas this probe evals them
+ * in-process (see `compile` below) to keep the test dependency-free. What is
+ * identical is the helpers/vision wiring the handlers run against, not the
+ * execution sandbox.
  */
 
 interface ManifestEntry {
@@ -42,7 +47,14 @@ interface ManifestEntry {
 }
 const images = manifest as ManifestEntry[];
 
-/** Evaluate a handler's editable source into the function the runner runs. */
+/**
+ * Evaluate a handler's editable source into a callable, in-process.
+ *
+ * NOTE: this is NOT how the runner executes handlers — the runner evaluates
+ * handler sources inside a sandboxed iframe (`runHandlerSandboxed`). Here we use
+ * `new Function` purely so the offline probe can drive the handler logic without
+ * a browser sandbox. Do not copy this `new Function` pattern into non-test code.
+ */
 function compile(source: string): ExampleHandler {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
   return new Function(`"use strict"; return (${source});`)() as ExampleHandler;
@@ -77,10 +89,12 @@ function modelFixture(): ModelInfo {
 const noopTrace: Trace = () => {};
 
 /**
- * Run one of the example's handlers exactly as the runner would when no live
- * browser-vision brain is connected: the scripted-vision brain is built from
- * the example's OWN `scriptedVision` field (which the plate-example slice
- * populated from `images.json`), and threaded in through `VisionSupport`.
+ * Drive one of the example's handlers through the same helpers/vision wiring the
+ * runner builds when no live browser-vision brain is connected: the
+ * scripted-vision brain is built from the example's OWN `scriptedVision` field
+ * (which the plate-example slice populated from `images.json`), and threaded in
+ * through `VisionSupport`. (The handler body itself is evaluated in-process via
+ * `compile`, not in the runner's iframe sandbox — see the note on `compile`.)
  */
 async function runHandler(
   elementId: "ExtractPlate" | "RecordResult",
