@@ -407,7 +407,7 @@ export function ExampleRunner({
           // "Paused" with no explanation.
           trace({
             kind: "error",
-            text: "⏭ run stopped — no dispatch round was returned",
+            text: "▶ run stopped — no dispatch round was returned",
           });
           break;
         }
@@ -762,8 +762,10 @@ export function ExampleRunner({
       return <Badge variant="warning">Waiting for a human</Badge>;
     if ((run.snapshot?.completedInstances ?? 0) >= 1)
       return <Badge variant="success">Completed</Badge>;
-    // A stepped-but-incomplete run: Reset still clears this back to "Ready"
-    // (see `stop`/`canResume`) — this is not a stalled run, just a paused one.
+    // An incomplete run that has quiesced short of completion — via Step, or
+    // via Run stopping on a wait state (timer/message/signal). Reset still
+    // clears this back to "Ready" (see `stop`/`canResume`) — this is not a
+    // stalled run, just a paused one.
     if (run.snapshot) return <Badge variant="warning">Paused</Badge>;
     return <Badge variant="neutral">Ready</Badge>;
   }, [run.phase, run.snapshot, running, stepping, openUserTask]);
