@@ -400,7 +400,18 @@ export function ExampleRunner({
           });
           break;
         }
-        if (!round || round.handled === 0) break;
+        if (!round) {
+          // `stepWorkers` returned null on a dispatch error — surface that
+          // explicitly rather than silently stopping as if the run had just
+          // quiesced (see `handled === 0` below), so a Run doesn't go
+          // "Paused" with no explanation.
+          trace({
+            kind: "error",
+            text: "⏭ run stopped — no dispatch round was returned",
+          });
+          break;
+        }
+        if (round.handled === 0) break;
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
@@ -681,7 +692,7 @@ export function ExampleRunner({
       if (!round) {
         trace({
           kind: "error",
-          text: "  ↳ step failed — no dispatch round was returned",
+          text: "⏭ step failed — no dispatch round was returned",
         });
         return;
       }
