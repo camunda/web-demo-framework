@@ -16,7 +16,16 @@ export interface CollapsibleCardProps {
    * the panel's (possibly dynamic) title.
    */
   sectionId: string;
+  /**
+   * Panel heading. Rendered inside the disclosure trigger `<button>`, so it
+   * must be phrasing (inline) content — block-level nodes would produce
+   * invalid nesting.
+   */
   title: ReactNode;
+  /**
+   * Optional sub-heading, also rendered inside the trigger `<button>`; phrasing
+   * (inline) content only, for the same reason as `title`.
+   */
   description?: ReactNode;
   /** Open state on a first-ever visit, before the reader has toggled it. */
   defaultOpen?: boolean;

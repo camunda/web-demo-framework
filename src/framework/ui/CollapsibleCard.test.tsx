@@ -87,6 +87,14 @@ describe("CollapsibleCard", () => {
     expect(window.localStorage.getItem(storageKeyFor("b"))).toBeNull();
   });
 
+  it("falls back to defaultOpen when the stored value is unrecognized", () => {
+    // A legacy or corrupted value we never wrote must not force the panel
+    // closed — it should be treated as "no preference" and defer to the default.
+    window.localStorage.setItem(storageKeyFor("process"), "true");
+    renderCard({ sectionId: "process", defaultOpen: true });
+    expect(screen.getByText("Body content")).toBeInTheDocument();
+  });
+
   it("honors defaultOpen=false only until a stored choice exists", () => {
     renderCard({ sectionId: "code", defaultOpen: false });
     expect(screen.queryByText("Body content")).not.toBeInTheDocument();

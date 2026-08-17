@@ -20,8 +20,12 @@ export function storageKeyFor(sectionId: string): string {
 function readStored(sectionId: string): boolean | undefined {
   try {
     const raw = window.localStorage.getItem(storageKeyFor(sectionId));
-    if (raw === null) return undefined;
-    return raw === "1";
+    if (raw === "1") return true;
+    if (raw === "0") return false;
+    // Missing, or an unrecognized/legacy value we never wrote: report "no
+    // preference stored" so the caller falls back to `defaultOpen`, rather than
+    // silently forcing the panel closed.
+    return undefined;
   } catch {
     // Storage can throw in private-mode / disabled-cookie contexts — treat it
     // as "no preference stored" rather than crashing the runner.
