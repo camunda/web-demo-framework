@@ -54,6 +54,21 @@ const CURATED_MODEL_IDS: { id: string; label: string; downloadLabel: string }[] 
     label: "Gemma 2 2B",
     downloadLabel: "~1.5 GB",
   },
+  // The f32 builds below are the fallback tier: same models, no `shader-f16`
+  // requirement, at the cost of a bigger download and more VRAM. A driver whose
+  // f16 shader path is broken (or absent) fails every f16 build identically, and
+  // "every model fails" reads as "the feature is broken" rather than "try a
+  // different quantisation" — so the alternative has to be on the menu.
+  {
+    id: "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+    label: "Llama 3.2 1B (f32, wider GPU support)",
+    downloadLabel: "~1.1 GB",
+  },
+  {
+    id: "SmolLM2-360M-Instruct-q4f32_1-MLC",
+    label: "SmolLM2 360M (tiny, f32)",
+    downloadLabel: "~0.6 GB",
+  },
   {
     id: "SmolLM2-360M-Instruct-q4f16_1-MLC",
     label: "SmolLM2 360M (tiny)",
@@ -195,11 +210,38 @@ export async function isModelCached(modelId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether an error means the GPU device went away underneath us, rather than
+ * anything about the model or the network.
+ *
+ * Windows resets a GPU that stops responding (`DXGI_ERROR_DEVICE_HUNG` /
+ * `DEVICE_REMOVED`), and once that happens every tvmjs handle the engine holds
+ * reports itself disposed. The messages come from three layers — Dawn, the
+ * WebGPU spec, and tvmjs — so this matches on all of them.
+ */
+export function isDeviceLostError(message: string): boolean {
+  return /device (was )?lost|device_hung|device_removed|already been disposed|gpudevicelostinfo/i.test(
+    message,
+  );
+}
+
+/** Advice that fits a dead GPU, rather than "check your connection". */
+export function deviceLostAdvice(): string {
+  return (
+    "The GPU device was lost — the driver reset while the model was loading or running. " +
+    "This is a browser/driver-level failure, not a problem with the model: fully quit and " +
+    "reopen the browser (a lost device usually persists for the life of the GPU process), " +
+    "check chrome://gpu still reports hardware acceleration, and update your GPU driver if " +
+    "it recurs. The Scripted and Endpoint brains don't use the GPU at all."
+  );
+}
+
 export class BrowserBrain {
   readonly kind = "browser" as const;
   model: string | null = null;
 
   private engine: MLCEngine | null = null;
+  private worker: Worker | null = null;
   /** Bumped on every connect()/cancelConnect() so a stale load can be ignored. */
   private generation = 0;
 
@@ -217,27 +259,45 @@ export class BrowserBrain {
       onProgress?.({ progress: report.progress ?? 0, text: report.text ?? "" });
     };
 
+    // Always a fresh engine and worker, never `engine.reload()`. Reload keeps
+    // the same underlying device, so once one has been lost the reused engine
+    // stays poisoned: `reload()` can even resolve against a dead device,
+    // leaving this brain reporting "connected" over something that throws on
+    // first use. Tearing down and rebuilding is what a page refresh does, and
+    // it is what actually recovers.
+    this.teardown();
+
     let loaded: MLCEngine;
+    let worker: Worker | undefined;
     try {
-      if (this.engine) {
-        await this.engine.reload(modelId);
-        loaded = this.engine;
-      } else {
-        // Load WebLLM only when a user actually opts in — it's a multi-MB
-        // bundle the scripted and endpoint paths never need.
-        const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
-        loaded = await CreateMLCEngine(modelId, { initProgressCallback });
-      }
+      // Load WebLLM only when a user actually opts in — it's a multi-MB bundle
+      // the scripted and endpoint paths never need.
+      const { CreateWebWorkerMLCEngine } = await import("@mlc-ai/web-llm");
+      // The engine runs in a worker, not on this thread. See the comment in
+      // `webllm.worker.ts`: GPU work submitted from a thread that is also doing
+      // React/bpmn-js/Monaco layout is what hangs the driver.
+      worker = new Worker(new URL("./webllm.worker.ts", import.meta.url), {
+        type: "module",
+      });
+      loaded = (await CreateWebWorkerMLCEngine(worker, modelId, {
+        initProgressCallback,
+      })) as unknown as MLCEngine;
     } catch (e) {
-      if (myGeneration !== this.generation)
-        throw new Error("cancelled");
+      worker?.terminate();
+      if (myGeneration !== this.generation) throw new Error("cancelled");
+      const message = e instanceof Error ? e.message : String(e);
+      if (isDeviceLostError(message)) {
+        throw new Error(
+          `Couldn't load ${modelId} in the browser (${message}). ${deviceLostAdvice()}`,
+        );
+      }
       const needsShaderF16 = BROWSER_MODELS.find(
         (m) => m.id === modelId,
       )?.requiredFeatures?.includes("shader-f16");
       throw new Error(
-        `Couldn't load ${modelId} in the browser (${e instanceof Error ? e.message : String(e)}). ` +
+        `Couldn't load ${modelId} in the browser (${message}). ` +
           (needsShaderF16
-            ? "This model needs WebGPU with shader-f16; try a smaller model or the endpoint brain."
+            ? "This model needs WebGPU with shader-f16; try one of the f32 models in the list, or the endpoint brain."
             : "Try a smaller model, check your connection, or use the endpoint brain instead."),
       );
     }
@@ -245,11 +305,23 @@ export class BrowserBrain {
       // The reader cancelled while this load was in flight. The bytes are
       // now cached for next time regardless, but don't surface as "connected".
       void loaded.unload().catch(() => {});
+      worker?.terminate();
       throw new Error("cancelled");
     }
     this.engine = loaded;
+    this.worker = worker ?? null;
     this.model = modelId;
     return modelId;
+  }
+
+  /** Drop the engine and its worker. Safe to call when there is nothing to drop. */
+  private teardown(): void {
+    const { engine, worker } = this;
+    this.engine = null;
+    this.worker = null;
+    this.model = null;
+    void engine?.unload().catch(() => {});
+    worker?.terminate();
   }
 
   /**
@@ -270,27 +342,37 @@ export class BrowserBrain {
     const engine = this.engine;
     if (!engine || !this.model)
       throw new Error("BrowserBrain.chat called before connect()");
-    const stream = await engine.chat.completions.create({
-      messages,
-      temperature: 0,
-      max_tokens: maxNewTokens,
-      stream: true,
-    });
-    let full = "";
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content ?? "";
-      if (delta) {
-        full += delta;
-        onToken?.(delta);
+    try {
+      const stream = await engine.chat.completions.create({
+        messages,
+        temperature: 0,
+        max_tokens: maxNewTokens,
+        stream: true,
+      });
+      let full = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content ?? "";
+        if (delta) {
+          full += delta;
+          onToken?.(delta);
+        }
       }
+      return full;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (isDeviceLostError(message)) {
+        // Everything this engine holds is dead. Drop it so the next connect
+        // rebuilds instead of hitting the "same model, already connected"
+        // early return and handing back the same corpse.
+        this.teardown();
+        throw new Error(`The in-browser model stopped: ${deviceLostAdvice()}`);
+      }
+      throw e;
     }
-    return full;
   };
 
   dispose(): void {
     this.generation++;
-    void this.engine?.unload().catch(() => {});
-    this.engine = null;
-    this.model = null;
+    this.teardown();
   }
 }

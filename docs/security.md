@@ -105,10 +105,23 @@ regardless of CSP, because Ollama's own CORS allowlist covers localhost
 origins only. So:
 
 - On a **hosted** deployment, `connect-src` is a fixed, narrow allowlist: the
-  page's own origin, plus the specific hosts WebLLM needs to fetch model
-  weights and the compiled wasm engine from (`https://huggingface.co
-  https://cdn-lfs.huggingface.co https://raw.githubusercontent.com`, since
-  `@mlc-ai/web-llm`'s prebuilt config points at those). `http://localhost:*`
+  page's own origin, plus what WebLLM needs to fetch model weights and the
+  compiled wasm engine from —
+
+  ```
+  https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com
+  ```
+
+  The two wildcards are deliberate, and were not optional. `@mlc-ai/web-llm`'s
+  prebuilt config only ever names `huggingface.co`, but a weight request there
+  302s to whichever storage host serves that repo: `us.aws.cdn.hf.co` today
+  (Hugging Face's Xet storage), `cdn-lfs.huggingface.co` historically, and the
+  region is part of the hostname. CSP is enforced against the *redirect target*,
+  so allowlisting only the URL WebLLM asks for blocks every model download —
+  and a CSP-blocked `fetch` is indistinguishable in JS from being offline, so
+  the reader just sees `Failed to fetch`. Enumerating individual CDN hosts
+  would break again the next time Hugging Face moves storage or adds a region.
+  `http://localhost:*`
   is **not** in a hosted CSP — the endpoint brain is already unusable there,
   documented as such in the UI, and adding it would only be a needless CSP
   hole. `font-src` additionally allows `data:`, since bpmn-js's own icon font

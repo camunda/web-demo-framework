@@ -228,6 +228,13 @@ export const seedExportCompliance: ExampleDef = {
   scriptedAgent: SCRIPTED_AGENT,
   templates: prompts,
   tour: complianceTour,
+  // The one tool whose absence changes the outcome: the gateway routes on the
+  // decision this records, so a run that skips it reaches a human review task
+  // with nothing to review. Small models do skip it — Llama 3.2 1B verifies the
+  // marker, checks the country, computes the score, passes `decision:
+  // "cleared"` as an argument to the *scoring* tool (which has no such
+  // argument, so it is dropped), and calls itself done.
+  requiredTools: ["RecordComplianceDecision"],
   handlers: [
     {
       elementId: "VerifyGeneticMarker",
