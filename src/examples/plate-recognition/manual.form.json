@@ -1,0 +1,25 @@
+{
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "exporter": { "name": "Camunda Web Modeler", "version": "9b5d5ef" },
+  "schemaVersion": 19,
+  "id": "plate-recognition-manual",
+  "type": "default",
+  "components": [
+    {
+      "text": "# Couldn't read the plate\n\nThe vision model didn't return a confident reading for this photo (an unrecognised image, or no in-browser model connected). Enter the plate by hand, or re-run with the in-browser vision brain connected.",
+      "type": "text",
+      "layout": { "row": "Row_heading", "columns": null },
+      "id": "Field_ManualHeading"
+    },
+    {
+      "label": "Number plate",
+      "description": "Type the plate exactly as it appears in the photo.",
+      "type": "textfield",
+      "layout": { "row": "Row_plate", "columns": null },
+      "id": "Field_ManualPlate",
+      "key": "confirmedPlate",
+      "validate": { "required": true }
+    }
+  ]
+}
