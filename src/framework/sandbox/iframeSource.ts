@@ -107,7 +107,7 @@ export function buildSandboxDocument(): string {
         if (!waiter) return;
         delete pendingCalls[msg.callId];
         if (msg.kind === "helper-result") waiter.resolve(msg.value);
-        else waiter.reject(new Error(msg.message || "vision helper failed"));
+        else waiter.reject(new Error(msg.message || "helper call failed"));
         return;
       }
       if (msg.kind !== "run-handler" && msg.kind !== "run-agent") return;

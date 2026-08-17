@@ -1,5 +1,7 @@
 import { buildSandboxDocument } from "./iframeSource";
 import type {
+  HelperErrorMessage,
+  HelperResultMessage,
   SandboxJob,
   SandboxRequest,
   SandboxRequestInput,
@@ -102,7 +104,7 @@ export function runInSandbox(
       what: string,
       ...args: A
     ) {
-      const send = (message: SandboxResponse | Record<string, unknown>) =>
+      const send = (message: HelperResultMessage | HelperErrorMessage) =>
         iframe.contentWindow?.postMessage(message, "*");
       if (!cb) {
         send({ kind: "helper-error", id, callId, message: `${what} helper is not available.` });
