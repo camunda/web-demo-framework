@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { SeedImage } from "../types";
 import type { RunImage } from "../imageInput";
 
@@ -37,18 +37,25 @@ export function ImageInputPanel({
 
   const readFile = useCallback(
     (file: File) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = String(reader.result);
-        setUploadPreview(dataUrl);
-        // The upload has no seed id, so the scripted brain resolves it to its
-        // UNKNOWN placeholder; a live brain reads the actual pixels.
-        onSelect({ imageName: file.name, pixels: dataUrl });
-      };
-      reader.readAsDataURL(file);
+      // Store the original File as the pixels (VisionImage accepts a Blob) so a
+      // live brain reads the bytes directly — no base64 expansion (~33% larger)
+      // or a duplicated multi-MB string held in state. The preview uses a cheap
+      // object URL that points at the same bytes, revoked when it's replaced or
+      // the panel unmounts (see the effect below).
+      setUploadPreview(URL.createObjectURL(file));
+      // The upload has no seed id, so the scripted brain resolves it to its
+      // UNKNOWN placeholder; a live brain reads the actual pixels.
+      onSelect({ imageName: file.name, pixels: file });
     },
     [onSelect],
   );
+
+  // Revoke the preview's object URL when it's superseded or the panel unmounts,
+  // so uploading/clearing repeatedly can't leak blob URLs.
+  useEffect(() => {
+    if (!uploadPreview) return;
+    return () => URL.revokeObjectURL(uploadPreview);
+  }, [uploadPreview]);
 
   const onFiles = useCallback(
     (files: FileList | null) => {

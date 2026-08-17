@@ -211,3 +211,16 @@ if (
 }
 
 
+
+// jsdom implements neither `URL.createObjectURL` nor `URL.revokeObjectURL`, but
+// `ImageInputPanel` uses them to preview an uploaded file without holding a
+// base64 copy. These stubs hand back a stable fake blob URL and no-op the
+// revoke, which is enough for the panel's mount/upload/clear/unmount lifecycle
+// under test — jsdom renders no actual image bytes.
+if (typeof URL.createObjectURL === "undefined") {
+  let counter = 0;
+  URL.createObjectURL = () => `blob:jsdom/${counter++}`;
+}
+if (typeof URL.revokeObjectURL === "undefined") {
+  URL.revokeObjectURL = () => {};
+}

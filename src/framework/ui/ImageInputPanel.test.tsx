@@ -38,7 +38,7 @@ describe("ImageInputPanel (contract B start affordance)", () => {
     });
   });
 
-  it("uploading a photo reports { imageName, pixels } as a data URL", async () => {
+  it("uploading a photo reports { imageName, pixels } as the original File", async () => {
     const onSelect = vi.fn<(image: RunImage | null) => void>();
     render(
       <ImageInputPanel imageInput={IMAGE_INPUT} value={null} onSelect={onSelect} />,
@@ -48,10 +48,11 @@ describe("ImageInputPanel (contract B start affordance)", () => {
     await act(async () => {
       fireEvent.change(upload, { target: { files: [file] } });
     });
-    // Wait until the FileReader's async onload has fired and reported.
     await waitFor(() => expect(onSelect).toHaveBeenCalled());
     const arg = onSelect.mock.calls.at(-1)![0]!;
     expect(arg.imageName).toBe("my-car.png");
-    expect(String(arg.pixels)).toMatch(/^data:image\/png/);
+    // The pixels are the original File (a Blob) — not a base64 data URL copy —
+    // so a live brain reads the bytes directly. VisionImage accepts a Blob.
+    expect(arg.pixels).toBe(file);
   });
 });
