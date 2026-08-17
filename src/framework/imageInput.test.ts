@@ -113,6 +113,10 @@ describe("pickVisionArg — live gets pixels, scripted gets the seed id", () => 
     const image: RunImage = { imageId: "seed-1", pixels: "seed-1.jpg" };
     expect(pickVisionArg(image, true)).toBe("seed-1.jpg");
   });
+  it("gives a live brain nothing when there are no pixels (never the seed id)", () => {
+    const image: RunImage = { imageId: "seed-1" };
+    expect(pickVisionArg(image, true)).toBeUndefined();
+  });
   it("hands the scripted brain the seed id", () => {
     const image: RunImage = { imageId: "seed-1", pixels: "seed-1.jpg" };
     expect(pickVisionArg(image, false)).toBe("seed-1");

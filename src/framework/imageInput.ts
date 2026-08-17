@@ -52,7 +52,12 @@ export function imageRefVariables(
  * Pick the `VisionImage` argument to hand a vision brain for this run's image.
  *
  * - A **live** browser-vision brain reads real pixels, so it gets `pixels`
- *   (the uploaded file, or the seed image's data URL/URL).
+ *   (the uploaded file, or the seed image's data URL/URL) — and *only* pixels.
+ *   `imageId` is a scripted-vision lookup key (a bare-string seed id), not a
+ *   loadable image source for Transformers.js `load_image`, so we never hand it
+ *   to a live brain: a gallery pick with no preloaded pixels resolves to
+ *   `undefined` (the accessor then reports "no image") rather than failing a
+ *   live read on an id it can't load.
  * - The **scripted** fallback identifies a seed image by its id, so it gets
  *   `imageId` — that is how the example's `scriptedVision` ground truth reaches
  *   `helpers.vision`. An upload (no `imageId`) falls back to its `pixels`
@@ -62,9 +67,7 @@ export function pickVisionArg(
   image: RunImage,
   live: boolean,
 ): VisionImage | undefined {
-  return live
-    ? (image.pixels ?? image.imageId)
-    : (image.imageId ?? image.pixels);
+  return live ? image.pixels : (image.imageId ?? image.pixels);
 }
 
 /**

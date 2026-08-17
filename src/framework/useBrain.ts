@@ -396,6 +396,7 @@ export function useBrain(): BrainControls {
       setVisionError(message);
       setVisionStatus("error");
       setVision(null);
+      setVisionModelInUse(null);
     } finally {
       setVisionProgress(null);
     }
