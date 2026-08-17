@@ -149,6 +149,64 @@ describe("describeRound", () => {
     expect(entry.text).toContain("charge-payment");
   });
 
+  it("treats a manually-held job type as waiting on a human, not an error", () => {
+    const round: RoundResult = {
+      snapshot: snap(),
+      handled: 0,
+      reason: "unhandledJobs",
+      unhandled: ["review-decision"],
+    };
+    const entry = describeRound(
+      round,
+      [],
+      labelFor,
+      new Set(["review-decision"]),
+    );
+    expect(entry.kind).toBe("human");
+    expect(entry.text).toMatch(/waiting for a human/i);
+  });
+
+  it("still reports an error when an unhandled job isn't one of the manually-held types", () => {
+    const round: RoundResult = {
+      snapshot: snap(),
+      handled: 0,
+      reason: "unhandledJobs",
+      unhandled: ["charge-payment"],
+    };
+    const entry = describeRound(
+      round,
+      [],
+      labelFor,
+      new Set(["review-decision"]),
+    );
+    expect(entry.kind).toBe("error");
+    expect(entry.text).toContain("charge-payment");
+  });
+
+  it("reports a user task opened mid-round as waiting on a human", () => {
+    const round: RoundResult = {
+      snapshot: snap({
+        userTasks: [
+          {
+            key: "1",
+            instanceKey: "1",
+            elementInstanceKey: "1",
+            elementId: "Task_1",
+            state: "Created",
+            candidateGroups: [],
+            candidateUsers: [],
+            priority: 50,
+          },
+        ],
+      }),
+      handled: 2,
+    };
+    const entry = describeRound(round, [], labelFor);
+    expect(entry.kind).toBe("human");
+    expect(entry.text).toContain("handled 2 jobs");
+    expect(entry.text).toMatch(/waiting for a human/i);
+  });
+
   it("says nothing is running when idle", () => {
     const round: RoundResult = { snapshot: snap(), handled: 0, reason: "idle" };
     expect(describeRound(round, [], labelFor).text).toMatch(

@@ -702,12 +702,23 @@ export function ExampleRunner({
         round.snapshot.takenSequenceFlows,
         prevFlowCount,
       );
-      trace(describeRound(round, flows, elementLabels));
+      trace(
+        describeRound(round, flows, elementLabels, manualControls),
+      );
     } finally {
       runningRef.current = false;
       setStepping(false);
     }
-  }, [run, stepping, draft.hasErrors, canResume, beginRun, trace, elementLabels]);
+  }, [
+    run,
+    stepping,
+    draft.hasErrors,
+    canResume,
+    beginRun,
+    trace,
+    elementLabels,
+    manualControls,
+  ]);
 
   const stop = useCallback(() => {
     runningRef.current = false;

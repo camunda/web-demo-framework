@@ -23,13 +23,31 @@ export function newSequenceFlows(
  * (`@nanobpm/bojtos-kit`'s `settleReason`) into an honest sentence about what
  * is blocking progress, instead of a silent no-op: idle and terminal states
  * must say what they're waiting for.
+ *
+ * `manualJobTypes`, if given, are job types this example deliberately holds
+ * out of the drive loop (see `HandlerDef.manualControl`/`manualControls` in
+ * `ExampleRunner`, which passes its `manualControls` map straight through —
+ * hence accepting anything with a `.has(jobType)` check rather than
+ * demanding a `Set`). Those workers are removed from `beginRun`'s worker
+ * map, so the engine reports a job of that type the same way as any other
+ * unhandled job type (`reason: "unhandledJobs"`) — without this set, that
+ * looks identical to a genuine "no worker registered" error even though the
+ * UI is correctly waiting on the reader's manual choice.
  */
 export function describeRound(
   round: RoundResult,
   flowsThisRound: SequenceFlowDto[],
   labelFor: LabelFor,
+  manualJobTypes?: { has(jobType: string): boolean },
 ): TraceEntry {
   const snap = round.snapshot;
+  // A user task can open in the very same round that also handled jobs (or
+  // that stopped on a manually-held job) — check once up front so both
+  // branches below can fold it in rather than hiding it behind a generic
+  // "now at —"/error line.
+  const humanWaitingText =
+    "⏸ waiting for a human — complete the task below to continue";
+  const userTaskOpened = snap.userTasks.some((t) => t.state === "Created");
   if (round.handled > 0) {
     const activeLabels = snap.activeElementIds.map(labelFor);
     const flowText = flowsThisRound.length
@@ -48,6 +66,17 @@ export function describeRound(
           `${flowText} — ✅ process instance completed`,
       };
     }
+    // Likewise, a round can handle jobs and open a user task in the same
+    // pass — say so explicitly instead of "now at <label>", which would
+    // otherwise look resumable when it's actually blocked on a form.
+    if (userTaskOpened) {
+      return {
+        kind: "human",
+        text:
+          `⏭ round handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
+          `${flowText} — ${humanWaitingText}`,
+      };
+    }
     return {
       kind: "step",
       text:
@@ -60,10 +89,7 @@ export function describeRound(
     case "completed":
       return { kind: "done", text: "✅ process instance completed" };
     case "userTasks":
-      return {
-        kind: "human",
-        text: "⏸ waiting for a human — complete the task below to continue",
-      };
+      return { kind: "human", text: humanWaitingText };
     case "timers":
       return {
         kind: "step",
@@ -81,13 +107,25 @@ export function describeRound(
       };
     case "incidents":
       return { kind: "error", text: "A job failed — incident on the diagram" };
-    case "unhandledJobs":
+    case "unhandledJobs": {
+      const unhandled = round.unhandled ?? [];
+      // The example itself deliberately excludes these job types from the
+      // drive loop (see `HandlerDef.manualControl`/`manualControls`) so the
+      // reader can choose how to resolve them — that's a normal pause
+      // waiting on a human choice, not an error, even though the engine's
+      // `settleReason` can't tell the two apart.
+      if (
+        manualJobTypes &&
+        unhandled.length > 0 &&
+        unhandled.every((jt: string) => manualJobTypes.has(jt))
+      ) {
+        return { kind: "human", text: humanWaitingText };
+      }
       return {
         kind: "error",
-        text: `⏭ waiting on job type(s) with no worker registered: ${(
-          round.unhandled ?? []
-        ).join(", ")}`,
+        text: `⏭ waiting on job type(s) with no worker registered: ${unhandled.join(", ")}`,
       };
+    }
     case "idle":
       return {
         kind: "step",
