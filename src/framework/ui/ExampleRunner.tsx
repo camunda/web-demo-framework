@@ -488,6 +488,7 @@ export function ExampleRunner({
         for (const [jobType, specs] of byJobType)
           agents[jobType] = makeLiveAgentRouter(specs, brain.chat!, trace, {
             turnRef: turnRef.current,
+            requiredTools: example.requiredTools,
           });
       } else if (scripted && model.agent) {
         // The scripted brain is one closure today — it only drives the

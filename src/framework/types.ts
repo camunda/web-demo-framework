@@ -151,4 +151,15 @@ export interface ExampleDef {
    * behaves exactly as one without this field at all.
    */
   tour?: TourDef;
+  /**
+   * Tool element ids this example's agent must actually call before a "done"
+   * is believed. A small model that reports done with one of these unrun is
+   * asked once, naming it — see `requiredTools` in `agent/liveAgent.ts` for
+   * why, and for what happens if it insists.
+   *
+   * Only for tools whose absence changes the outcome: the one that records a
+   * decision, not every tool that might be relevant. Listing optional tools
+   * here would push a model into calling things the case doesn't call for.
+   */
+  requiredTools?: string[];
 }
