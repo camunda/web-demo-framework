@@ -37,6 +37,17 @@ export function describeRound(
           .map((f) => `${labelFor(f.from)} → ${labelFor(f.to)}`)
           .join(", ")}`
       : "";
+    // A round can both handle jobs *and* finish the instance in the same
+    // pass — surface that explicitly as "done" rather than a plain "step"
+    // entry, so a final round while stepping doesn't hide the completion.
+    if (snap.completedInstances >= 1) {
+      return {
+        kind: "done",
+        text:
+          `⏭ round handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
+          `${flowText} — ✅ process instance completed`,
+      };
+    }
     return {
       kind: "step",
       text:

@@ -59,6 +59,17 @@ describe("describeRound", () => {
     expect(entry.text).toContain("now at Review");
   });
 
+  it("reports completion when a round both handles jobs and finishes the instance", () => {
+    const round: RoundResult = {
+      snapshot: snap({ completedInstances: 1 }),
+      handled: 1,
+    };
+    const entry = describeRound(round, [], labelFor);
+    expect(entry.kind).toBe("done");
+    expect(entry.text).toContain("handled 1 job");
+    expect(entry.text).toMatch(/completed/i);
+  });
+
   it("uses singular phrasing for one handled job", () => {
     const round: RoundResult = { snapshot: snap(), handled: 1 };
     const entry = describeRound(round, [], labelFor);

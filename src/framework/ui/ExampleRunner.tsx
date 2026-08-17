@@ -741,7 +741,7 @@ export function ExampleRunner({
           <Button
             variant="secondary"
             onClick={stop}
-            disabled={run.phase !== "ready"}
+            disabled={run.phase !== "ready" || stepping}
           >
             ↺ Reset
           </Button>
