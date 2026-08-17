@@ -215,11 +215,13 @@ describe("describeRound", () => {
   });
 
   it("surfaces an unrecognized settle reason instead of reusing the idle text", () => {
-    const round: RoundResult = {
+    // Stands in for a `SettleReason` a future bojtos-kit adds, so it is cast
+    // past the union this version declares — that is the branch under test.
+    const round = {
       snapshot: snap(),
       handled: 0,
       reason: "somethingNew",
-    };
+    } as unknown as RoundResult;
     const entry = describeRound(round, [], labelFor);
     expect(entry.text).toContain("somethingNew");
     expect(entry.text).not.toMatch(/nothing to step/i);
