@@ -27,7 +27,11 @@ function connectSrc(): string[] {
   return directive!.slice("connect-src ".length).split(/\s+/);
 }
 
-/** CSP host matching: `*.example.com` matches any number of leading labels. */
+/**
+ * CSP host matching: `*.example.com` matches subdomains at any depth
+ * (`a.example.com`, `a.b.example.com`) but not the apex `example.com`, which is
+ * why the allowlist names `huggingface.co` separately from `*.huggingface.co`.
+ */
 function allowed(sources: string[], url: string): boolean {
   const { host } = new URL(url);
   return sources.some((source) => {
@@ -69,5 +73,15 @@ describe("index.html connect-src", () => {
   it("does not widen to a bare wildcard", () => {
     expect(sources).not.toContain("*");
     expect(sources).not.toContain("https:");
+  });
+
+  it("matches subdomains but not the apex, so the apex is listed in its own right", () => {
+    // The distinction the comment on `allowed()` describes, asserted: were
+    // `*.huggingface.co` enough on its own, dropping `huggingface.co` from the
+    // allowlist would still pass — and every model download would break, since
+    // that apex is the host WebLLM's config actually names.
+    expect(allowed(["https://*.hf.co"], "https://us.aws.cdn.hf.co/x")).toBe(true);
+    expect(allowed(["https://*.hf.co"], "https://hf.co/x")).toBe(false);
+    expect(sources).toContain("https://huggingface.co");
   });
 });

@@ -106,8 +106,11 @@ origins only. So:
 
 - On a **hosted** deployment, `connect-src` is a fixed, narrow allowlist: the
   page's own origin, plus what WebLLM needs to fetch model weights and the
-  compiled wasm engine from — `https://huggingface.co
-  https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com`.
+  compiled wasm engine from —
+
+  ```
+  https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com
+  ```
 
   The two wildcards are deliberate, and were not optional. `@mlc-ai/web-llm`'s
   prebuilt config only ever names `huggingface.co`, but a weight request there
