@@ -1,4 +1,3 @@
-import { SCRIPTED_VISION_PLACEHOLDER } from "./brains/vision";
 import type { VisionFn, VisionImage } from "./brains/types";
 
 /**
@@ -88,15 +87,16 @@ export interface VisionSupport {
 /**
  * What a vision accessor resolves to when there is nothing to read: no image
  * was selected, or the selected image carries no argument the active brain can
- * use. On the **live** path the scripted placeholder would be misleading (it
- * claims the scripted brain is in use), so a live brain gets a neutral
- * "no image" message instead.
+ * use. This is deliberately distinct from the scripted brain's "unknown image"
+ * placeholder — conflating "no image selected" with "couldn't identify the
+ * image" would send a reader down the wrong debugging path — so both the live
+ * and scripted paths get this neutral message.
  */
-export const NO_LIVE_IMAGE_MESSAGE =
+export const NO_IMAGE_MESSAGE =
   "No image selected — pick or upload a photo to read.";
 
-function noImageResult(live: boolean): string {
-  return live ? NO_LIVE_IMAGE_MESSAGE : SCRIPTED_VISION_PLACEHOLDER;
+function noImageResult(): string {
+  return NO_IMAGE_MESSAGE;
 }
 
 /**
@@ -111,9 +111,9 @@ export function makeVisionAccessor(
 ): (prompt: string) => Promise<string> {
   return async (prompt: string) => {
     const image = support.resolve(instanceKey);
-    if (!image) return noImageResult(support.live);
+    if (!image) return noImageResult();
     const arg = pickVisionArg(image, support.live);
-    if (arg === undefined) return noImageResult(support.live);
+    if (arg === undefined) return noImageResult();
     try {
       return await support.read(arg, prompt);
     } catch (e) {

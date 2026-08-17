@@ -8,7 +8,7 @@ import { SCRIPTED_VISION_PLACEHOLDER } from "./brains/vision";
 import {
   imageRefVariables,
   makeVisionAccessor,
-  NO_LIVE_IMAGE_MESSAGE,
+  NO_IMAGE_MESSAGE,
   pickVisionArg,
   type RunImage,
   type VisionSupport,
@@ -197,24 +197,24 @@ describe("helpers.vision threading via buildWorkers", () => {
     await expect(vision("<OCR>")).resolves.toContain("device lost");
   });
 
-  it("helpers.vision resolves to the placeholder when no image is selected", async () => {
+  it("helpers.vision resolves to a neutral no-image message on the scripted path when no image is selected", async () => {
     const support: VisionSupport = {
       read: async () => "should not be called",
       live: false,
       resolve: () => undefined,
     };
     const vision = makeVisionAccessor(support, "inst-1");
-    await expect(vision("<OCR>")).resolves.toBe(SCRIPTED_VISION_PLACEHOLDER);
+    await expect(vision("<OCR>")).resolves.toBe(NO_IMAGE_MESSAGE);
   });
 
-  it("a live brain gets a neutral no-image message, not the scripted placeholder", async () => {
+  it("a live brain also gets the neutral no-image message, not the scripted placeholder", async () => {
     const support: VisionSupport = {
       read: async () => "should not be called",
       live: true,
       resolve: () => undefined,
     };
     const vision = makeVisionAccessor(support, "inst-1");
-    await expect(vision("<OCR>")).resolves.toBe(NO_LIVE_IMAGE_MESSAGE);
+    await expect(vision("<OCR>")).resolves.toBe(NO_IMAGE_MESSAGE);
   });
 
   it("regression guard: without vision support, helpers.vision/image are undefined", async () => {
