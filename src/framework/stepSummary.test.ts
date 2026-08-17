@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RoundResult, Snapshot } from "@nanobpm/bojtos-kit";
+import type { RoundResult, SettleReason, Snapshot } from "@nanobpm/bojtos-kit";
 import { describeRound, newSequenceFlows } from "./stepSummary";
 
 const labelFor = (id: string) => (id === "Task_1" ? "Review" : id);
@@ -215,10 +215,13 @@ describe("describeRound", () => {
   });
 
   it("surfaces an unrecognized settle reason instead of reusing the idle text", () => {
+    // Stands in for a `SettleReason` a future bojtos-kit adds, so only the
+    // `reason` field is cast past the union this version declares — that is
+    // the branch under test — while the rest of `RoundResult` stays checked.
     const round: RoundResult = {
       snapshot: snap(),
       handled: 0,
-      reason: "somethingNew",
+      reason: "somethingNew" as unknown as SettleReason,
     };
     const entry = describeRound(round, [], labelFor);
     expect(entry.text).toContain("somethingNew");
