@@ -48,7 +48,7 @@ const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
 const TEMPLATE_TAB_PREFIX = "__template__:";
 
-// Both the live diagram (bpmn-js, via `@nanobpm/bojtos-react`) and the code
+// Both the live diagram (bpmn-js, via `./RuntimeDiagram`) and the code
 // editor (Monaco) are multi-MB dependencies that most of a first paint never
 // needs to touch. Loading them via `React.lazy()` keeps them out of the
 // initial JS payload and into their own on-demand chunks (see

@@ -122,9 +122,15 @@ export function RuntimeDiagram({
     const viewer = new Viewer({ container: containerRef.current });
     viewerRef.current = viewer;
     importedRef.current = false;
+    // `importXML` resolves after this effect may already have been cleaned up —
+    // a new `xml` prop, or an unmount. Without this guard the late resolution
+    // would zoom and mark a viewer that has been destroyed, or worse, mark the
+    // *next* viewer as imported while its own import is still in flight.
+    let current = true;
     viewer
       .importXML(xml)
       .then(() => {
+        if (!current) return;
         viewer.get<CanvasLike>("canvas").zoom("fit-viewport");
         importedRef.current = true;
         applyMarkers();
@@ -133,6 +139,7 @@ export function RuntimeDiagram({
         /* malformed XML — leave blank, the runner's diagnostics say why */
       });
     return () => {
+      current = false;
       viewer.destroy();
       viewerRef.current = null;
       importedRef.current = false;

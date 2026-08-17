@@ -90,6 +90,29 @@ describe("RuntimeDiagram", () => {
     );
   });
 
+  it("survives unmounting while the import is still in flight", async () => {
+    // `importXML` resolves after the effect may have been cleaned up. Zooming
+    // or marking a destroyed viewer at that point throws from inside a promise
+    // nobody awaits — an unhandled rejection, and state set on a viewer that no
+    // longer exists.
+    const errors: unknown[] = [];
+    const onError = (event: PromiseRejectionEvent | ErrorEvent) => {
+      errors.push(event);
+    };
+    window.addEventListener("unhandledrejection", onError as EventListener);
+    window.addEventListener("error", onError as EventListener);
+
+    const { unmount } = render(
+      <RuntimeDiagram xml={XML} activeIds={["Task_1"]} incidentIds={[]} />,
+    );
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    window.removeEventListener("unhandledrejection", onError as EventListener);
+    window.removeEventListener("error", onError as EventListener);
+    expect(errors).toEqual([]);
+  });
+
   it("is built on a viewer with no pan or zoom modules", async () => {
     // The guarantee is "cannot be moved", and it holds because the plain
     // `Viewer` has no navigation modules — not because anything suppresses
