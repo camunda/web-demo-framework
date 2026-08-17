@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageInputPanel } from "./ImageInputPanel";
 import type { RunImage } from "../imageInput";
@@ -19,7 +19,8 @@ describe("ImageInputPanel (contract B start affordance)", () => {
       <ImageInputPanel imageInput={IMAGE_INPUT} value={null} onSelect={() => {}} />,
     );
     expect(screen.getByText("Pick a car photo")).toBeInTheDocument();
-    expect(screen.getAllByRole("option")).toHaveLength(2);
+    const gallery = screen.getByRole("group", { name: "Seed photos" });
+    expect(within(gallery).getAllByRole("button")).toHaveLength(2);
     const upload = document.getElementById("image-upload") as HTMLInputElement;
     expect(upload).toBeTruthy();
     expect(upload.getAttribute("accept")).toBe("image/*");
@@ -30,7 +31,7 @@ describe("ImageInputPanel (contract B start affordance)", () => {
     render(
       <ImageInputPanel imageInput={IMAGE_INPUT} value={null} onSelect={onSelect} />,
     );
-    fireEvent.click(screen.getAllByRole("option")[1]);
+    fireEvent.click(within(screen.getByRole("group", { name: "Seed photos" })).getAllByRole("button")[1]);
     expect(onSelect).toHaveBeenCalledWith({
       imageId: "de-bmw-mini",
       pixels: "images/b.jpg",

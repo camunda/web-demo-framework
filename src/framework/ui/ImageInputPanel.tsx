@@ -64,15 +64,14 @@ export function ImageInputPanel({
       {imageInput.label && <p className="field-hint">{imageInput.label}</p>}
 
       <label className="image-input-label">Seed photos</label>
-      <div className="image-gallery" role="listbox" aria-label="Seed photos">
+      <div className="image-gallery" role="group" aria-label="Seed photos">
         {imageInput.seedImages.map((img) => {
           const selected = value?.imageId === img.id;
           return (
             <button
               key={img.id}
               type="button"
-              role="option"
-              aria-selected={selected}
+              aria-pressed={selected}
               className={`image-thumb${selected ? " image-thumb--selected" : ""}`}
               disabled={disabled}
               title={img.label ?? img.id}

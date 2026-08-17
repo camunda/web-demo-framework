@@ -144,6 +144,7 @@ export function useBrain(): BrainControls {
   );
   const [vision, setVision] = useState<VisionFn | null>(null);
   const visionBrainRef = useRef<BrowserVisionBrain | null>(null);
+  const pickedVisionDefault = useRef(false);
 
   /**
    * Wraps a brain's `chat` so a fatal failure mid-run is visible.
@@ -211,7 +212,14 @@ export function useBrain(): BrainControls {
     void webgpuUnavailableReason("the scripted-vision fallback").then(
       (reason) => {
         setVisionWebgpuReason(reason);
-        setVisionKindState(reason === null ? "browser-vision" : "scripted-vision");
+        // Respect an early explicit pick: only default when the reader hasn't
+        // chosen a vision brain yet (mirrors pickedDefault for the text brain).
+        if (!pickedVisionDefault.current) {
+          pickedVisionDefault.current = true;
+          setVisionKindState(
+            reason === null ? "browser-vision" : "scripted-vision",
+          );
+        }
       },
     );
   }, []);
@@ -244,6 +252,7 @@ export function useBrain(): BrainControls {
   }, []);
 
   const setVisionKind = useCallback((next: VisionBrainKind) => {
+    pickedVisionDefault.current = true;
     setVisionKindState(next);
     setVisionStatus("idle");
     setVisionError(null);
