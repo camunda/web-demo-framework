@@ -128,6 +128,12 @@ function userMessage(
   outstanding: string[] = [],
   /** Why the previous reply in this same turn sequence was rejected, if it was. */
   rejected: string[] = [],
+  /**
+   * Mirrors `allowRepeats`. With repeats allowed, `remaining` is every tool, so
+   * telling the model never to call an already-run one contradicts both the
+   * manifest it can see and the policy that would accept the call.
+   */
+  allowRepeats = false,
 ): string {
   const authored = spec.userPrompt || "Carry out your task.";
 
@@ -148,7 +154,11 @@ function userMessage(
   ].filter(Boolean);
   parts.push(
     history.length
-      ? `Tools you have already run — do NOT call these again:\n${history.join("\n")}`
+      ? `${
+          allowRepeats
+            ? "Tools you have already run (you may call one again if it is genuinely needed):"
+            : "Tools you have already run — do NOT call these again:"
+        }\n${history.join("\n")}`
       : "You have not run any tools yet.",
   );
   // Naming what's left keeps a small model from looping on the tool it just
@@ -488,6 +498,7 @@ export function makeLiveAgent(
           remaining,
           outstanding,
           rejected,
+          allowRepeats,
         ),
       },
     ];

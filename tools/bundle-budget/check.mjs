@@ -231,6 +231,19 @@ async function main() {
     );
     failed = true;
   }
+  if (workerKb === 0) {
+    // Same failure mode as the manifest misses above, and easier to hit: this
+    // one is matched by filename, so a renamed worker entry point or a changed
+    // output path silently measures 0 kB and passes a budget nothing is
+    // checking. Multi-MB blind spots are the whole reason this tool exists.
+    console.warn(
+      "\nWarning: couldn't find the WebLLM worker bundle in dist/assets — " +
+        "webllm-worker measured as 0 kB, which would mask a real regression. " +
+        "Check that src/framework/brains/webllm.worker.ts still exists and is " +
+        "referenced via new Worker(new URL(...)) in browser.ts.",
+    );
+    failed = true;
+  }
 
   if (failed) {
     console.error("\nBundle budget check FAILED.");

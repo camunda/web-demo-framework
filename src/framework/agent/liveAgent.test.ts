@@ -205,6 +205,31 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
     expect(third.completionConditionFulfilled).toBe(true);
   });
 
+  it("does not forbid repeats when the caller allows them", async () => {
+    // With `allowRepeats`, an already-run tool stays on the menu and a repeat
+    // is accepted — so telling the model never to call one again contradicts
+    // both the manifest it can see and the policy that would honour the call.
+    const prompts: string[] = [];
+    const replies = [
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+      '{"tool": "ToolA", "arguments": {"code": "A2"}}',
+    ];
+    const chat: ChatFn = async (messages) => {
+      prompts.push(messages.map((m) => m.content).join("\n\n"));
+      return replies.shift() ?? '{"done": true}';
+    };
+    const agent = makeLiveAgent(makeSpec(), chat, () => {}, {
+      allowRepeats: true,
+    });
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    const second = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(prompts[1]).not.toContain("do NOT call these again");
+    expect(prompts[1]).toContain("ToolA");
+    expect(second.activateElements?.[0]?.elementId).toBe("ToolA");
+  });
+
   it("stops asking once the model-call budget is spent", async () => {
     const trace: { kind: string; text: string }[] = [];
     // Never says anything usable: the budget is what has to end this, and it
