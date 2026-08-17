@@ -153,6 +153,61 @@ body {
   min-width: 0;
 }
 
+/* Collapsible panel header — the whole header row is the disclosure trigger
+   (see CollapsibleCard.tsx). Styled to match the design system's CardHeader
+   padding while reading as a full-width button. */
+.panel-trigger {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0 16px;
+  margin: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.panel-trigger:focus-visible {
+  outline: 2px solid var(--ring, #3b82f6);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+.panel-trigger-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.panel-title {
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.3;
+}
+.panel-desc {
+  font-size: 13px;
+  color: var(--muted-foreground, #6b7280);
+}
+.panel-chevron {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--muted-foreground, #6b7280);
+  transition: transform 0.18s ease;
+}
+.panel-trigger[data-state="open"] .panel-chevron {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-chevron {
+    transition: none;
+  }
+}
+
 .diagram,
 .diagram-fallback {
   height: 340px;
