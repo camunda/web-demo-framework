@@ -14,12 +14,6 @@ import {
   AlertTitle,
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Separator,
   Tabs,
   TabsContent,
   TabsList,
@@ -41,6 +35,7 @@ import { ImageInputPanel } from "./ImageInputPanel";
 import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
+import { CollapsibleCard } from "./CollapsibleCard";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
@@ -907,122 +902,113 @@ export function ExampleRunner({
 
       <div className="grid">
         <div className="col">
-          <Card className="panel" data-tour={TOUR_ANCHOR.diagram}>
-            <CardHeader>
-              <CardTitle>Process</CardTitle>
-              <CardDescription>
-                {model.processName} — live token (green), incidents (red).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {/* Render the Suspense boundary unconditionally so the lazy
-                  diagram chunk starts downloading immediately, in parallel
-                  with engine boot, instead of waiting for `run.phase` to
-                  leave "loading" first. */}
-              <Suspense
-                fallback={
-                  <div className="diagram-fallback">
-                    {run.phase === "loading"
-                      ? "Booting the engine…"
-                      : "Loading diagram…"}
-                  </div>
-                }
-              >
-                <BpmnRuntimeView
-                  xml={draft.resolvedBpmn}
-                  activeIds={run.snapshot?.activeElementIds ?? []}
-                  incidentIds={run.snapshot?.incidentElementIds ?? []}
-                  className="diagram"
-                />
-              </Suspense>
-            </CardContent>
-          </Card>
+          <CollapsibleCard
+            sectionId="process"
+            data-tour={TOUR_ANCHOR.diagram}
+            title="Process"
+            description={`${model.processName} — live token (green), incidents (red).`}
+          >
+            {/* Render the Suspense boundary unconditionally so the lazy
+                diagram chunk starts downloading immediately, in parallel
+                with engine boot, instead of waiting for `run.phase` to
+                leave "loading" first. */}
+            <Suspense
+              fallback={
+                <div className="diagram-fallback">
+                  {run.phase === "loading"
+                    ? "Booting the engine…"
+                    : "Loading diagram…"}
+                </div>
+              }
+            >
+              <BpmnRuntimeView
+                xml={draft.resolvedBpmn}
+                activeIds={run.snapshot?.activeElementIds ?? []}
+                incidentIds={run.snapshot?.incidentElementIds ?? []}
+                className="diagram"
+              />
+            </Suspense>
+          </CollapsibleCard>
 
           {openUserTask && (
-            <Card className="panel">
-              <CardHeader>
-                <CardTitle>{openUserTaskSpec?.label ?? "Human task"}</CardTitle>
-                <CardDescription>
-                  {reviewSchema
-                    ? `Rendered from the model's form "${openUserTaskSpec?.formId}".`
-                    : "This task has no linked form — complete it with no variables."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {unrunTools.length > 0 && (
-                  <Alert variant="destructive">
-                    <AlertTitle>The agent didn't finish its checks</AlertTitle>
-                    <AlertDescription>
-                      It completed without running{" "}
-                      {unrunTools.map((t) => t.label || t.elementId).join(", ")}
-                      . The process took the default path to this task, so the
-                      findings below have no value to report.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {reviewSchema && (
-                  <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
-                    <FormRenderer
-                      ref={reviewFormRef}
-                      schema={reviewSchema}
-                      values={reviewValues}
-                      onChange={(k, v) =>
-                        setReviewValues((prev) => ({ ...prev, [k]: v }))
-                      }
-                      context={displayVars}
-                      onValidityChange={setReviewFormValid}
-                    />
-                  </Suspense>
-                )}
-                <Button
-                  onClick={submitUserTask}
-                  disabled={!!reviewSchema && !reviewFormValid}
-                >
-                  Complete task
-                </Button>
-              </CardContent>
-            </Card>
+            <CollapsibleCard
+              sectionId="human-task"
+              title={openUserTaskSpec?.label ?? "Human task"}
+              description={
+                reviewSchema
+                  ? `Rendered from the model's form "${openUserTaskSpec?.formId}".`
+                  : "This task has no linked form — complete it with no variables."
+              }
+            >
+              {unrunTools.length > 0 && (
+                <Alert variant="destructive">
+                  <AlertTitle>The agent didn't finish its checks</AlertTitle>
+                  <AlertDescription>
+                    It completed without running{" "}
+                    {unrunTools.map((t) => t.label || t.elementId).join(", ")}
+                    . The process took the default path to this task, so the
+                    findings below have no value to report.
+                  </AlertDescription>
+                </Alert>
+              )}
+              {reviewSchema && (
+                <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+                  <FormRenderer
+                    ref={reviewFormRef}
+                    schema={reviewSchema}
+                    values={reviewValues}
+                    onChange={(k, v) =>
+                      setReviewValues((prev) => ({ ...prev, [k]: v }))
+                    }
+                    context={displayVars}
+                    onValidityChange={setReviewFormValid}
+                  />
+                </Suspense>
+              )}
+              <Button
+                onClick={submitUserTask}
+                disabled={!!reviewSchema && !reviewFormValid}
+              >
+                Complete task
+              </Button>
+            </CollapsibleCard>
           )}
 
           {pendingManualJob && (
-            <Card className="panel">
-              <CardHeader>
-                <CardTitle>{pendingManualJob.control.label}</CardTitle>
-                <CardDescription>
-                  This job is held here on purpose — pick how it resolves.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="controls">
-                  <Button
-                    onClick={() => void resolveManualControl("complete")}
-                    disabled={running || stepping}
-                  >
-                    {pendingManualJob.control.completeLabel ??
-                      "✅ Complete normally"}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => void resolveManualControl("action")}
-                    disabled={running || stepping}
-                  >
-                    {pendingManualJob.control.action.label}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <CollapsibleCard
+              sectionId="manual-job"
+              title={pendingManualJob.control.label}
+              description="This job is held here on purpose — pick how it resolves."
+            >
+              <div className="controls">
+                <Button
+                  onClick={() => void resolveManualControl("complete")}
+                  disabled={running || stepping}
+                >
+                  {pendingManualJob.control.completeLabel ??
+                    "✅ Complete normally"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void resolveManualControl("action")}
+                  disabled={running || stepping}
+                >
+                  {pendingManualJob.control.action.label}
+                </Button>
+              </div>
+            </CollapsibleCard>
           )}
 
           <div className="row">
-            <Card className="panel grow" data-tour={TOUR_ANCHOR.variablesPanel}>
-              <CardHeader>
-                <CardTitle>Variables</CardTitle>
-                <CardDescription>The instance payload, live.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <pre className="vars">{safeStringify(displayVars, 2)}</pre>
-              </CardContent>
-            </Card>
+            <CollapsibleCard
+              sectionId="variables"
+              className="grow"
+              data-tour={TOUR_ANCHOR.variablesPanel}
+              title="Variables"
+              description="The instance payload, live."
+            >
+              <pre className="vars">{safeStringify(displayVars, 2)}</pre>
+            </CollapsibleCard>
 
             <TraceTimeline
               log={log}
@@ -1035,249 +1021,242 @@ export function ExampleRunner({
 
         <div className="col">
           {(model.agent || example.imageInput) && (
-            <Card className="panel" data-tour={TOUR_ANCHOR.brainPanel}>
-              <CardHeader>
-                <CardTitle>Brain</CardTitle>
-                <CardDescription>
-                  {model.agent
-                    ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
-                    : "What reads the image. The model recommends; the process governs."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <BrainPanel
-                  brain={brain}
-                  showText={!!model.agent}
-                  showVision={!!example.imageInput}
-                />
-              </CardContent>
-            </Card>
+            <CollapsibleCard
+              sectionId="brain"
+              data-tour={TOUR_ANCHOR.brainPanel}
+              title="Brain"
+              description={
+                model.agent
+                  ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
+                  : "What reads the image. The model recommends; the process governs."
+              }
+            >
+              <BrainPanel
+                brain={brain}
+                showText={!!model.agent}
+                showVision={!!example.imageInput}
+              />
+            </CollapsibleCard>
           )}
 
-          <Card className="panel">
-            <CardHeader>
-              <CardTitle>Start</CardTitle>
-              <CardDescription>
-                {model.startFormId
-                  ? `The model's start form "${model.startFormId}".`
-                  : example.imageInput
-                    ? "Pick a seed photo or upload your own to read."
-                    : "The starting payload."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {example.imageInput && (
-                <ImageInputPanel
-                  imageInput={example.imageInput}
-                  value={imageSelection}
-                  onSelect={setImageSelection}
-                  disabled={running}
-                />
-              )}
-              {example.scenarios && (
-                <div className="scenarios">
-                  {example.scenarios.map((s) => (
-                    <Button
-                      key={s.label}
-                      size="sm"
-                      variant="secondary"
-                      disabled={running}
-                      onClick={() =>
-                        setStartValues((prev) => ({ ...prev, ...s.variables }))
-                      }
-                    >
-                      {s.label}
-                    </Button>
-                  ))}
-                </div>
-              )}
-              {startSchema ? (
-                <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
-                  <FormRenderer
-                    ref={startFormRef}
-                    schema={startSchema}
-                    values={startValues}
-                    onChange={(k, v) =>
-                      setStartValues((prev) => ({ ...prev, [k]: v }))
-                    }
+          <CollapsibleCard
+            sectionId="start"
+            title="Start"
+            description={
+              model.startFormId
+                ? `The model's start form "${model.startFormId}".`
+                : example.imageInput
+                  ? "Pick a seed photo or upload your own to read."
+                  : "The starting payload."
+            }
+          >
+            {example.imageInput && (
+              <ImageInputPanel
+                imageInput={example.imageInput}
+                value={imageSelection}
+                onSelect={setImageSelection}
+                disabled={running}
+              />
+            )}
+            {example.scenarios && (
+              <div className="scenarios">
+                {example.scenarios.map((s) => (
+                  <Button
+                    key={s.label}
+                    size="sm"
+                    variant="secondary"
                     disabled={running}
-                    onValidityChange={setStartFormValid}
-                  />
-                </Suspense>
-              ) : (
-                <pre className="vars">{safeStringify(startValues, 2)}</pre>
-              )}
-            </CardContent>
-          </Card>
+                    onClick={() =>
+                      setStartValues((prev) => ({ ...prev, ...s.variables }))
+                    }
+                  >
+                    {s.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {startSchema ? (
+              <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+                <FormRenderer
+                  ref={startFormRef}
+                  schema={startSchema}
+                  values={startValues}
+                  onChange={(k, v) =>
+                    setStartValues((prev) => ({ ...prev, [k]: v }))
+                  }
+                  disabled={running}
+                  onValidityChange={setStartFormValid}
+                />
+              </Suspense>
+            ) : (
+              <pre className="vars">{safeStringify(startValues, 2)}</pre>
+            )}
+          </CollapsibleCard>
 
-          <Card className="panel editors" data-tour={TOUR_ANCHOR.codePanel}>
-            <CardHeader>
-              <CardTitle>Code</CardTitle>
-              <CardDescription>
-                One handler per BPMN element. Return variables to merge, or
-                throw to fail the job.
-              </CardDescription>
-            </CardHeader>
-            <Separator />
-            <CardContent>
-              <Suspense
-                fallback={
-                  <div className="editor-fallback">Loading editor…</div>
-                }
-              >
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList>
-                    <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
-                    {model.agent && (
-                      <TabsTrigger value={AGENT_TAB}>
-                        agent (scripted)
-                      </TabsTrigger>
-                    )}
-                    {example.handlers.map((h) => (
-                      <TabsTrigger key={h.elementId} value={h.elementId}>
+          <CollapsibleCard
+            sectionId="code"
+            className="editors"
+            data-tour={TOUR_ANCHOR.codePanel}
+            title="Code"
+            description="One handler per BPMN element. Return variables to merge, or throw to fail the job."
+          >
+            <Suspense
+              fallback={
+                <div className="editor-fallback">Loading editor…</div>
+              }
+            >
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList>
+                  <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
+                  {model.agent && (
+                    <TabsTrigger value={AGENT_TAB}>
+                      agent (scripted)
+                    </TabsTrigger>
+                  )}
+                  {example.handlers.map((h) => (
+                    <TabsTrigger key={h.elementId} value={h.elementId}>
+                      {model.tasks.find((t) => t.elementId === h.elementId)
+                        ?.label ?? h.elementId}
+                    </TabsTrigger>
+                  ))}
+                  {Object.keys(templateSources).map((name) => (
+                    <TabsTrigger key={name} value={TEMPLATE_TAB_PREFIX + name}>
+                      {name}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                <TabsContent value={MODEL_TAB}>
+                  <div className="editor-meta">
+                    <strong>Model</strong>
+                    <code>edit the diagram visually — Run re-checks it below</code>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setBpmn(example.bpmn)}
+                      disabled={bpmn === example.bpmn}
+                    >
+                      Revert to original
+                    </Button>
+                  </div>
+                  <ModelEditor value={bpmn} onChange={setBpmn} />
+                </TabsContent>
+
+                {model.agent && (
+                  <TabsContent value={AGENT_TAB}>
+                    <div className="editor-meta">
+                      <strong>{model.agent.label}</strong>
+                      <code>
+                        {brain.kind === "scripted" || !brain.chat
+                          ? "in use"
+                          : "unused — a live brain is connected"}
+                      </code>
+                    </div>
+                    <div className="editor-wrap">
+                      <Editor
+                        height="360px"
+                        defaultLanguage="javascript"
+                        value={agentSource}
+                        onChange={(v) => setAgentSource(v ?? "")}
+                        options={editorOptions}
+                      />
+                    </div>
+                  </TabsContent>
+                )}
+
+                {example.handlers.map((h) => (
+                  <TabsContent key={h.elementId} value={h.elementId}>
+                    <div className="editor-meta">
+                      <strong>
                         {model.tasks.find((t) => t.elementId === h.elementId)
                           ?.label ?? h.elementId}
-                      </TabsTrigger>
-                    ))}
-                    {Object.keys(templateSources).map((name) => (
-                      <TabsTrigger key={name} value={TEMPLATE_TAB_PREFIX + name}>
-                        {name}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-
-                  <TabsContent value={MODEL_TAB}>
-                    <div className="editor-meta">
-                      <strong>Model</strong>
-                      <code>edit the diagram visually — Run re-checks it below</code>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setBpmn(example.bpmn)}
-                        disabled={bpmn === example.bpmn}
-                      >
-                        Revert to original
-                      </Button>
+                      </strong>
+                      <code>{h.standsInFor ?? h.elementId}</code>
                     </div>
-                    <ModelEditor value={bpmn} onChange={setBpmn} />
+                    <div className="editor-wrap">
+                      <Editor
+                        height="360px"
+                        defaultLanguage="javascript"
+                        value={sources[h.elementId]}
+                        onChange={(v) =>
+                          setSources((prev) => ({
+                            ...prev,
+                            [h.elementId]: v ?? "",
+                          }))
+                        }
+                        options={editorOptions}
+                      />
+                    </div>
                   </TabsContent>
+                ))}
 
-                  {model.agent && (
-                    <TabsContent value={AGENT_TAB}>
-                      <div className="editor-meta">
-                        <strong>{model.agent.label}</strong>
-                        <code>
-                          {brain.kind === "scripted" || !brain.chat
-                            ? "in use"
-                            : "unused — a live brain is connected"}
-                        </code>
-                      </div>
-                      <div className="editor-wrap">
-                        <Editor
-                          height="360px"
-                          defaultLanguage="javascript"
-                          value={agentSource}
-                          onChange={(v) => setAgentSource(v ?? "")}
-                          options={editorOptions}
-                        />
-                      </div>
-                    </TabsContent>
-                  )}
-
-                  {example.handlers.map((h) => (
-                    <TabsContent key={h.elementId} value={h.elementId}>
-                      <div className="editor-meta">
-                        <strong>
-                          {model.tasks.find((t) => t.elementId === h.elementId)
-                            ?.label ?? h.elementId}
-                        </strong>
-                        <code>{h.standsInFor ?? h.elementId}</code>
-                      </div>
-                      <div className="editor-wrap">
-                        <Editor
-                          height="360px"
-                          defaultLanguage="javascript"
-                          value={sources[h.elementId]}
-                          onChange={(v) =>
-                            setSources((prev) => ({
-                              ...prev,
-                              [h.elementId]: v ?? "",
-                            }))
-                          }
-                          options={editorOptions}
-                        />
-                      </div>
-                    </TabsContent>
-                  ))}
-
-                  {/*
-                   * Prompts as editable assets: each `{{name}}` template gets
-                   * its own tab, edited as plain text — not JS, and not the raw
-                   * FEEL/XML it's substituted into. A change here reaches the
-                   * agent on the next run, through the same draft-definition
-                   * pipeline as any other edit (see templates.ts / draft.ts).
-                   */}
-                  {Object.keys(templateSources).map((name) => (
-                    <TabsContent key={name} value={TEMPLATE_TAB_PREFIX + name}>
-                      <div className="editor-meta">
-                        <strong>{name}</strong>
-                        <code>
-                          prompt / template text — substitutes{" "}
-                          {"{{" + name + "}}"}
-                        </code>
-                      </div>
-                      <div className="editor-wrap">
-                        <Editor
-                          height="360px"
-                          defaultLanguage="markdown"
-                          value={templateSources[name]}
-                          onChange={(v) =>
-                            setTemplateSources((prev) =>
-                              createTemplateMap(prev, { [name]: v ?? "" }),
-                            )
-                          }
-                          options={editorOptions}
-                        />
-                      </div>
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </Suspense>
-            </CardContent>
-          </Card>
+                {/*
+                 * Prompts as editable assets: each `{{name}}` template gets
+                 * its own tab, edited as plain text — not JS, and not the raw
+                 * FEEL/XML it's substituted into. A change here reaches the
+                 * agent on the next run, through the same draft-definition
+                 * pipeline as any other edit (see templates.ts / draft.ts).
+                 */}
+                {Object.keys(templateSources).map((name) => (
+                  <TabsContent key={name} value={TEMPLATE_TAB_PREFIX + name}>
+                    <div className="editor-meta">
+                      <strong>{name}</strong>
+                      <code>
+                        prompt / template text — substitutes{" "}
+                        {"{{" + name + "}}"}
+                      </code>
+                    </div>
+                    <div className="editor-wrap">
+                      <Editor
+                        height="360px"
+                        defaultLanguage="markdown"
+                        value={templateSources[name]}
+                        onChange={(v) =>
+                          setTemplateSources((prev) =>
+                            createTemplateMap(prev, { [name]: v ?? "" }),
+                          )
+                        }
+                        options={editorOptions}
+                      />
+                    </div>
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </Suspense>
+          </CollapsibleCard>
 
           {model.agent && (
-            <Card className="panel">
-              <CardHeader>
-                <CardTitle>Tools, as the model sees them</CardTitle>
-                <CardDescription>
+            <CollapsibleCard
+              sectionId="tools"
+              title="Tools, as the model sees them"
+              description={
+                <>
                   Read from the diagram — element name, documentation, and every
                   <code> fromAi(…)</code> argument.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="tool-list">
-                  {model.agent.tools.map((t) => (
-                    <li key={t.elementId}>
-                      <code>{t.elementId}</code>
-                      <span> — {t.documentation || t.label}</span>
-                      {t.args.length > 0 && (
-                        <ul>
-                          {t.args.map((a) => (
-                            <li key={a.name}>
-                              <code>
-                                {a.name}: {a.type}
-                              </code>{" "}
-                              — {a.description}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
+                </>
+              }
+            >
+              <ul className="tool-list">
+                {model.agent.tools.map((t) => (
+                  <li key={t.elementId}>
+                    <code>{t.elementId}</code>
+                    <span> — {t.documentation || t.label}</span>
+                    {t.args.length > 0 && (
+                      <ul>
+                        {t.args.map((a) => (
+                          <li key={a.name}>
+                            <code>
+                              {a.name}: {a.type}
+                            </code>{" "}
+                            — {a.description}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleCard>
           )}
         </div>
       </div>

@@ -2,12 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@camunda/design-system";
+import { CollapsibleCard } from "./CollapsibleCard";
 import type { TraceEntry } from "../types";
 
 /**
@@ -244,16 +240,13 @@ export function TraceTimeline({
   };
 
   return (
-    <Card className="panel grow">
-      <CardHeader>
-        <CardTitle>Activity</CardTitle>
-        <CardDescription>
-          Agent turns, model replies, and tool calls — read top to bottom as a
-          story.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="timeline-toolbar">
+    <CollapsibleCard
+      sectionId="activity"
+      className="grow"
+      title="Activity"
+      description="Agent turns, model replies, and tool calls — read top to bottom as a story."
+    >
+      <div className="timeline-toolbar">
           <Button variant="secondary" size="sm" onClick={copyJson}>
             {copied ? "Copied!" : "Copy run as JSON"}
           </Button>
@@ -309,7 +302,6 @@ export function TraceTimeline({
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </CollapsibleCard>
   );
 }

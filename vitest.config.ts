@@ -21,6 +21,16 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // Inline the design system so Vite transforms its ESM JSON imports (the
+    // icon `registry.json`). Externalized node_modules are handled by Node's
+    // loader, which rejects a bare `import … from "*.json"` without an import
+    // attribute — see CollapsibleCard.test.tsx, the first test to render a DS
+    // component.
+    server: {
+      deps: {
+        inline: [/@camunda\/design-system/],
+      },
+    },
     coverage: {
       reporter: ["text", "html"],
       include: ["src/framework/**/*.ts"],
