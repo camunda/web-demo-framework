@@ -33,7 +33,10 @@ export type BrainKind = "scripted" | "browser" | "endpoint";
  * `image` is any source the model backend can consume: a data URL / http(s)
  * URL string, a `Blob`/`File` (e.g. an uploaded photo), or an `ImageBitmap`.
  * The `scripted-vision` fallback additionally treats a bare string as the
- * **seed image id** it looks up in its injected ground-truth mapping.
+ * **seed image id** it looks up in its injected ground-truth mapping — so to
+ * exercise the deterministic scripted fallback, pass a seed id string, **not**
+ * a URL (a URL is never fetched by `scripted-vision` and always resolves to the
+ * placeholder).
  */
 export type VisionImage = string | Blob | ImageBitmap;
 

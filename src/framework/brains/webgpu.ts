@@ -1,12 +1,14 @@
 /**
  * Shared WebGPU probe/reason helpers.
  *
- * Extracted verbatim from `brains/browser.ts` so both the in-browser LLM brain
+ * Extracted from `brains/browser.ts` so both the in-browser LLM brain
  * (`browser.ts`) and the in-browser vision brain (`vision.ts`) check WebGPU the
  * same way — a reader must never be handed a live brain that can't connect, and
  * both fall back (to Endpoint/Scripted, or to `scripted-vision`) with the *same*
- * explained reason. `browser.ts` re-exports these, so its public surface is
- * unchanged.
+ * explained reason. The probe is unchanged from the original; the reason helper
+ * gained a `fallbackHint` parameter (and slightly rephrased wording) so each
+ * seam can name its own fallback. `browser.ts` re-exports these, so its public
+ * surface is unchanged.
  */
 
 interface GPUAdapterLike {
