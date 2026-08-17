@@ -42,13 +42,35 @@ function toolBlock(tool: ToolSpec): string {
   return `${tool.elementId}\n    purpose: ${doc}\n    arguments:\n${args}`;
 }
 
-function systemMessage(spec: AgentSpec, allowMultiToolTurns: boolean): string {
+function systemMessage(
+  spec: AgentSpec,
+  allowMultiToolTurns: boolean,
+  /**
+   * The tools that can still be called. Only these are listed.
+   *
+   * Listing the full set every turn and relying on "do not call these again"
+   * elsewhere in the prompt does not work on a small model: the manifest reads
+   * as the menu, and Qwen2.5 1.5B duly alternated between two already-run tools
+   * until its budget was gone. An already-run tool that isn't in the prompt
+   * can't be picked from it.
+   */
+  callable: ToolSpec[],
+): string {
   const authored =
     spec.systemPrompt ||
     "You are an agent driving a business process. Use the tools available to you.";
   // Show the format with a real tool name from this diagram — a small model
   // copies the example far more reliably than it follows a description of it.
-  const example = spec.tools[0];
+  const example = callable[0] ?? spec.tools[0];
+
+  if (callable.length === 0) {
+    return `${authored}
+
+Every tool has already run. Reply with JSON only — no prose, no explanation, no
+markdown fence — exactly:
+
+{"done": true}`;
+  }
   const exampleArgs = example?.args.length
     ? `{${example.args.map((a) => `"${a.name}": "…"`).join(", ")}}`
     : "{}";
@@ -59,7 +81,7 @@ function systemMessage(spec: AgentSpec, allowMultiToolTurns: boolean): string {
 You drive the process by calling exactly one tool at a time. The tool names you
 may use, one per block:
 
-${spec.tools.map(toolBlock).join("\n\n")}
+${callable.map(toolBlock).join("\n\n")}
 
 Reply with JSON only — no prose, no explanation, no markdown fence — in exactly
 this shape:
@@ -84,7 +106,7 @@ reply — don't spend a turn on each when they don't depend on each other. Only
 list tools whose arguments you can already determine. The tool names you may
 use, one per block:
 
-${spec.tools.map(toolBlock).join("\n\n")}
+${callable.map(toolBlock).join("\n\n")}
 
 Reply with JSON only — no prose, no explanation, no markdown fence — in exactly
 this shape:
@@ -102,6 +124,10 @@ function userMessage(
   variables: Record<string, unknown>,
   history: string[],
   remaining: ToolSpec[],
+  /** Set after a premature "done" — see `requiredTools` in {@link LiveAgentOptions}. */
+  outstanding: string[] = [],
+  /** Why the previous reply in this same turn sequence was rejected, if it was. */
+  rejected: string[] = [],
 ): string {
   const authored = spec.userPrompt || "Carry out your task.";
 
@@ -133,6 +159,27 @@ function userMessage(
       ? `Tools still available:\n${remaining.map((t) => `  ${t.elementId}`).join("\n")}`
       : "No tools remain. Reply {\"done\": true}.",
   );
+  if (rejected.length) {
+    // Retrying with a byte-identical prompt at temperature 0 gets a
+    // byte-identical reply — the model loops on the same rejected call until
+    // the budget runs out. Observed with Qwen2.5 1.5B re-requesting a tool that
+    // had already run, over and over. Saying what was wrong is what makes the
+    // next call a different question.
+    parts.push(
+      `Your last reply was rejected: ${rejected.join("; ")}. Do not repeat it.`,
+    );
+  }
+  if (outstanding.length) {
+    // Stated plainly, because the model has already claimed to be finished
+    // once: repeating the general instruction doesn't work, naming the
+    // outstanding call does.
+    parts.push(
+      `You reported that you are done, but ${outstanding.join(" and ")} ` +
+        `${outstanding.length === 1 ? "has" : "have"} not run. ` +
+        `Passing those values as another tool's arguments does not count. ` +
+        `Call ${outstanding.length === 1 ? "it" : "them"} now.`,
+    );
+  }
   parts.push("Which tool should run next? Reply with JSON only.");
   return parts.join("\n\n");
 }
@@ -331,6 +378,28 @@ export interface LiveAgentOptions {
   allowMultiToolTurns?: boolean;
   /** See {@link TurnRef}. Optional — omitting it just leaves trace entries ungrouped. */
   turnRef?: TurnRef;
+  /**
+   * Element ids that must have run before a "done" is taken at face value.
+   *
+   * Small models finish early. Observed repeatedly with Llama 3.2 1B on the
+   * compliance example: it verifies the marker, checks the country, computes
+   * the score, passes `decision: "cleared"` as an argument to the *scoring*
+   * tool — which has no such argument, so it is dropped — and then reports
+   * done, having never called the tool that records a decision. The process
+   * then correctly routes to a human, and the reader sees a review task
+   * instead of the run they came for.
+   *
+   * When a required tool hasn't run, the first "done" is answered with one
+   * turn naming it, rather than accepted. Only the first: a model that insists
+   * is allowed to be wrong, and the run shows that it was — this nudges a
+   * forgetful model, it doesn't argue with a determined one.
+   *
+   * Empty by default, so an example that doesn't declare requirements behaves
+   * exactly as before.
+   */
+  requiredTools?: string[];
+  /** How many premature "done" replies to answer with a reminder. Default 1. */
+  maxEarlyDoneNudges?: number;
 }
 
 export function makeLiveAgent(
@@ -344,6 +413,8 @@ export function makeLiveAgent(
     allowRepeats = false,
     allowMultiToolTurns = false,
     turnRef,
+    requiredTools = [],
+    maxEarlyDoneNudges = 1,
   } = opts;
 
   // Per-run state. The engine re-emits the agent job after each activated tool
@@ -351,8 +422,42 @@ export function makeLiveAgent(
   let turn = 0;
   const called = new Set<string>();
   const history: string[] = [];
+  let earlyDoneNudges = 0;
+  /** Named in the next prompt after a premature "done"; cleared once used. */
+  let outstanding: string[] = [];
+  /** Why the previous reply was rejected, fed back so the retry differs; cleared once used. */
+  let rejected: string[] = [];
 
   return async (job): Promise<AgentResult> => {
+    const variables = job.variables;
+    // What the last tool produced, so the model can reason about it.
+    const lastResult = variables.toolCallResult;
+    if (lastResult !== undefined && history.length)
+      history[history.length - 1] =
+        `${history[history.length - 1]} → ${shorten(JSON.stringify(lastResult), 160)}`;
+
+    // Retries happen *inside* this invocation, not by returning and waiting to
+    // be asked again.
+    //
+    // `AgentResult` can activate elements, fulfil the completion condition, or
+    // merge variables — there is no "ask me again". Returning `{}` leaves the
+    // ad-hoc sub-process with nothing running, so the engine completes it, and
+    // the run is over. Every "trying again next turn" below used to do exactly
+    // that: a hallucinated name, an empty reply, or a repeat of an
+    // already-run tool silently ended the agent with most of its budget
+    // unspent — observed with Qwen2.5 1.5B, which re-requested
+    // ComputeComplianceScore on turn 4 of 10 and never got a turn 5.
+    //
+    // Unit tests didn't catch it because they call this handler in a loop
+    // themselves, which is precisely the behaviour the engine does not provide.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const outcome = await runTurn();
+      if (outcome) return outcome;
+    }
+
+    /** One model call. Returns a result to hand back, or `null` to try again. */
+    async function runTurn(): Promise<AgentResult | null> {
     turn += 1;
     if (turnRef) turnRef.current = turn;
 
@@ -365,21 +470,29 @@ export function makeLiveAgent(
       return { completionConditionFulfilled: true };
     }
 
-    const variables = job.variables;
-    // What the last tool produced, so the model can reason about it.
-    const lastResult = variables.toolCallResult;
-    if (lastResult !== undefined && history.length)
-      history[history.length - 1] =
-        `${history[history.length - 1]} → ${shorten(JSON.stringify(lastResult), 160)}`;
-
     const remaining = allowRepeats
       ? spec.tools
       : spec.tools.filter((t) => !called.has(t.elementId));
 
     const messages: ChatMessage[] = [
-      { role: "system", content: systemMessage(spec, allowMultiToolTurns) },
-      { role: "user", content: userMessage(spec, variables, history, remaining) },
+      {
+        role: "system",
+        content: systemMessage(spec, allowMultiToolTurns, remaining),
+      },
+      {
+        role: "user",
+        content: userMessage(
+          spec,
+          variables,
+          history,
+          remaining,
+          outstanding,
+          rejected,
+        ),
+      },
     ];
+    outstanding = [];
+    rejected = [];
 
     let raw: string;
     try {
@@ -402,6 +515,17 @@ export function makeLiveAgent(
 
     const json = extractJson(raw);
     if (saysDone(json) && collectToolCalls(json).length === 0) {
+      const missing = requiredTools.filter((id) => !called.has(id));
+      if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
+        earlyDoneNudges += 1;
+        outstanding = missing;
+        trace({
+          kind: "agent",
+          text: `🤖 model says it is done, but ${missing.join(", ")} hasn't run — asking once more`,
+          turn,
+        });
+        return null;
+      }
       trace({ kind: "agent", text: "🤖 model says it is done", turn });
       return { completionConditionFulfilled: true };
     }
@@ -409,16 +533,19 @@ export function makeLiveAgent(
     const stated = collectToolCalls(json);
     if (stated.length === 0) {
       // Not "done", but named nothing usable either — a confused or empty
-      // reply. Don't end the whole run over one bad turn: give the model
-      // another chance next turn, same as an all-hallucinated/all-repeat turn
-      // below. `spec.maxModelCalls` (checked at the top of this function) is
-      // the actual backstop against a model that never recovers.
+      // reply. Don't end the whole run over one bad turn: ask again, same as
+      // an all-hallucinated/all-repeat turn below. `spec.maxModelCalls`
+      // (checked at the top of each turn) is the actual backstop against a
+      // model that never recovers.
       trace({
         kind: "error",
-        text: "🤖 model named no tool (and didn't say it was done) — trying again next turn",
+        text: "🤖 model named no tool (and didn't say it was done) — asking again",
         turn,
       });
-      return {};
+      rejected = [
+        'it named no tool and did not say it was done — reply with {"tool": "...", "arguments": {...}} or {"done": true}',
+      ];
+      return null;
     }
 
     // Exact-match only. A name that isn't a real element activates nothing.
@@ -453,17 +580,26 @@ export function makeLiveAgent(
 
     if (resolved.length === 0) {
       // Every stated call was a hallucination and/or a repeat — nothing to
-      // activate this turn, but that's a bad reply, not a considered
-      // decision to stop. Ending the whole agent here would mean one
-      // hallucinated name terminates a run that might otherwise finish
-      // correctly, so give the model another turn instead (still bounded by
-      // `spec.maxModelCalls`).
+      // activate, but that's a bad reply, not a considered decision to stop.
+      // Ending the agent here would mean one hallucinated name terminates a
+      // run that might otherwise finish correctly, so ask again (still
+      // bounded by `spec.maxModelCalls`).
       trace({
         kind: "agent",
-        text: "🤖 nothing activated this turn — trying again next turn",
+        text: "🤖 nothing activated — asking again",
         turn,
       });
-      return {};
+      rejected = [
+        ...(unknown.length
+          ? [`${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not a real tool`]
+          : []),
+        ...(repeats.length
+          ? [
+              `${repeats.join(", ")} has already run and will never run again — pick a different tool, or reply {"done": true} if nothing is left to do`,
+            ]
+          : []),
+      ];
+      return null;
     }
 
     // Tool arguments ride on the agent result, NOT on the activation: variables
@@ -494,6 +630,7 @@ export function makeLiveAgent(
       activateElements: resolved.map((r) => ({ elementId: r.tool.elementId })),
       variables: variablesOut,
     };
+    }
   };
 }
 

@@ -89,7 +89,14 @@ describe("makeLiveAgent — argument collision policy", () => {
 });
 
 describe("makeLiveAgent — recovers from a bad turn instead of ending the run", () => {
-  it("does not complete the agent when every stated call is unrecognised", async () => {
+  /**
+   * Recovery has to happen inside one invocation. `AgentResult` offers only
+   * activate / complete / merge-variables — there is no "ask me again" — so an
+   * empty result leaves the ad-hoc sub-process with nothing running and the
+   * engine completes it. A handler that returns `{}` after a bad reply ends the
+   * run, whatever its trace says.
+   */
+  it("retries within the same call when every stated call is unrecognised", async () => {
     const trace: { kind: string; text: string }[] = [];
     const chat = fakeChat([
       '{"tool": "NotARealTool", "arguments": {}, "done": false}',
@@ -97,12 +104,200 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
     ]);
     const agent = makeLiveAgent(makeSpec(), chat, (e) => trace.push(e));
 
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(trace.some((e) => e.text.includes("doesn't exist"))).toBe(true);
+    expect(result.activateElements?.[0]?.elementId).toBe("ToolA");
+  });
+
+  it("never hands the engine a result that does nothing", async () => {
+    // The invariant behind all of this: activate something, complete, or merge
+    // variables. Anything else silently ends the run.
+    const chat = fakeChat([
+      '{"tool": "NotARealTool", "arguments": {}}',
+      "not json at all",
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+    ]);
+    const result = await makeLiveAgent(makeSpec(), chat, () => {})({
+      elementId: "Agent",
+      variables: {},
+      type: "x",
+    } as never);
+
+    const doesSomething =
+      (result.activateElements?.length ?? 0) > 0 ||
+      result.completionConditionFulfilled === true ||
+      result.variables !== undefined;
+    expect(doesSomething).toBe(true);
+  });
+
+  it("tells the model why a rejected call was rejected, so the retry differs", async () => {
+    // At temperature 0 an identical prompt yields an identical reply, so a
+    // retry that says nothing new loops until the budget is gone — which is
+    // exactly what Qwen2.5 1.5B did, re-requesting an already-run tool.
+    const prompts: string[] = [];
+    const replies = [
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+      '{"tool": "ToolA", "arguments": {"code": "A2"}}',
+      '{"tool": "ToolB", "arguments": {"code": "B1"}}',
+    ];
+    const chat: ChatFn = async (messages) => {
+      prompts.push(messages[messages.length - 1]!.content);
+      return replies.shift() ?? '{"done": true}';
+    };
+    const agent = makeLiveAgent(makeSpec(), chat, () => {});
+
+    // First invocation activates ToolA.
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    // Second: the model asks for ToolA again, which is refused, and the retry
+    // has to carry that back.
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(prompts[2]).toContain("rejected");
+    expect(prompts[2]).toContain("ToolA");
+    expect(prompts[2]).toContain("already run");
+    expect(result.activateElements?.[0]?.elementId).toBe("ToolB");
+  });
+
+  it("stops offering a tool that has already run", async () => {
+    // The system message is the menu a small model shops from. Leaving an
+    // already-run tool on it and saying "don't call this" elsewhere is how
+    // Qwen2.5 1.5B ended up alternating between two spent tools.
+    const systems: string[] = [];
+    const replies = [
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+      '{"tool": "ToolB", "arguments": {"code": "B1"}}',
+    ];
+    const chat: ChatFn = async (messages) => {
+      systems.push(messages[0]!.content);
+      return replies.shift() ?? '{"done": true}';
+    };
+    const agent = makeLiveAgent(makeSpec(), chat, () => {});
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(systems[0]).toContain("ToolA");
+    expect(systems[0]).toContain("ToolB");
+    // Second turn: ToolA has run, so it is not on the menu at all.
+    expect(systems[1]).not.toContain("ToolA");
+    expect(systems[1]).toContain("ToolB");
+  });
+
+  it("tells the model to finish when nothing is left to call", async () => {
+    const systems: string[] = [];
+    const replies = [
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+      '{"tool": "ToolB", "arguments": {"code": "B1"}}',
+      '{"done": true}',
+    ];
+    const chat: ChatFn = async (messages) => {
+      systems.push(messages[0]!.content);
+      return replies.shift() ?? '{"done": true}';
+    };
+    const agent = makeLiveAgent(makeSpec(), chat, () => {});
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    const third = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(systems[2]).toContain("Every tool has already run");
+    expect(third.completionConditionFulfilled).toBe(true);
+  });
+
+  it("stops asking once the model-call budget is spent", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    // Never says anything usable: the budget is what has to end this, and it
+    // has to end as a completion rather than an empty result.
+    const chat = fakeChat(Array.from({ length: 20 }, () => "nonsense"));
+    const spec = { ...makeSpec(), maxModelCalls: 3 };
+    const result = await makeLiveAgent(spec, chat, (e) => trace.push(e))({
+      elementId: "Agent",
+      variables: {},
+      type: "x",
+    } as never);
+
+    expect(result.completionConditionFulfilled).toBe(true);
+    expect(trace.some((e) => e.text.includes("Turn budget spent"))).toBe(true);
+  });
+});
+
+describe("makeLiveAgent — a premature done, when a tool is required", () => {
+  /**
+   * Observed with Llama 3.2 1B on the compliance example: it runs the checks,
+   * then reports done without ever calling the tool that records a decision —
+   * having passed `decision: "cleared"` as an argument to a different tool,
+   * which drops it. The gateway then routes to a human review task with
+   * nothing to review, and the reader sees the failure as a business outcome.
+   */
+  const captureLastPrompt = (prompts: string[]): ChatFn => {
+    const replies = ['{"done": true}', '{"tool": "ToolB", "arguments": {"code": "B1"}}'];
+    return async (messages) => {
+      prompts.push(messages[messages.length - 1]!.content);
+      return replies.shift() ?? '{"done": true}';
+    };
+  };
+
+  it("asks once more, naming the tool, instead of completing", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const prompts: string[] = [];
+    const agent = makeLiveAgent(
+      makeSpec(),
+      captureLastPrompt(prompts),
+      (e) => trace.push(e),
+      { requiredTools: ["ToolB"] },
+    );
+
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(trace.some((e) => e.text.includes("hasn't run"))).toBe(true);
+    // The reminder has to reach the model, not just the trace.
+    expect(prompts[1]).toContain("ToolB");
+    expect(prompts[1]).toContain("not run");
+    expect(result.activateElements?.[0]?.elementId).toBe("ToolB");
+  });
+
+  it("accepts a second done — one nudge, not an argument", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const agent = makeLiveAgent(
+      makeSpec(),
+      fakeChat(['{"done": true}', '{"done": true}']),
+      (e) => trace.push(e),
+      { requiredTools: ["ToolB"] },
+    );
+
+    // A model that insists is allowed to be wrong; the run records that it was.
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    expect(result.completionConditionFulfilled).toBe(true);
+    expect(trace.some((e) => e.text.includes("hasn't run"))).toBe(true);
+  });
+
+  it("takes done at face value once the required tool has run", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const agent = makeLiveAgent(
+      makeSpec(),
+      fakeChat([
+        '{"tool": "ToolB", "arguments": {"code": "B1"}}',
+        '{"done": true}',
+      ]),
+      (e) => trace.push(e),
+      { requiredTools: ["ToolB"] },
+    );
+
+    // The engine calls back after the activated tool drains — that part is real,
+    // and is how a run makes progress.
     const first = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
-    expect(first.completionConditionFulfilled).toBeFalsy();
-    expect(first.activateElements).toBeUndefined();
+    expect(first.activateElements?.[0]?.elementId).toBe("ToolB");
 
     const second = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
-    expect(second.activateElements?.[0]?.elementId).toBe("ToolA");
+    expect(second.completionConditionFulfilled).toBe(true);
+    expect(trace.some((e) => e.text.includes("hasn't run"))).toBe(false);
+  });
+
+  it("is inert for an example that declares nothing", async () => {
+    const agent = makeLiveAgent(makeSpec(), fakeChat(['{"done": true}']), () => {});
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    expect(result.completionConditionFulfilled).toBe(true);
   });
 });
 
