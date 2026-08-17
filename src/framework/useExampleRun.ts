@@ -8,6 +8,7 @@ import {
   type RoundResult,
   type Snapshot,
 } from "@nanobpm/bojtos-kit";
+import type { RunImage } from "./imageInput";
 
 /**
  * The engine half of the runner: `useBojtos` from `@nanobpm/bojtos-react` plus
@@ -61,6 +62,15 @@ export interface ExampleRunControls {
   ): Snapshot | null;
   reset(): void;
   /**
+   * Hold this run's picked/uploaded image (contract B) in run-scoped context,
+   * keyed to its process instance — the actual pixels live here, never in a
+   * BPMN variable. Handlers read it back through `helpers.vision`/`helpers.image`
+   * (see `imageInput.ts`); it is dropped on `reset`/`redeploy` and on unmount.
+   */
+  setRunImage(instanceKey: string, image: RunImage): void;
+  /** The image held for a process instance, or `undefined` if none. */
+  getRunImage(instanceKey: string): RunImage | undefined;
+  /**
    * Reset the engine and redeploy it with `xml`, replacing whatever was
    * deployed before (the initial `bpmn` or a prior `redeploy`/`reset`).
    *
@@ -103,9 +113,30 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
    */
   const runGenRef = useRef(0);
 
+  /**
+   * This run's images, keyed by process instance (contract B). Holds the actual
+   * pixels a `helpers.vision`/`helpers.image` call resolves, so they never have
+   * to travel as a BPMN variable. Cleared whenever the run is torn down
+   * (`reset`/`redeploy`) or the session is (re)created/freed, so an old run's
+   * bytes don't linger.
+   */
+  const runImagesRef = useRef<Map<string, RunImage>>(new Map());
+
+  const setRunImage = useCallback((instanceKey: string, image: RunImage) => {
+    runImagesRef.current.set(instanceKey, image);
+  }, []);
+
+  const getRunImage = useCallback(
+    (instanceKey: string) => runImagesRef.current.get(instanceKey),
+    [],
+  );
+
   const deployInto = useCallback((session: BojtosSession, xml: string) => {
     const res = session.deploy(xml);
     lastAppliedRef.current = xml;
+    // A fresh deploy (mount, Reset, or Redeploy) starts a new run — drop any
+    // prior run's held image bytes so they can't outlive their instance.
+    runImagesRef.current.clear();
     setProcessIds(res.processIds);
     setSnapshot(null);
     setError(null);
@@ -146,6 +177,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
       cancelled = true;
       sessionRef.current?.free();
       sessionRef.current = null;
+      runImagesRef.current.clear();
     };
     // `bpmn` here is the model to (re)deploy when the session itself is
     // (re)created — e.g. on mount or when the caller remounts for a new
@@ -277,5 +309,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     throwJobError,
     reset,
     redeploy,
+    setRunImage,
+    getRunImage,
   };
 }

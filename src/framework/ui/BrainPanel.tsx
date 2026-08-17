@@ -20,8 +20,9 @@ import {
   loadBrowserModelRequirements,
 } from "../brains/browser";
 import { localEndpointBlockedReason, pageIsLocal } from "../brains/endpoint";
+import { VISION_MODELS } from "../brains/vision";
 import type { BrainControls } from "../useBrain";
-import type { BrainKind } from "../brains/types";
+import type { BrainKind, VisionBrainKind } from "../brains/types";
 
 const KINDS: { kind: BrainKind; label: string; hint: string }[] = [
   {
@@ -41,7 +42,40 @@ const KINDS: { kind: BrainKind; label: string; hint: string }[] = [
   },
 ];
 
-export function BrainPanel({ brain }: { brain: BrainControls }) {
+const VISION_KINDS: { kind: VisionBrainKind; label: string; hint: string }[] = [
+  {
+    kind: "scripted-vision",
+    label: "Scripted",
+    hint: "No model. The example's known plate is returned — deterministic and offline.",
+  },
+  {
+    kind: "browser-vision",
+    label: "In-browser (WebGPU)",
+    hint: "Reads the photo with a vision model on your GPU. First run downloads weights.",
+  },
+];
+
+export function BrainPanel({
+  brain,
+  showText = true,
+  showVision = false,
+}: {
+  brain: BrainControls;
+  /** Render the text-brain (agent) section. Default true — existing behaviour. */
+  showText?: boolean;
+  /** Render the vision-brain section. Default false; on for an `imageInput` example. */
+  showVision?: boolean;
+}) {
+  return (
+    <div className="brain">
+      {showText && <TextBrain brain={brain} />}
+      {showText && showVision && <hr className="brain-divider" />}
+      {showVision && <VisionBrain brain={brain} />}
+    </div>
+  );
+}
+
+function TextBrain({ brain }: { brain: BrainControls }) {
   const active = KINDS.find((k) => k.kind === brain.kind)!;
   // Warn before the user clicks Connect, not after it fails.
   const localBlocked = localEndpointBlockedReason(brain.endpointUrl);
@@ -63,7 +97,7 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
     brain.webgpu === true ? "browser" : local && brain.webgpu === false ? "endpoint" : null;
 
   return (
-    <div className="brain">
+    <div className="brain-section">
       <div className="brain-kinds">
         {KINDS.map((k) => (
           <Button
@@ -213,6 +247,124 @@ export function BrainPanel({ brain }: { brain: BrainControls }) {
         <Alert variant="destructive">
           <AlertTitle>Couldn't connect</AlertTitle>
           <AlertDescription>{brain.error}</AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The vision brain section (contract B) — the image analogue of `TextBrain`,
+ * driving the independent vision brain in `useBrain`. Same shape a reader
+ * already knows from the WebLLM panel: pick scripted vs in-browser, see the
+ * model's download size, Connect (with progress), and a clear WebGPU-absent
+ * reason that steers to the scripted fallback.
+ */
+function VisionBrain({ brain }: { brain: BrainControls }) {
+  const active = VISION_KINDS.find((k) => k.kind === brain.visionKind)!;
+  const recommended: VisionBrainKind | null =
+    brain.webgpu === true ? "browser-vision" : null;
+
+  return (
+    <div className="brain-section brain-vision">
+      <Label>Vision (reads the image)</Label>
+      <div className="brain-kinds">
+        {VISION_KINDS.map((k) => (
+          <Button
+            key={k.kind}
+            size="sm"
+            variant={brain.visionKind === k.kind ? "default" : "secondary"}
+            onClick={() => brain.setVisionKind(k.kind)}
+          >
+            {k.label}
+            {k.kind === recommended && (
+              <Badge variant="info" className="brain-recommended-badge">
+                recommended
+              </Badge>
+            )}
+          </Button>
+        ))}
+        {brain.visionStatus === "ready" &&
+          brain.visionKind === "browser-vision" && (
+            <Badge variant="success">
+              {brain.visionModelInUse ?? "connected"}
+            </Badge>
+          )}
+        {brain.visionStatus === "connecting" && (
+          <Badge variant="info">connecting…</Badge>
+        )}
+        {brain.visionStatus === "error" && (
+          <Badge variant="danger">not connected</Badge>
+        )}
+      </div>
+
+      <p className="field-hint">{active.hint}</p>
+
+      {brain.visionKind === "browser-vision" && (
+        <div className="brain-config">
+          <div className="field">
+            <Label htmlFor="vision-model">Model</Label>
+            <Select
+              value={brain.visionModel}
+              onValueChange={brain.setVisionModel}
+              disabled={brain.visionStatus === "connecting"}
+            >
+              <SelectTrigger id="vision-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {VISION_MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="field-hint">
+              Connecting downloads the weights once (size shown above), then
+              caches them — every token is read on your GPU, no server.
+            </p>
+          </div>
+          {brain.webgpu === false && brain.visionWebgpuReason && (
+            <Alert variant="destructive">
+              <AlertTitle>No WebGPU in this browser</AlertTitle>
+              <AlertDescription>{brain.visionWebgpuReason}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      )}
+
+      {brain.visionKind === "browser-vision" && (
+        <div className="brain-actions">
+          <Button
+            size="sm"
+            onClick={() => void brain.connectVision()}
+            disabled={brain.visionStatus === "connecting"}
+          >
+            {brain.visionStatus === "ready" ? "Reconnect" : "Connect"}
+          </Button>
+          {brain.visionStatus === "connecting" && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={brain.cancelVisionConnect}
+            >
+              Cancel
+            </Button>
+          )}
+          {brain.visionProgress && (
+            <span className="field-hint">
+              {Math.round(brain.visionProgress.progress * 100)}% —{" "}
+              {brain.visionProgress.text}
+            </span>
+          )}
+        </div>
+      )}
+
+      {brain.visionError && (
+        <Alert variant="destructive">
+          <AlertTitle>Couldn't connect the vision brain</AlertTitle>
+          <AlertDescription>{brain.visionError}</AlertDescription>
         </Alert>
       )}
     </div>

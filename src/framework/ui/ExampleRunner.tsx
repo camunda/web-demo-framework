@@ -32,9 +32,12 @@ import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
 import { describeRound, newSequenceFlows } from "../stepSummary";
 import { useBrain } from "../useBrain";
-import type { BrainKind } from "../brains/types";
+import type { BrainKind, VisionFn } from "../brains/types";
+import { makeScriptedVisionBrain } from "../brains/vision";
+import { imageRefVariables, type RunImage, type VisionSupport } from "../imageInput";
 import { patchDeepLinkState } from "../deepLink";
 import { BrainPanel } from "./BrainPanel";
+import { ImageInputPanel } from "./ImageInputPanel";
 import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
@@ -143,6 +146,10 @@ export function ExampleRunner({
   // repeatedly wiping the previous run's state mid-edit.
   const [bpmn, setBpmn] = useState(example.bpmn);
   const brain = useBrain();
+  // The image picked/uploaded for the next run (contract B), or null. Only ever
+  // set for an `imageInput` example; the small reference goes into process
+  // variables, the pixels into run-scoped context — see `start`/`beginRun`.
+  const [imageSelection, setImageSelection] = useState<RunImage | null>(null);
 
   useEffect(() => {
     if (initialBrainKind && initialBrainKind !== brain.kind) {
@@ -501,7 +508,29 @@ export function ExampleRunner({
     // Fresh per run, so a tool's trace entries only group with this run's
     // agent turns — see the `turnRef` comment above.
     turnRef.current = { current: undefined };
-    const workers = buildWorkers(model, draft.handlers, trace, turnRef.current);
+    // Vision support (contract B): only for an `imageInput` example. The active
+    // reader is the connected live browser-vision `VisionFn` when present, else
+    // a `scripted-vision` brain built from this example's `scriptedVision`
+    // ground truth — mirroring exactly how `brain.chat`/`scriptedAgent` pick the
+    // agent's reader above. Handlers reach it via `helpers.vision`/`helpers.image`.
+    let visionSupport: VisionSupport | undefined;
+    if (example.imageInput) {
+      const live: VisionFn | null = brain.vision;
+      const read: VisionFn =
+        live ?? makeScriptedVisionBrain(example.scriptedVision).read;
+      visionSupport = {
+        read,
+        live: !!live,
+        resolve: (instanceKey) => run.getRunImage(instanceKey),
+      };
+    }
+    const workers = buildWorkers(
+      model,
+      draft.handlers,
+      trace,
+      turnRef.current,
+      visionSupport,
+    );
     // Job types this example holds back for a manual choice (see
     // `manualControls`/`pendingManualJob`) never auto-dispatch — the drive
     // loop below simply finds nothing registered for them and stops there.
@@ -560,7 +589,14 @@ export function ExampleRunner({
 
     setLog([]);
     setReviewValues({});
-    const seed = { ...example.seed, ...startValues };
+    // Only the *reference* to the image (imageId/imageName) rides in the
+    // process variables — never the pixels (see `imageInput.ts`). The bytes are
+    // put into run-scoped context below, keyed to the instance just created.
+    const seed = {
+      ...example.seed,
+      ...startValues,
+      ...imageRefVariables(example.imageInput ? imageSelection : null),
+    };
     setDisplayVars(seed);
     workersRef.current = workers;
     agentsRef.current = agents;
@@ -582,6 +618,11 @@ export function ExampleRunner({
       }`,
     });
     const snap = run.createInstance(pid, JSON.stringify(seed));
+    // Stash the picked image against the instance just created, so
+    // `helpers.vision`/`helpers.image` can resolve it during the run.
+    const instanceKey = snap?.instances[0]?.key;
+    if (example.imageInput && imageSelection && instanceKey)
+      run.setRunImage(instanceKey, imageSelection);
     return { workers, agents, snap };
   }, [
     run,
@@ -590,6 +631,7 @@ export function ExampleRunner({
     bpmn,
     agentSource,
     startValues,
+    imageSelection,
     model,
     brain,
     trace,
@@ -992,17 +1034,22 @@ export function ExampleRunner({
         </div>
 
         <div className="col">
-          {model.agent && (
+          {(model.agent || example.imageInput) && (
             <Card className="panel" data-tour={TOUR_ANCHOR.brainPanel}>
               <CardHeader>
                 <CardTitle>Brain</CardTitle>
                 <CardDescription>
-                  What drives “{model.agent.label}”. The model recommends; the
-                  process governs.
+                  {model.agent
+                    ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
+                    : "What reads the image. The model recommends; the process governs."}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <BrainPanel brain={brain} />
+                <BrainPanel
+                  brain={brain}
+                  showText={!!model.agent}
+                  showVision={!!example.imageInput}
+                />
               </CardContent>
             </Card>
           )}
@@ -1013,10 +1060,20 @@ export function ExampleRunner({
               <CardDescription>
                 {model.startFormId
                   ? `The model's start form "${model.startFormId}".`
-                  : "The starting payload."}
+                  : example.imageInput
+                    ? "Pick a seed photo or upload your own to read."
+                    : "The starting payload."}
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {example.imageInput && (
+                <ImageInputPanel
+                  imageInput={example.imageInput}
+                  value={imageSelection}
+                  onSelect={setImageSelection}
+                  disabled={running}
+                />
+              )}
               {example.scenarios && (
                 <div className="scenarios">
                   {example.scenarios.map((s) => (
