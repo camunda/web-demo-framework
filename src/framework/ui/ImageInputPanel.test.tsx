@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageInputPanel } from "./ImageInputPanel";
 import type { RunImage } from "../imageInput";
@@ -47,10 +47,9 @@ describe("ImageInputPanel (contract B start affordance)", () => {
     const upload = document.getElementById("image-upload") as HTMLInputElement;
     await act(async () => {
       fireEvent.change(upload, { target: { files: [file] } });
-      // Let the FileReader's async onload settle within this act().
-      await new Promise((r) => setTimeout(r, 50));
     });
-    expect(onSelect).toHaveBeenCalled();
+    // Wait until the FileReader's async onload has fired and reported.
+    await waitFor(() => expect(onSelect).toHaveBeenCalled());
     const arg = onSelect.mock.calls.at(-1)![0]!;
     expect(arg.imageName).toBe("my-car.png");
     expect(String(arg.pixels)).toMatch(/^data:image\/png/);

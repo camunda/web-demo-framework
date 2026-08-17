@@ -83,6 +83,20 @@ export interface VisionSupport {
 }
 
 /**
+ * What a vision accessor resolves to when there is nothing to read: no image
+ * was selected, or the selected image carries no argument the active brain can
+ * use. On the **live** path the scripted placeholder would be misleading (it
+ * claims the scripted brain is in use), so a live brain gets a neutral
+ * "no image" message instead.
+ */
+export const NO_LIVE_IMAGE_MESSAGE =
+  "No image selected — pick or upload a photo to read.";
+
+function noImageResult(live: boolean): string {
+  return live ? NO_LIVE_IMAGE_MESSAGE : SCRIPTED_VISION_PLACEHOLDER;
+}
+
+/**
  * Build a handler's `vision(prompt)` for one job. Resolves this run's image and
  * reads it with the active brain, and — per contract B — **never throws**: a
  * missing image or a mid-run backend failure resolves to a clearly-marked
@@ -94,9 +108,9 @@ export function makeVisionAccessor(
 ): (prompt: string) => Promise<string> {
   return async (prompt: string) => {
     const image = support.resolve(instanceKey);
-    if (!image) return SCRIPTED_VISION_PLACEHOLDER;
+    if (!image) return noImageResult(support.live);
     const arg = pickVisionArg(image, support.live);
-    if (arg === undefined) return SCRIPTED_VISION_PLACEHOLDER;
+    if (arg === undefined) return noImageResult(support.live);
     try {
       return await support.read(arg, prompt);
     } catch (e) {

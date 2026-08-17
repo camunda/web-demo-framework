@@ -8,6 +8,7 @@ import { SCRIPTED_VISION_PLACEHOLDER } from "./brains/vision";
 import {
   imageRefVariables,
   makeVisionAccessor,
+  NO_LIVE_IMAGE_MESSAGE,
   pickVisionArg,
   type RunImage,
   type VisionSupport,
@@ -200,6 +201,16 @@ describe("helpers.vision threading via buildWorkers", () => {
     };
     const vision = makeVisionAccessor(support, "inst-1");
     await expect(vision("<OCR>")).resolves.toBe(SCRIPTED_VISION_PLACEHOLDER);
+  });
+
+  it("a live brain gets a neutral no-image message, not the scripted placeholder", async () => {
+    const support: VisionSupport = {
+      read: async () => "should not be called",
+      live: true,
+      resolve: () => undefined,
+    };
+    const vision = makeVisionAccessor(support, "inst-1");
+    await expect(vision("<OCR>")).resolves.toBe(NO_LIVE_IMAGE_MESSAGE);
   });
 
   it("regression guard: without vision support, helpers.vision/image are undefined", async () => {

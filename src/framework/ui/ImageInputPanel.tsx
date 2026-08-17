@@ -63,8 +63,8 @@ export function ImageInputPanel({
     <div className="image-input">
       {imageInput.label && <p className="field-hint">{imageInput.label}</p>}
 
-      <label className="image-input-label">Seed photos</label>
-      <div className="image-gallery" role="group" aria-label="Seed photos">
+      <p className="image-input-label" id="seed-photos-label">Seed photos</p>
+      <div className="image-gallery" role="group" aria-labelledby="seed-photos-label">
         {imageInput.seedImages.map((img) => {
           const selected = value?.imageId === img.id;
           return (
