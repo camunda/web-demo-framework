@@ -241,6 +241,17 @@ export function ExampleRunner({
   const reviewFormRef = useRef<FormRendererHandle>(null);
 
   const runningRef = useRef(false);
+  // Monotonic generation token for `driveLoop`: `runningRef.current` alone
+  // can't tell a stale in-flight round from a brand-new run, because Reset
+  // clears it to `false` and a subsequent Start/manual-resume sets it back
+  // to `true` before the stale round's `await` resolves — the boolean check
+  // would then wrongly let the old round trace/update vars into the new run.
+  // Each call that owns `driveLoop` captures the value *after* bumping this
+  // ref and only proceeds past its `await` if the ref still matches (pattern
+  // borrowed from `ModelEditor`'s `importSeqRef`), so Reset (which also
+  // bumps it) reliably drops late arrivals even once `runningRef.current`
+  // flips back to `true` for a new run.
+  const runSeqRef = useRef(0);
   const logIdRef = useRef(0);
   // Shared with `buildWorkers` (compile.ts) and `makeLiveAgentRouter`
   // (agent/liveAgent.ts) for one run, so a tool's own trace entries land in
@@ -361,22 +372,24 @@ export function ExampleRunner({
       workers: Record<string, JobHandler>,
       agents: Record<string, AgentHandler>,
       initialSnap: Snapshot | null,
+      seq: number,
     ) => {
       let snap = initialSnap;
       let guard = 0;
       while (
-        runningRef.current &&
+        runSeqRef.current === seq &&
         snap &&
         snap.completedInstances < 1 &&
         guard++ < 80
       ) {
         const round = await run.stepWorkers(workers, { agents });
-        // Reset can fire while the await above is in flight — `runningRef.current`
-        // is only checked in the `while` condition, so without this the round
-        // that was already dispatched would still trace/update vars after
-        // Reset, letting stale state reappear post-reset. Bail out immediately
-        // and drop this round rather than let it leak into the reset UI.
-        if (!runningRef.current) return snap;
+        // Reset (or a fresh Start/manual-resume that landed while this await
+        // was in flight) can bump `runSeqRef` — checking that instead of the
+        // resettable `runningRef.current` boolean means a stale round is
+        // dropped even if a *new* run has since flipped `runningRef.current`
+        // back to `true`. Bail out immediately and drop this round rather
+        // than let it leak into whichever run is current now.
+        if (runSeqRef.current !== seq) return snap;
         snap = round?.snapshot ?? snap;
         const vars = snap.instances[0]?.variables;
         if (vars) setDisplayVars({ ...vars });
@@ -413,6 +426,7 @@ export function ExampleRunner({
     async (choice: "complete" | "action") => {
       if (!pendingManualJob || runningRef.current) return;
       const { job, control } = pendingManualJob;
+      const seq = ++runSeqRef.current;
       runningRef.current = true;
       setRunning(true);
       try {
@@ -435,7 +449,7 @@ export function ExampleRunner({
           const vars = snap.instances[0]?.variables;
           if (vars) setDisplayVars({ ...vars });
           await new Promise((r) => setTimeout(r, BEAT));
-          await driveLoop(workersRef.current, agentsRef.current, snap);
+          await driveLoop(workersRef.current, agentsRef.current, snap, seq);
         } else {
           trace({
             kind: "error",
@@ -602,6 +616,7 @@ export function ExampleRunner({
       let workers = workersRef.current;
       let agents = agentsRef.current;
       let snap = run.snapshot;
+      const seq = ++runSeqRef.current;
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
@@ -614,7 +629,7 @@ export function ExampleRunner({
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
-      await driveLoop(workers, agents, snap);
+      await driveLoop(workers, agents, snap, seq);
     } finally {
       runningRef.current = false;
       setRunning(false);
@@ -685,6 +700,11 @@ export function ExampleRunner({
 
   const stop = useCallback(() => {
     runningRef.current = false;
+    // Bump the generation token so any `driveLoop` round already in flight
+    // (dispatched before Reset was clicked) is dropped even if a new
+    // Start/manual-resume flips `runningRef.current` back to `true` before
+    // that stale round's `await` resolves.
+    runSeqRef.current++;
     setRunning(false);
     setStepping(false);
     run.reset();

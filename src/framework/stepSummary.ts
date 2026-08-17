@@ -89,10 +89,21 @@ export function describeRound(
         ).join(", ")}`,
       };
     case "idle":
-    default:
       return {
         kind: "step",
         text: "Nothing to step — no instance is running.",
+      };
+    default:
+      // `round.reason` is `@nanobpm/bojtos-kit`'s `settleReason` — if a new
+      // value is ever added there (or `reason` is omitted), fall back to
+      // surfacing it verbatim instead of silently reusing the "idle" text,
+      // so the Step log stays honest about an unanticipated block rather
+      // than misleadingly implying nothing is running.
+      return {
+        kind: "step",
+        text: round.reason
+          ? `Step blocked on an unrecognized reason: ${round.reason}`
+          : "Nothing to step — no instance is running.",
       };
   }
 }

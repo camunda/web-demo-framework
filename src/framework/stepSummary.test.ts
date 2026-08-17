@@ -155,4 +155,15 @@ describe("describeRound", () => {
       /nothing to step/i,
     );
   });
+
+  it("surfaces an unrecognized settle reason instead of reusing the idle text", () => {
+    const round: RoundResult = {
+      snapshot: snap(),
+      handled: 0,
+      reason: "somethingNew",
+    };
+    const entry = describeRound(round, [], labelFor);
+    expect(entry.text).toContain("somethingNew");
+    expect(entry.text).not.toMatch(/nothing to step/i);
+  });
 });
