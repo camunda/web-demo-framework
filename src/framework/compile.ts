@@ -2,6 +2,11 @@ import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-rea
 import type { ModelInfo } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
 import type { TurnRef } from "./agent/liveAgent";
+import {
+  makeImageAccessor,
+  makeVisionAccessor,
+  type VisionSupport,
+} from "./imageInput";
 import { runAgentSandboxed, runHandlerSandboxed } from "./sandbox";
 
 /**
@@ -43,7 +48,12 @@ export function compileAgent(source: string): AgentHandler {
   return (job) => runAgentSandboxed(source, job);
 }
 
-function helpersFor(job: ActivatedJob, trace: Trace, turn?: number): HandlerHelpers {
+function helpersFor(
+  job: ActivatedJob,
+  trace: Trace,
+  turn?: number,
+  vision?: VisionSupport,
+): HandlerHelpers {
   return {
     sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
     // Default `turn`/`elementId` so a handler's own `trace()` calls land in
@@ -65,6 +75,17 @@ function helpersFor(job: ActivatedJob, trace: Trace, turn?: number): HandlerHelp
       const n = typeof v === "number" ? v : Number(v);
       return Number.isFinite(n) ? n : fallback;
     },
+    // Vision accessors are attached only when the example declares `imageInput`
+    // (the runner passes `vision`), so `helpers.vision`/`helpers.image` stay
+    // undefined — and every existing handler unaffected — otherwise. They read
+    // the current run's image (held run-scoped, keyed by `job.instanceKey`)
+    // with the active brain; see `imageInput.ts`.
+    ...(vision
+      ? {
+          vision: makeVisionAccessor(vision, job.instanceKey),
+          image: makeImageAccessor(vision, job.instanceKey),
+        }
+      : {}),
   };
 }
 
@@ -91,12 +112,17 @@ function safeStringify(value: unknown): string {
  * `TurnRef`), so a tool activated by an agent groups with its own result in
  * the trace timeline. Omit it for a non-agentic example — the entries just
  * render ungrouped, exactly as before.
+ *
+ * `vision`, when supplied (only for an example with `imageInput`), gives every
+ * handler a `helpers.vision`/`helpers.image` bound to this run's image and the
+ * active vision brain — see `helpersFor` and `imageInput.ts`.
  */
 export function buildWorkers(
   model: ModelInfo,
   byElement: Record<string, ExampleHandler>,
   trace: Trace,
   turnRef?: TurnRef,
+  vision?: VisionSupport,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
   // Cover every process, not just the primary one: call activities (or a
@@ -117,7 +143,7 @@ export function buildWorkers(
       const label = labels.get(job.elementId) ?? job.elementId;
       const turn = turnRef?.current;
       trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
-      const out = await handler(job, helpersFor(job, trace, turn));
+      const out = await handler(job, helpersFor(job, trace, turn, vision));
       trace({
         kind: "vars",
         text: `  ↳ ${safeStringify(out)}`,

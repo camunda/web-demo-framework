@@ -13,7 +13,8 @@ import {
   localEndpointBlockedReason,
   pageIsLocal,
 } from "./brains/endpoint";
-import type { BrainKind, ChatFn } from "./brains/types";
+import { BrowserVisionBrain, DEFAULT_VISION_MODEL } from "./brains/vision";
+import type { BrainKind, ChatFn, VisionBrainKind, VisionFn } from "./brains/types";
 
 /**
  * Owns which brain drives the agent and its connection lifecycle.
@@ -63,6 +64,31 @@ export interface BrainControls {
   connect(): Promise<void>;
   /** The live chat function, or null when scripted / not yet connected. */
   chat: ChatFn | null;
+
+  // --- Vision brain (contract B) — a second, independent brain beside the ---
+  // --- text one: a text agent and an image reader can be connected at once, ---
+  // --- so this mirrors the fields above rather than sharing the `kind`. ---
+  /** Which vision brain is selected: the scripted fallback or in-browser WebGPU. */
+  visionKind: VisionBrainKind;
+  setVisionKind(kind: VisionBrainKind): void;
+  visionStatus: BrainStatus;
+  visionError: string | null;
+  /** The selected vision model id (for `browser-vision`). */
+  visionModel: string;
+  setVisionModel(id: string): void;
+  /** The vision model id actually in use, once connected. */
+  visionModelInUse: string | null;
+  /** Weight-download / GPU-load progress for the browser-vision brain. */
+  visionProgress: { progress: number; text: string } | null;
+  /**
+   * Why WebGPU isn't usable for the vision brain, if it isn't (null until
+   * probed, or when it is) — phrased to steer the reader to `scripted-vision`.
+   */
+  visionWebgpuReason: string | null;
+  connectVision(): Promise<void>;
+  cancelVisionConnect(): void;
+  /** The live vision reader, or null when scripted / not yet connected. */
+  vision: VisionFn | null;
 }
 
 /** Pick a sensible starting brain for this environment — see module doc. */
@@ -99,6 +125,27 @@ export function useBrain(): BrainControls {
   const [chat, setChat] = useState<ChatFn | null>(null);
   const brainRef = useRef<BrowserBrain | EndpointBrain | null>(null);
 
+  // Vision brain — an independent selection/lifecycle beside the text brain
+  // above. WebGPU present -> default to the in-browser vision brain; absent ->
+  // scripted-vision, so a reader never lands on a vision brain that can't
+  // connect (the fallback the epic's "Brain panel" spec requires).
+  const [visionKind, setVisionKindState] =
+    useState<VisionBrainKind>("scripted-vision");
+  const [visionStatus, setVisionStatus] = useState<BrainStatus>("idle");
+  const [visionError, setVisionError] = useState<string | null>(null);
+  const [visionModel, setVisionModel] = useState(DEFAULT_VISION_MODEL);
+  const [visionModelInUse, setVisionModelInUse] = useState<string | null>(null);
+  const [visionProgress, setVisionProgress] = useState<{
+    progress: number;
+    text: string;
+  } | null>(null);
+  const [visionWebgpuReason, setVisionWebgpuReason] = useState<string | null>(
+    null,
+  );
+  const [vision, setVision] = useState<VisionFn | null>(null);
+  const visionBrainRef = useRef<BrowserVisionBrain | null>(null);
+  const pickedVisionDefault = useRef(false);
+
   /**
    * Wraps a brain's `chat` so a fatal failure mid-run is visible.
    *
@@ -127,6 +174,29 @@ export function useBrain(): BrainControls {
     };
   }, []);
 
+  /**
+   * Wraps a browser-vision brain's `read` so a fatal failure mid-run is
+   * visible, mirroring `watchChat` above: without it the panel keeps saying
+   * "ready" while every read throws (a lost GPU device, an evicted model), and
+   * `helpers.vision` would silently degrade with no signal to the reader.
+   */
+  const watchVision = useCallback((brain: BrowserVisionBrain): VisionFn => {
+    return async (...args) => {
+      try {
+        return await brain.read(...args);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (isDeviceLostError(message)) {
+          setVision(null);
+          setVisionModelInUse(null);
+          setVisionStatus("error");
+          setVisionError(message);
+        }
+        throw e;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     void webgpuUnavailableReason().then((reason) => {
       setWebgpuReason(reason);
@@ -136,6 +206,22 @@ export function useBrain(): BrainControls {
         void chooseDefaultKind().then(setKindState);
       }
     });
+    // The vision seam has no Endpoint alternative, so its reason names the
+    // scripted-vision fallback; probed the same way, and used to pick the
+    // starting vision brain (WebGPU -> browser-vision, else scripted-vision).
+    void webgpuUnavailableReason("the scripted-vision fallback").then(
+      (reason) => {
+        setVisionWebgpuReason(reason);
+        // Respect an early explicit pick: only default when the reader hasn't
+        // chosen a vision brain yet (mirrors pickedDefault for the text brain).
+        if (!pickedVisionDefault.current) {
+          pickedVisionDefault.current = true;
+          setVisionKindState(
+            reason === null ? "browser-vision" : "scripted-vision",
+          );
+        }
+      },
+    );
   }, []);
 
   // Cached-state indication: re-probed whenever the selected model changes,
@@ -153,6 +239,8 @@ export function useBrain(): BrainControls {
 
   // Free the GPU/engine when the page goes away.
   useEffect(() => () => brainRef.current?.dispose(), []);
+  // Same for the vision brain's model/GPU.
+  useEffect(() => () => visionBrainRef.current?.dispose(), []);
 
   const setKind = useCallback((next: BrainKind) => {
     setKindState(next);
@@ -161,6 +249,22 @@ export function useBrain(): BrainControls {
     setModelInUse(null);
     setProgress(null);
     setChat(null);
+  }, []);
+
+  const setVisionKind = useCallback((next: VisionBrainKind) => {
+    pickedVisionDefault.current = true;
+    // Switching kinds cancels any in-flight connect and disposes the vision
+    // brain, so a late-resolving connect can't revive state for the now-stale
+    // selection and GPU/model resources aren't left alive.
+    visionBrainRef.current?.cancelConnect();
+    visionBrainRef.current?.dispose();
+    visionBrainRef.current = null;
+    setVisionKindState(next);
+    setVisionStatus("idle");
+    setVisionError(null);
+    setVisionModelInUse(null);
+    setVisionProgress(null);
+    setVision(null);
   }, []);
 
   /** Tear down the active brain instance and clear its live chat/model state. */
@@ -245,6 +349,65 @@ export function useBrain(): BrainControls {
     watchChat,
   ]);
 
+  /** Tear down the active vision brain and clear its live reader/model state. */
+  const disconnectVision = useCallback(() => {
+    visionBrainRef.current?.dispose();
+    visionBrainRef.current = null;
+    setVision(null);
+    setVisionModelInUse(null);
+  }, []);
+
+  const cancelVisionConnect = useCallback(() => {
+    visionBrainRef.current?.cancelConnect();
+    disconnectVision();
+    setVisionStatus("idle");
+    setVisionProgress(null);
+    setVisionError(null);
+  }, [disconnectVision]);
+
+  const connectVision = useCallback(async () => {
+    // scripted-vision needs no connect — like the text "scripted" brain, the
+    // runner builds it per-example from `ExampleDef.scriptedVision`, so `vision`
+    // stays null and the panel just reports ready.
+    if (visionKind === "scripted-vision") {
+      disconnectVision();
+      setVisionStatus("ready");
+      setVisionError(null);
+      return;
+    }
+    setVisionStatus("connecting");
+    setVisionError(null);
+    setVisionProgress(null);
+    try {
+      const brain =
+        visionBrainRef.current instanceof BrowserVisionBrain
+          ? visionBrainRef.current
+          : new BrowserVisionBrain();
+      if (visionBrainRef.current && visionBrainRef.current !== brain)
+        visionBrainRef.current.dispose();
+      visionBrainRef.current = brain;
+      const id = await brain.connect(visionModel, setVisionProgress);
+      setVisionModelInUse(id);
+      setVision(() => watchVision(brain));
+      setVisionStatus("ready");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message === "cancelled") {
+        // cancelVisionConnect() already reset status/error/progress.
+        return;
+      }
+      // WebGPU absent (or the model failed to load) — surface the reason and
+      // leave the reader on the scripted-vision fallback rather than a live
+      // brain that can't connect.
+      setVisionError(message);
+      setVisionStatus("error");
+      setVision(null);
+      setVisionModelInUse(null);
+    } finally {
+      setVisionProgress(null);
+    }
+  }, [visionKind, visionModel, disconnectVision, watchVision]);
+
   return {
     kind,
     setKind,
@@ -266,5 +429,17 @@ export function useBrain(): BrainControls {
     setApiKey,
     connect,
     chat,
+    visionKind,
+    setVisionKind,
+    visionStatus,
+    visionError,
+    visionModel,
+    setVisionModel,
+    visionModelInUse,
+    visionProgress,
+    visionWebgpuReason,
+    connectVision,
+    cancelVisionConnect,
+    vision,
   };
 }

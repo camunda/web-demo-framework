@@ -34,6 +34,23 @@ export function buildSandboxDocument(): string {
       return new Promise(function (resolve) { setTimeout(resolve, ms); });
     }
 
+    // Correlate each delegated helper call (vision/image) with the host's
+    // reply. The reader's source runs here, but vision/image must execute
+    // host-side (only the host holds this run's image and the active brain),
+    // so the helper posts a request and awaits the matching helper-result.
+    var pendingCalls = {};
+    var callSeq = 0;
+
+    function callHost(kind, id, extra) {
+      return new Promise(function (resolve, reject) {
+        var callId = String(++callSeq);
+        pendingCalls[callId] = { resolve: resolve, reject: reject };
+        var msg = { kind: kind, id: id, callId: callId };
+        if (extra) for (var k in extra) msg[k] = extra[k];
+        post(msg);
+      });
+    }
+
     function compile(source, what) {
       // Deliberately still new Function(): the isolation here comes from the
       // opaque-origin iframe boundary, not from re-implementing a JS sandbox.
@@ -43,20 +60,33 @@ export function buildSandboxDocument(): string {
       return fn;
     }
 
-    function helpersFor(job, id) {
-      return {
+    function helpersFor(job, id, hasVision) {
+      var helpers = {
         sleep: sleep,
         trace: function (text) { post({ kind: "trace", id: id, text: String(text) }); },
         text: function (key, fallback) { return textOf(job.variables, key, fallback); },
         num: function (key, fallback) { return numOf(job.variables, key, fallback); },
       };
+      // Vision accessors bridge back to the host, and only exist when the host
+      // wired vision for this run — mirroring the host-side helpersFor so a
+      // handler in a non-imageInput example still sees helpers.vision as
+      // undefined (calling it throws "not a function"), exactly as before.
+      if (hasVision) {
+        helpers.vision = function (prompt) {
+          return callHost("vision-request", id, { prompt: String(prompt) });
+        };
+        helpers.image = function () {
+          return callHost("image-request", id);
+        };
+      }
+      return helpers;
     }
 
     async function handle(msg) {
       try {
         if (msg.kind === "run-handler") {
           var handler = compile(msg.source, "Handler code");
-          var out = await handler(msg.job, helpersFor(msg.job, msg.id));
+          var out = await handler(msg.job, helpersFor(msg.job, msg.id, msg.hasVision));
           post({ kind: "result", id: msg.id, value: out === undefined ? undefined : out });
         } else if (msg.kind === "run-agent") {
           var agent = compile(msg.source, "Agent code");
@@ -70,7 +100,17 @@ export function buildSandboxDocument(): string {
 
     window.addEventListener("message", function (event) {
       var msg = event.data;
-      if (!msg || (msg.kind !== "run-handler" && msg.kind !== "run-agent")) return;
+      if (!msg) return;
+      // Host's reply to a delegated vision/image call: settle the waiter.
+      if (msg.kind === "helper-result" || msg.kind === "helper-error") {
+        var waiter = pendingCalls[msg.callId];
+        if (!waiter) return;
+        delete pendingCalls[msg.callId];
+        if (msg.kind === "helper-result") waiter.resolve(msg.value);
+        else waiter.reject(new Error(msg.message || "helper call failed"));
+        return;
+      }
+      if (msg.kind !== "run-handler" && msg.kind !== "run-agent") return;
       handle(msg);
     });
 

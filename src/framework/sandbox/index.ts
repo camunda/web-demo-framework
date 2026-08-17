@@ -15,9 +15,21 @@ export function runHandlerSandboxed(
   job: ActivatedJob,
   helpers: HandlerHelpers,
 ): Promise<unknown> {
+  // Vision support (contract B) is additive: `helpers.vision`/`helpers.image`
+  // exist only when the runner wired them for an `imageInput` example. Tell the
+  // sandbox whether to expose them, and bridge each call back to these
+  // host-side accessors — they alone hold this run's image pixels and the
+  // active brain, which never cross into the reader-controlled sandbox.
+  const hasVision = typeof helpers.vision === "function";
   return runInSandbox(
-    { kind: "run-handler", source, job: toSandboxJob(job) },
-    { onTrace: helpers.trace },
+    { kind: "run-handler", source, job: toSandboxJob(job), hasVision },
+    {
+      onTrace: helpers.trace,
+      onVision: helpers.vision
+        ? (prompt: string) => helpers.vision!(prompt)
+        : undefined,
+      onImage: helpers.image ? () => helpers.image!() : undefined,
+    },
   );
 }
 

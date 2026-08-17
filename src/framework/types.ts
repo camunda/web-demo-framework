@@ -1,6 +1,7 @@
 import type { ActivatedJob } from "@nanobpm/bojtos-react";
 import type { TemplateMap } from "./templates";
 import type { TourDef } from "./tour/types";
+import type { VisionImage } from "./brains/types";
 
 /** A line in the run's activity log. */
 export interface TraceEntry {
@@ -60,6 +61,28 @@ export interface HandlerHelpers {
   text(key: string, fallback?: string): string;
   /** A numeric variable with a fallback. */
   num(key: string, fallback?: number): number;
+  /**
+   * Read the current run's image with the connected vision brain and return its
+   * text (contract B). `prompt` is the vision instruction — for the Florence-2
+   * browser-vision backend a `<OCR>`/`<OCR_WITH_REGION>` task token (see
+   * `brains/vision.ts`). With a live browser-vision brain connected this runs
+   * the model on the reader's GPU; with none connected the framework's
+   * scripted-vision fallback — built from the example's `scriptedVision`
+   * ground truth — answers instead.
+   *
+   * **Optional and additive**: only present for an example whose `ExampleDef`
+   * declares `imageInput`, so existing handlers and `HandlerHelpers` consumers
+   * are unaffected. It **never throws** — a missing image or a mid-run backend
+   * failure resolves to a clearly-marked string rather than failing the job.
+   */
+  vision?(prompt: string): Promise<string>;
+  /**
+   * The lower-level counterpart to {@link vision}: the current run's image as a
+   * `VisionImage` (the uploaded/seed pixels, or the seed id for the scripted
+   * fallback), or `undefined` when nothing is selected — so a handler can pass
+   * it to a brain itself. Optional/additive on the same terms as `vision`.
+   */
+  image?(): Promise<VisionImage | undefined>;
 }
 
 /** What an example's editable handler compiles to. */
@@ -112,6 +135,19 @@ export interface Scenario {
 }
 
 /**
+ * One seed image offered in an example's start gallery (contract B). `id` is
+ * the stable key that becomes the `imageId` process variable and the lookup
+ * key for the example's `scriptedVision` ground truth; `file`/`thumb` are
+ * asset paths (a bundler URL or a public path) the gallery renders.
+ */
+export interface SeedImage {
+  id: string;
+  file: string;
+  thumb?: string;
+  label?: string;
+}
+
+/**
  * An example, as a manifest: model + code + optional LLM wiring. Everything
  * else — the tool manifest, the prompts, the job types, the forms — the runner
  * derives from the model.
@@ -143,6 +179,23 @@ export interface ExampleDef {
    * for a model with an agent.
    */
   scriptedAgent?: string;
+  /**
+   * Opt-in image input for this example (contract B). When present, the runner
+   * renders an image start affordance — a gallery of `seedImages` plus an
+   * "upload your own photo" control — instead of only the ordinary start form,
+   * and threads the chosen image to `helpers.vision`/`helpers.image`. Purely
+   * additive: an example without `imageInput` renders its start form unchanged.
+   */
+  imageInput?: { seedImages: SeedImage[]; label?: string };
+  /**
+   * Per-example deterministic vision ground truth (contract B) — the direct
+   * analogue of `scriptedAgent` for the vision seam. A `seedImageId -> plate`
+   * (image id → expected text) map the runner injects into a `scripted-vision`
+   * brain (see `brains/vision.ts`) to build `helpers.vision`'s fallback when no
+   * live browser-vision brain is connected. The example only supplies this
+   * data; the runner owns the threading. Optional/additive.
+   */
+  scriptedVision?: Record<string, string>;
   /**
    * Prompt (and other) text assets, by template name, substituted into `bpmn`
    * as `{{name}}` placeholders before both deploy and `parseModel` — see
