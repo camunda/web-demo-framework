@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "probe": "node tools/probe/index.mjs",
     "eval": "node --import ./tools/eval/register.mjs tools/eval/index.mjs",
+    "eval:vision": "node tools/eval-vision/index.mjs",
     "spike:urban": "node --experimental-strip-types tools/spike-urban-bojtos/demo.ts",
     "budget": "node tools/bundle-budget/check.mjs"
   },
