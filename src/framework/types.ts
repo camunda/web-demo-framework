@@ -4,7 +4,16 @@ import type { TourDef } from "./tour/types";
 
 /** A line in the run's activity log. */
 export interface TraceEntry {
-  kind: "start" | "agent" | "llm" | "tool" | "human" | "done" | "error" | "vars";
+  kind:
+    | "start"
+    | "agent"
+    | "llm"
+    | "tool"
+    | "human"
+    | "done"
+    | "error"
+    | "vars"
+    | "step";
   text: string;
   /**
    * Stable id for an entry that updates in place — a streaming completion grows

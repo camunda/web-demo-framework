@@ -241,6 +241,9 @@ body {
   color: #dc2626;
   font-weight: 600;
 }
+.log-step {
+  color: #0e7490;
+}
 
 /* Trace timeline (see ui/TraceTimeline.tsx) — reuses the .log-* colours
    above for the ungrouped rows, adding turn-card structure on top. */

@@ -261,7 +261,7 @@ export function TraceTimeline({
 
         <div className="timeline" ref={scrollRef}>
           {rows.length === 0 ? (
-            <div className="log-empty">Press Run to start.</div>
+            <div className="log-empty">Press Run or Step to start.</div>
           ) : (
             rows.map((row) =>
               isTurnGroup(row) ? (
