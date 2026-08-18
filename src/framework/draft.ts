@@ -127,6 +127,9 @@ export function buildDraftRunDefinition(
   const defaultSourceOf = new Map(example.handlers.map((h) => [h.elementId, h.source]));
   const handlers: Record<string, ExampleHandler> = {};
   for (const task of allTasks) {
+    // A compound tool (embedded sub-process / call activity) has no job type of
+    // its own — the engine drives its inner flow — so it never needs a handler.
+    if (task.compound) continue;
     const source = sources[task.elementId] ?? defaultSourceOf.get(task.elementId);
     if (source === undefined) {
       diagnostics.push({

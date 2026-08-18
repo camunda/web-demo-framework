@@ -133,6 +133,10 @@ export function buildWorkers(
   const labels = new Map(allTasks.map((t) => [t.elementId, t.label]));
 
   for (const task of allTasks) {
+    // A compound tool (embedded sub-process / call activity) carries no single
+    // job type — its inner flow is engine-driven — so there is nothing to
+    // register a job worker against.
+    if (task.compound) continue;
     if (workers[task.jobType]) continue; // one wrapper per job type
     workers[task.jobType] = async (job) => {
       const handler = byElement[job.elementId];

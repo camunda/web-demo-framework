@@ -46,7 +46,11 @@ process — it notices the model has no agent.
 author never restates any of this in code:
 
 - **Tools** — the ad-hoc sub-process's children, with their `name` and
-  `<bpmn:documentation>` as the description shown to the model.
+  `<bpmn:documentation>` as the description shown to the model. A tool can be a
+  job-typed element (service/script task) **or a compound tool** — an embedded
+  `bpmn:subProcess` or `bpmn:callActivity` used as an ad-hoc tool. The model
+  selects a compound tool the same way; the engine drives its inner flow to
+  completion, so it needs no job handler of its own.
 - **Tool arguments** — every `fromAi(toolCall.x, "…", "string")` in a tool's
   input mappings becomes a typed argument in the prompt.
 - **Prompts and turn budget** — `data.systemPrompt.prompt`,

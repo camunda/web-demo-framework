@@ -283,6 +283,117 @@ describe("parseModel", () => {
     const xml = `${BPMN_HEADER}${BPMN_FOOTER}`;
     expect(() => parseModel(xml)).toThrow(/No <bpmn:process>/);
   });
+
+  it("advertises a compound tool (embedded subProcess) with no taskDefinition", () => {
+    const xml = `${BPMN_HEADER}
+    <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
+      <bpmn:adHocSubProcess id="Agent_1" name="Agent">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" />
+        </bpmn:extensionElements>
+        <bpmn:subProcess id="LoanReview" name="Loan decision review">
+          <bpmn:documentation>Escalate a loan to a senior officer for review.</bpmn:documentation>
+          <bpmn:extensionElements>
+            <zeebe:ioMapping>
+              <zeebe:input source="=fromAi(toolCall.amount, &quot;The loan amount.&quot;, &quot;number&quot;)" target="amount" />
+            </zeebe:ioMapping>
+          </bpmn:extensionElements>
+          <bpmn:serviceTask id="OfficerReview" name="Senior officer review">
+            <bpmn:extensionElements>
+              <zeebe:taskDefinition type="officer-review" />
+            </bpmn:extensionElements>
+          </bpmn:serviceTask>
+        </bpmn:subProcess>
+      </bpmn:adHocSubProcess>
+    </bpmn:process>
+    ${BPMN_FOOTER}`;
+    const info = parseModel(xml);
+    // The compound tool is advertised to the model, with its own documentation
+    // and fromAi inputs, independent of any taskDefinition.
+    expect(info.agent?.tools.map((t) => t.elementId)).toEqual(["LoanReview"]);
+    const tool = info.agent?.tools[0];
+    expect(tool).toMatchObject({
+      elementId: "LoanReview",
+      label: "Loan decision review",
+      jobType: "",
+      documentation: "Escalate a loan to a senior officer for review.",
+      compound: true,
+    });
+    expect(tool?.args).toEqual([
+      { name: "amount", description: "The loan amount.", type: "number" },
+    ]);
+    // The compound tool is a task, flagged compound and isTool, with no jobType.
+    const toolTask = info.tasks.find((t) => t.elementId === "LoanReview");
+    expect(toolTask).toMatchObject({ isTool: true, compound: true, jobType: "" });
+    // Its inner service task is a job-bearing task (needs a handler) but is NOT
+    // advertised as a separate tool.
+    const inner = info.tasks.find((t) => t.elementId === "OfficerReview");
+    expect(inner?.jobType).toBe("officer-review");
+    expect(inner?.isTool).toBe(false);
+    expect(inner?.compound).toBeUndefined();
+  });
+
+  it("advertises a callActivity as a compound tool", () => {
+    const xml = `${BPMN_HEADER}
+    <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
+      <bpmn:adHocSubProcess id="Agent_1" name="Agent">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" />
+        </bpmn:extensionElements>
+        <bpmn:callActivity id="Fulfil" name="Fulfil order">
+          <bpmn:documentation>Kick off the fulfilment process.</bpmn:documentation>
+          <bpmn:extensionElements>
+            <zeebe:calledElement processId="fulfilment" />
+            <zeebe:ioMapping>
+              <zeebe:input source="=fromAi(toolCall.orderId, &quot;The order id.&quot;)" target="orderId" />
+            </zeebe:ioMapping>
+          </bpmn:extensionElements>
+        </bpmn:callActivity>
+      </bpmn:adHocSubProcess>
+    </bpmn:process>
+    ${BPMN_FOOTER}`;
+    const info = parseModel(xml);
+    expect(info.agent?.tools).toHaveLength(1);
+    expect(info.agent?.tools[0]).toMatchObject({
+      elementId: "Fulfil",
+      jobType: "",
+      compound: true,
+    });
+    expect(info.agent?.tools[0].args).toEqual([
+      { name: "orderId", description: "The order id.", type: "string" },
+    ]);
+  });
+
+  it("advertises compound and job tools side by side under one host", () => {
+    const xml = `${BPMN_HEADER}
+    <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
+      <bpmn:adHocSubProcess id="Agent_1" name="Agent">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" />
+        </bpmn:extensionElements>
+        <bpmn:serviceTask id="Lookup" name="Lookup">
+          <bpmn:extensionElements>
+            <zeebe:taskDefinition type="lookup-job" />
+          </bpmn:extensionElements>
+        </bpmn:serviceTask>
+        <bpmn:subProcess id="Review" name="Review">
+          <bpmn:serviceTask id="Inner" name="Inner">
+            <bpmn:extensionElements>
+              <zeebe:taskDefinition type="inner-job" />
+            </bpmn:extensionElements>
+          </bpmn:serviceTask>
+        </bpmn:subProcess>
+      </bpmn:adHocSubProcess>
+    </bpmn:process>
+    ${BPMN_FOOTER}`;
+    const info = parseModel(xml);
+    expect(info.agent?.tools.map((t) => t.elementId).sort()).toEqual(["Lookup", "Review"]);
+    const job = info.agent?.tools.find((t) => t.elementId === "Lookup");
+    expect(job).toMatchObject({ jobType: "lookup-job" });
+    expect(job?.compound).toBeUndefined();
+    const compound = info.agent?.tools.find((t) => t.elementId === "Review");
+    expect(compound).toMatchObject({ jobType: "", compound: true });
+  });
 });
 
 describe("feelLiteralText", () => {

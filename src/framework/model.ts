@@ -35,11 +35,24 @@ export interface ToolSpec {
   elementId: string;
   /** The element's `name`, for display. */
   label: string;
-  /** The job type the engine emits for it. */
+  /**
+   * The job type the engine emits for it, or `""` for a {@link ToolSpec.compound}
+   * tool — an embedded sub-process / call activity has no single job type of its
+   * own, since its activation runs an inner flow rather than one job.
+   */
   jobType: string;
   /** `<bpmn:documentation>` — what this tool is for, shown to the model. */
   documentation: string;
   args: ToolArg[];
+  /**
+   * True for a **compound tool**: an embedded `bpmn:subProcess` or a
+   * `bpmn:callActivity` used as an ad-hoc tool. Zeebe treats these as valid
+   * ad-hoc tool kinds alongside job-typed elements. Unlike a job tool, a
+   * compound tool carries no `zeebe:taskDefinition`; the model still selects it
+   * by id and supplies its `fromAi(...)` inputs, and the engine drives its inner
+   * flow to completion — so no per-element job handler is registered for it.
+   */
+  compound?: boolean;
 }
 
 /** The ad-hoc sub-process hosting the agent, plus its prompts and limits. */
@@ -81,6 +94,13 @@ export interface TaskSpec {
   documentation: string;
   /** True when this element is a tool inside the agent's ad-hoc sub-process. */
   isTool: boolean;
+  /**
+   * True for a **compound tool** (an embedded sub-process / call activity used
+   * as an ad-hoc tool). It carries no job type of its own — its inner flow is
+   * engine-driven — so it never needs a handler and is not dispatched by job
+   * type, even though it is still surfaced as a tool. Its `jobType` is `""`.
+   */
+  compound?: boolean;
 }
 
 /** A `userTask` — a human step the runner renders a form for. */
@@ -229,7 +249,27 @@ function attributeValues(el: Element): string {
  * arrives with no arguments.
  */
 export function parseFromAiArgs(el: Element): ToolArg[] {
-  const xml = attributeValues(el);
+  return argsFromText(attributeValues(el));
+}
+
+/**
+ * The `fromAi(...)` arguments declared by a **compound tool** (embedded
+ * sub-process / call activity): read only from the tool activity's *own*
+ * extension elements (its `zeebe:ioMapping`), never from the inner flow nodes
+ * it contains. Those inner elements resolve their own inputs from the tool's
+ * activation at run time — they are not arguments the model supplies — so
+ * walking the whole subtree (as {@link parseFromAiArgs} does for a leaf job
+ * tool) would wrongly advertise them as tool arguments.
+ */
+export function parseCompoundFromAiArgs(el: Element): ToolArg[] {
+  const ext = Array.from(el.children).find(
+    (c) => c.namespaceURI === BPMN_NS && c.localName === "extensionElements",
+  );
+  return ext ? argsFromText(attributeValues(ext)) : [];
+}
+
+/** Extract `fromAi(...)` declarations from already-unserialized attribute text. */
+function argsFromText(xml: string): ToolArg[] {
   const re =
     /fromAi\(\s*toolCall\.([A-Za-z_$][\w$]*)\s*,\s*"((?:[^"\\]|\\.)*)"\s*(?:,\s*"(\w+)")?/g;
   const args: ToolArg[] = [];
@@ -274,6 +314,36 @@ function agentHostsOf(process: Element): Element[] {
   );
 }
 
+/**
+ * BPMN activity kinds that can be used as a **compound tool** — an ad-hoc tool
+ * whose activation runs an inner flow rather than emitting a single job. These
+ * mirror the engine's ad-hoc activity kinds (`AdHocSubProcessTransformer`:
+ * `SUB_PROCESS`, `AD_HOC_SUB_PROCESS`, `CALL_ACTIVITY`). An `adHocSubProcess`
+ * only qualifies when it is not itself an AI Agent host.
+ */
+const COMPOUND_TOOL_LOCALS = new Set(["subProcess", "adHocSubProcess", "callActivity"]);
+
+/** Sub-process families that own the flow nodes nested directly within them. */
+const SUBPROCESS_CONTAINER_LOCALS = new Set(["adHocSubProcess", "subProcess", "transaction"]);
+
+/**
+ * The nearest enclosing sub-process-family activity of `el`, or null when `el`
+ * sits at the process root. This is what makes a node a tool of exactly one
+ * host: a node is a tool only when its immediate container *is* an agent host,
+ * so a node nested inside a compound tool (whose container is that compound
+ * sub-process, not the host) is an internal step of the tool, not a tool in its
+ * own right. It also picks the innermost host when hosts nest.
+ */
+function enclosingContainer(el: Element): Element | null {
+  let cur: Element | null = el.parentElement;
+  while (cur) {
+    if (cur.namespaceURI === BPMN_NS && SUBPROCESS_CONTAINER_LOCALS.has(cur.localName))
+      return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 function agentSpecOf(adHoc: Element, tools: ToolSpec[]): AgentSpec {
   const inputs = inputsOf(adHoc);
   const maxCalls = Number(
@@ -316,15 +386,38 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
   for (const el of Array.from(process.getElementsByTagName("*"))) {
     if (el.namespaceURI !== BPMN_NS) continue;
     if (agentHosts.includes(el)) continue;
-    const jobType = jobTypeOf(el);
     const id = el.getAttribute("id");
-    if (!jobType || !id) continue;
-    // A tool nested inside two AI Agent hosts (one inside another) matches
-    // `.contains()` for both; attribute it to the innermost one — the
-    // candidate every other containing candidate also contains — not
-    // whichever comes first in document order.
-    const containing = agentHosts.filter((h) => h.contains(el));
-    const host = containing.find((h) => containing.every((other) => other === h || other.contains(h)));
+    if (!id) continue;
+
+    // The host this element is a *tool* of — the agent host that immediately
+    // contains it. A node whose immediate container is a compound tool (an
+    // embedded sub-process / call activity used as a tool) is an internal step
+    // of that tool, not a tool in its own right, so it is never advertised.
+    // When hosts nest, the immediate container is the innermost host.
+    const container = enclosingContainer(el);
+    const host = container && agentHosts.includes(container) ? container : null;
+
+    // A compound tool: an embedded sub-process / call activity nested directly
+    // in an agent host, advertised independent of any zeebe:taskDefinition. It
+    // has no single job type — its inner flow is engine-driven — so it is never
+    // dispatched to a handler.
+    if (host && COMPOUND_TOOL_LOCALS.has(el.localName)) {
+      const label = el.getAttribute("name") ?? id;
+      const documentation = documentationOf(el);
+      tasks.push({ elementId: id, label, jobType: "", documentation, isTool: true, compound: true });
+      toolsByHost.get(host)!.push({
+        elementId: id,
+        label,
+        jobType: "",
+        documentation,
+        args: parseCompoundFromAiArgs(el),
+        compound: true,
+      });
+      continue;
+    }
+
+    const jobType = jobTypeOf(el);
+    if (!jobType) continue;
     const spec: TaskSpec = {
       elementId: id,
       label: el.getAttribute("name") ?? id,
