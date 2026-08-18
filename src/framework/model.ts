@@ -323,7 +323,19 @@ function agentHostsOf(process: Element): Element[] {
  */
 const COMPOUND_TOOL_LOCALS = new Set(["subProcess", "adHocSubProcess", "callActivity"]);
 
-/** Sub-process families that own the flow nodes nested directly within them. */
+/**
+ * Sub-process families that own the flow nodes nested directly within them, so
+ * a node's *immediate* container — not merely some ancestor host — decides which
+ * host it is a tool of. This is a superset of `COMPOUND_TOOL_LOCALS` on purpose:
+ * `transaction` is a structural container (it owns its inner flow nodes, which
+ * are therefore internal steps, never direct-child tools of an enclosing host)
+ * but is deliberately *not* a compound tool. Zeebe does not support transaction
+ * sub-processes, so the engine can neither activate a `<bpmn:transaction>` as an
+ * ad-hoc tool nor individually activate an activity buried inside one; treating
+ * it as an opaque, non-advertised boundary keeps both out of the tool set.
+ * (`callActivity` is the mirror case — a compound tool with no inline children,
+ * so it is in `COMPOUND_TOOL_LOCALS` but not here.)
+ */
 const SUBPROCESS_CONTAINER_LOCALS = new Set(["adHocSubProcess", "subProcess", "transaction"]);
 
 /**
