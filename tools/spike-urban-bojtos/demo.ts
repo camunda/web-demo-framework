@@ -36,7 +36,7 @@ const repoRoot = path.resolve(here, "..", "..");
  */
 function loadWasm() {
   return readFileSync(
-    path.join(repoRoot, "node_modules", "@nanobpm", "engine-wasm", "nanobpmn_engine_bg.wasm"),
+    path.join(repoRoot, "node_modules", "@nanobpm", "engine-wasm", "lean", "nanobpmn_engine_bg.wasm"),
   );
 }
 

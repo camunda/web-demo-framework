@@ -6,9 +6,11 @@ its docs. Handing someone an example built on an unsupported BPMN construct
 wastes the task and fails as a mysterious browser stall; this table exists so
 that decision is made up front, in seconds, on the command line.
 
-**Engine version this report targets:** `@nanobpm/engine-wasm@0.3.0` (via
-`@nanobpm/bojtos-kit@0.4.0`), the version pinned in `package.json` at the time
-this report was produced.
+**Engine version this report targets:** whatever `@nanobpm/engine-wasm` version
+is pinned in `package.json` (currently `^0.7.1`, consumed via
+`@nanobpm/bojtos-kit`). This report is re-run and diffed on every engine bump
+(see below), so it always describes the currently-pinned engine rather than a
+frozen version number.
 
 **Re-run and diff when the engine updates:**
 
@@ -70,9 +72,12 @@ doesn't build.
 
 Issue #15 asked for a DMN business-rule example to be brought into the repo,
 contingent on DMN evaluation working end-to-end. It does not, and this section
-records the independent re-verification (engine version unchanged at
-`@nanobpm/engine-wasm@0.3.0` / `@nanobpm/bojtos-kit@0.4.0`) done for that task,
-confirming the row above rather than superseding it.
+records the independent re-verification (done at the time against the
+then-pinned `@nanobpm/engine-wasm@0.3.0` / `@nanobpm/bojtos-kit@0.4.0`)
+confirming the row above rather than superseding it. The finding still holds on
+the currently-pinned engine — the coverage harness continues to report the same
+"no deployed decision" incident (there is still no `.dmn` deploy path in this
+repo's tooling).
 
 Re-running the existing fixture reproduces the same incident:
 

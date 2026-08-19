@@ -13,7 +13,7 @@ import { createBojtosSession, dispatchRound } from "@nanobpm/bojtos-kit";
 
 const wasm = readFileSync(
   new URL(
-    "../node_modules/@nanobpm/engine-wasm/nanobpmn_engine_bg.wasm",
+    "../node_modules/@nanobpm/engine-wasm/lean/nanobpmn_engine_bg.wasm",
     import.meta.url,
   ),
 );
