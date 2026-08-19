@@ -24,24 +24,19 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createBojtosEngineClient, type EngineJob } from "./BojtosEngineClient.ts";
+import { loadLeanWasm } from "../wasm-path.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..", "..");
 
 /**
  * Read the engine wasm bytes explicitly from node_modules — the default
  * `import.meta.url` loader `@nanobpm/bojtos-kit`/`@nanobpm/engine-wasm` use
- * under a bundler doesn't resolve under plain Node (same trap `tools/probe`
- * works around; see its `loadWasm`).
+ * under a bundler doesn't resolve under plain Node. Resolved via the shared
+ * `tools/wasm-path.mjs` (single source of truth; see its comment) so this
+ * script can't drift from `tools/probe` on the next layout change.
  */
-function loadWasm() {
-  return readFileSync(
-    path.join(repoRoot, "node_modules", "@nanobpm", "engine-wasm", "nanobpmn_engine_bg.wasm"),
-  );
-}
-
 async function main() {
-  const client = await createBojtosEngineClient({ wasm: loadWasm() });
+  const client = await createBojtosEngineClient({ wasm: loadLeanWasm() });
   const trace: string[] = [];
 
   const bpmn = readFileSync(path.join(here, "fixtures", "greet.bpmn"), "utf8");

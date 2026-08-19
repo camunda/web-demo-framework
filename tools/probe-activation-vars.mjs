@@ -10,13 +10,9 @@
 //   node tools/probe-activation-vars.mjs
 import { readFileSync } from "node:fs";
 import { createBojtosSession, dispatchRound } from "@nanobpm/bojtos-kit";
+import { loadLeanWasm } from "./wasm-path.mjs";
 
-const wasm = readFileSync(
-  new URL(
-    "../node_modules/@nanobpm/engine-wasm/nanobpmn_engine_bg.wasm",
-    import.meta.url,
-  ),
-);
+const wasm = loadLeanWasm();
 const xml = readFileSync(
   new URL("./fixtures/activation-vars.bpmn", import.meta.url),
   "utf8",
