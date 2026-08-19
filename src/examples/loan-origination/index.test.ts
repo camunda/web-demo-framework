@@ -211,6 +211,14 @@ describe("QueryCustomer handler", () => {
   });
 });
 
+describe("UpdateApplicationStatus handler", () => {
+  it("writes the case back as under-review (the governance state the officer picks up)", async () => {
+    const out = await runHandler("UpdateApplicationStatus", { applicantName: "Ada Lovelace" });
+    expect(out.applicationStatus).toBe("under-review");
+    expect(out.toolCallResult).toBe("under-review");
+  });
+});
+
 describe("trunk handlers", () => {
   it("IssueLoanOffer prices the approved loan with a positive monthly repayment", async () => {
     const out = await runHandler("IssueLoanOffer", { loanAmount: 20000, riskBand: "low" });

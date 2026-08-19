@@ -53,7 +53,7 @@
         </bpmn:extensionElements>
       </bpmn:serviceTask>
       <bpmn:scriptTask id="AssessApplication" name="Assess application">
-        <bpmn:documentation>Applies the lender's deterministic underwriting policy — computes the debt-to-income ratio, a risk band, and a recommend/decline recommendation from the verified application figures. This is the policy step the senior officer's review depends on.</bpmn:documentation>
+        <bpmn:documentation>Applies the lender's deterministic underwriting policy — computes the debt-to-income ratio, a risk band, and an approve/decline recommendation from the verified application figures. This is the policy step the senior officer's review depends on.</bpmn:documentation>
         <bpmn:extensionElements>
           <zeebe:script expression="=recommendation" resultVariable="recommendation" />
         </bpmn:extensionElements>
