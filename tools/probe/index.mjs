@@ -24,9 +24,7 @@ import path from "node:path";
 import { createBojtosSession, dispatchRound } from "@nanobpm/bojtos-kit";
 import { parseXml } from "./xml.mjs";
 import { analyzeModel } from "./model.mjs";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..", "..");
+import { loadLeanWasm } from "../wasm-path.mjs";
 
 function parseArgs(argv) {
   const args = { seed: "{}", files: [] };
@@ -46,23 +44,11 @@ function parseArgs(argv) {
 /**
  * Read the engine wasm bytes explicitly from node_modules — the default
  * `import.meta.url` loader `@nanobpm/bojtos-kit`/`@nanobpm/engine-wasm` use
- * under a bundler doesn't resolve under plain Node.
- *
- * engine-wasm 0.5.0+ split the binary into `lean/` and `readmodel/` subpaths
- * and dropped the root `nanobpmn_engine_bg.wasm`; the probe drives the lean
- * engine (`createBojtosSession({ wasm })`), so it reads the `lean/` binary.
+ * under a bundler doesn't resolve under plain Node. Path lives in the shared
+ * `tools/wasm-path.mjs` so every raw-wasm loader resolves the same binary
+ * (re-exported here for the callers that import it from this module).
  */
-export function loadWasm() {
-  const wasmPath = path.join(
-    repoRoot,
-    "node_modules",
-    "@nanobpm",
-    "engine-wasm",
-    "lean",
-    "nanobpmn_engine_bg.wasm",
-  );
-  return readFileSync(wasmPath);
-}
+export { loadLeanWasm as loadWasm };
 
 /**
  * A stub agent handler: on its first turn it activates every tool belonging
@@ -147,7 +133,7 @@ export async function probe(file, seedJson, workerOverrides = {}) {
   const tree = parseXml(xml);
   const analysis = analyzeModel(tree);
 
-  const wasm = loadWasm();
+  const wasm = loadLeanWasm();
 
   const session = await createBojtosSession({ wasm });
   try {

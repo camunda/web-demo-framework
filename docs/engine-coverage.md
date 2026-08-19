@@ -7,9 +7,10 @@ wastes the task and fails as a mysterious browser stall; this table exists so
 that decision is made up front, in seconds, on the command line.
 
 **Engine version this report targets:** whatever `@nanobpm/engine-wasm` version
-is pinned in `package.json` (currently `^0.7.1`, consumed via
-`@nanobpm/bojtos-kit`). This report is re-run and diffed on every engine bump
-(see below), so it always describes the currently-pinned engine rather than a
+`package.json` declares — a semver range, currently `^0.7.1`, consumed via
+`@nanobpm/bojtos-kit`, so the installed engine is the highest patch/minor that
+range admits. This report is re-run and diffed on every engine bump (see
+below), so it always describes the currently-installed engine rather than a
 frozen version number.
 
 **Re-run and diff when the engine updates:**

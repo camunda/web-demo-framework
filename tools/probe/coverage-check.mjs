@@ -50,8 +50,10 @@ async function runCompensationRejection() {
     session.deploy(xml);
     record(name, false, "unexpectedly deployed — compensation may now be modelled; restore runGenericFixture and update the coverage doc (#886)");
   } catch (e) {
-    const msg = String(e);
-    const rejected = /compensateEventDefinition/.test(msg) && /does not model this construct/.test(msg);
+    const msg = e instanceof Error ? e.message : String(e);
+    const rejected =
+      /compensateEventDefinition/.test(msg) &&
+      /(does not model this construct|unsupported element)/i.test(msg);
     record(name, rejected, rejected ? "deploy correctly rejected: unsupported <compensateEventDefinition>" : `deploy threw unexpectedly: ${msg.slice(0, 120)}`);
   } finally {
     session.free();
