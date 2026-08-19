@@ -47,6 +47,10 @@ function parseArgs(argv) {
  * Read the engine wasm bytes explicitly from node_modules — the default
  * `import.meta.url` loader `@nanobpm/bojtos-kit`/`@nanobpm/engine-wasm` use
  * under a bundler doesn't resolve under plain Node.
+ *
+ * engine-wasm 0.5.0+ split the binary into `lean/` and `readmodel/` subpaths
+ * and dropped the root `nanobpmn_engine_bg.wasm`; the probe drives the lean
+ * engine (`createBojtosSession({ wasm })`), so it reads the `lean/` binary.
  */
 export function loadWasm() {
   const wasmPath = path.join(
@@ -54,6 +58,7 @@ export function loadWasm() {
     "node_modules",
     "@nanobpm",
     "engine-wasm",
+    "lean",
     "nanobpmn_engine_bg.wasm",
   );
   return readFileSync(wasmPath);

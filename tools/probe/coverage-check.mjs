@@ -36,6 +36,28 @@ async function runGenericFixture(name, file) {
   return report;
 }
 
+// Compensation is not modelled yet (Magikcraft/nano-bpm#886). The engine's
+// deploy-validation parity (#850) correctly *rejects* `compensateEventDefinition`
+// rather than silently degrading it — so the honest coverage assertion today is
+// "deploy is rejected with UnsupportedElement", not "it runs". Flip this back to
+// runGenericFixture once #886 lands and the fixture actually executes.
+async function runCompensationRejection() {
+  const name = "compensation (rejected at deploy — not modelled, #886)";
+  const xml = readFileSync(path.join(fixturesDir, "compensation.bpmn"), "utf8");
+  const wasm = loadWasm();
+  const session = await createBojtosSession({ wasm });
+  try {
+    session.deploy(xml);
+    record(name, false, "unexpectedly deployed — compensation may now be modelled; restore runGenericFixture and update the coverage doc (#886)");
+  } catch (e) {
+    const msg = String(e);
+    const rejected = /compensateEventDefinition/.test(msg) && /does not model this construct/.test(msg);
+    record(name, rejected, rejected ? "deploy correctly rejected: unsupported <compensateEventDefinition>" : `deploy threw unexpectedly: ${msg.slice(0, 120)}`);
+  } finally {
+    session.free();
+  }
+}
+
 async function runErrorBoundaryFixture() {
   const file = path.join(fixturesDir, "error-boundary.bpmn");
   const xml = readFileSync(file, "utf8");
@@ -119,7 +141,7 @@ async function main() {
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
   await runGenericFixture("message correlation", "message.bpmn");
   await runGenericFixture("signal broadcast", "signal.bpmn");
-  await runGenericFixture("compensation (throw + boundary handler)", "compensation.bpmn");
+  await runCompensationRejection();
   await runMultiInstanceFixture();
   await runErrorBoundaryFixture();
   await runDmnFixture();
