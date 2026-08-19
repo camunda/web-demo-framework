@@ -1,0 +1,68 @@
+{
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "exporter": { "name": "Camunda Web Modeler", "version": "9b5d5ef" },
+  "schemaVersion": 19,
+  "id": "loan-application",
+  "type": "default",
+  "components": [
+    {
+      "text": "# Loan application\n\nCapture the applicant's details, then run the origination agent.",
+      "type": "text",
+      "layout": { "row": "Row_heading", "columns": null },
+      "id": "Field_Heading"
+    },
+    {
+      "label": "Applicant name",
+      "type": "textfield",
+      "layout": { "row": "Row_applicant", "columns": null },
+      "id": "Field_ApplicantName",
+      "key": "applicantName",
+      "defaultValue": "Ada Lovelace",
+      "validate": { "required": true }
+    },
+    {
+      "label": "Loan amount",
+      "description": "Amount requested.",
+      "type": "number",
+      "layout": { "row": "Row_amount", "columns": null },
+      "id": "Field_LoanAmount",
+      "key": "loanAmount",
+      "defaultValue": 20000
+    },
+    {
+      "label": "Loan purpose",
+      "type": "textfield",
+      "layout": { "row": "Row_purpose", "columns": null },
+      "id": "Field_LoanPurpose",
+      "key": "loanPurpose",
+      "defaultValue": "Home improvement"
+    },
+    {
+      "label": "Annual income",
+      "type": "number",
+      "layout": { "row": "Row_income", "columns": null },
+      "id": "Field_AnnualIncome",
+      "key": "annualIncome",
+      "defaultValue": 96000
+    },
+    {
+      "label": "Monthly debt payments",
+      "description": "Existing monthly repayments across all obligations.",
+      "type": "number",
+      "layout": { "row": "Row_debt", "columns": null },
+      "id": "Field_MonthlyDebt",
+      "key": "monthlyDebt",
+      "defaultValue": 850
+    },
+    {
+      "label": "Stated credit score",
+      "description": "The applicant's self-reported score; the credit bureau tool confirms it.",
+      "type": "number",
+      "layout": { "row": "Row_score", "columns": null },
+      "id": "Field_CreditScore",
+      "key": "creditScore",
+      "defaultValue": 782
+    }
+  ]
+}

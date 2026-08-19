@@ -1,0 +1,1 @@
+Gather this loan case for the senior officer: look up the customer, pull their credit bureau report, run the underwriting assessment, and set the application status to under review. Then stop — the officer makes the decision.

@@ -1,0 +1,42 @@
+{
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "exporter": { "name": "Camunda Web Modeler", "version": "9b5d5ef" },
+  "schemaVersion": 19,
+  "id": "loan-senior-officer-review",
+  "type": "default",
+  "components": [
+    {
+      "text": "# Senior officer review\n\nEvery application reaches this desk before an offer or a decline can be sent. Review the agent's findings, then record your decision.",
+      "type": "text",
+      "layout": { "row": "Row_heading", "columns": null },
+      "id": "Field_ReviewHeading"
+    },
+    {
+      "text": "**Applicant:** {{applicantName}} — {{loanPurpose}}, amount {{loanAmount}}\n\n**Customer relationship:** {{if customerProfile = null then \"unknown\" else customerProfile.segment + \" (\" + string(customerProfile.relationshipYears) + \"y)\"}}\n\n**Credit bureau:** {{if bureauReport = null then \"n/a\" else string(bureauReport.score) + \" (\" + bureauReport.band + \"), \" + string(bureauReport.derogatoryMarks) + \" derogatory mark(s)\"}}\n\n**Debt-to-income:** {{debtToIncome}}%\n\n**Assessed risk band:** {{riskBand}}\n\n**Policy recommendation:** {{recommendation}}",
+      "type": "text",
+      "layout": { "row": "Row_findings", "columns": null },
+      "id": "Field_ReviewFindings"
+    },
+    {
+      "label": "Decision",
+      "values": [
+        { "label": "Approve — issue loan offer", "value": "approved" },
+        { "label": "Decline — send decline notice", "value": "declined" }
+      ],
+      "type": "radio",
+      "layout": { "row": "Row_decision", "columns": null },
+      "id": "Field_Decision",
+      "key": "decision",
+      "validate": { "required": true }
+    },
+    {
+      "label": "Officer note",
+      "description": "Recorded against the application; the decline notice quotes it as the reason.",
+      "type": "textarea",
+      "layout": { "row": "Row_note", "columns": null },
+      "id": "Field_ReviewNote",
+      "key": "reviewNote"
+    }
+  ]
+}
