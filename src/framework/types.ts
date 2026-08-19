@@ -163,6 +163,16 @@ export interface ExampleDef {
    * docs page exists.
    */
   docsUrl?: string;
+  /**
+   * Which gallery section this example belongs to. `"scenario"` (the
+   * default, used when this field is absent) is the existing hand-built
+   * demos; `"learn-bpmn"` is the "one runnable page per BPMN construct"
+   * gallery from issue #64, auto-discovered by `src/examples/index.ts` (see
+   * the `import.meta.glob` there) rather than hand-listed. Optional and
+   * additive: every existing example needs zero changes and keeps rendering
+   * in the scenario section as before.
+   */
+  group?: "scenario" | "learn-bpmn";
   /** The BPMN XML. */
   bpmn: string;
   /** Camunda `.form` schemas by form id, for the start and user-task forms. */
