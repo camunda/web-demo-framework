@@ -225,11 +225,13 @@ function TextBrain({ brain }: { brain: BrainControls }) {
                     placeholder={
                       brain.endpointModelsStatus === "loading"
                         ? "Loading models…"
-                        : brain.endpointModelsStatus === "error"
-                          ? "No models — check the endpoint"
-                          : brain.endpointModels.length === 0
-                            ? "No models served"
-                            : "Select a model"
+                        : brain.endpointModelsStatus === "idle"
+                          ? "Enter an endpoint above"
+                          : brain.endpointModelsStatus === "error"
+                            ? "No models — check the endpoint"
+                            : brain.endpointModels.length === 0
+                              ? "No models served"
+                              : "Select a model"
                     }
                   />
                 </SelectTrigger>

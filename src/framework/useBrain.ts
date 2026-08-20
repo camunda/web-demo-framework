@@ -160,6 +160,10 @@ export function useBrain(): BrainControls {
   const [vision, setVision] = useState<VisionFn | null>(null);
   const visionBrainRef = useRef<BrowserVisionBrain | null>(null);
   const pickedVisionDefault = useRef(false);
+  // Monotonic token so a slow /models fetch that resolves after a newer one
+  // (endpoint/key changed, or Refresh clicked again) can't overwrite the fresh
+  // result with stale data.
+  const endpointModelsSeq = useRef(0);
 
   /**
    * Wraps a brain's `chat` so a fatal failure mid-run is visible.
@@ -308,6 +312,8 @@ export function useBrain(): BrainControls {
    * pick is blank or no longer offered.
    */
   const listEndpointModels = useCallback(async () => {
+    const seq = ++endpointModelsSeq.current;
+    const isStale = () => seq !== endpointModelsSeq.current;
     const blocked = localEndpointBlockedReason(endpointUrl);
     if (blocked) {
       setEndpointModels([]);
@@ -320,12 +326,14 @@ export function useBrain(): BrainControls {
     const brain = new EndpointBrain(endpointUrl, apiKey);
     try {
       const ids = await brain.listModels();
+      if (isStale()) return;
       setEndpointModels(ids);
       setEndpointModelsStatus("ready");
       setEndpointModel((current) =>
         current && ids.includes(current) ? current : (ids[0] ?? ""),
       );
     } catch (e) {
+      if (isStale()) return;
       setEndpointModels([]);
       setEndpointModel("");
       setEndpointModelsStatus("error");
