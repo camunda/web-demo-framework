@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_learn_error_boundary" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.36.1" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.8.0">
+  <bpmn:process id="learn_error_boundary" name="Error boundary event" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" name="Order received">
+      <bpmn:outgoing>Flow_to_guarded</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Activity_guarded" name="Charge payment (guarded)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="charge-payment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_to_guarded</bpmn:incoming>
+      <bpmn:outgoing>Flow_to_unguarded</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <!--
+      This boundary event is the whole point of the page: it attaches to
+      Activity_guarded and catches only the BPMN error whose errorRef is
+      Error_ChargeDeclined below. A job dispatched through this framework's
+      normal drive loop can only complete or fail a job — there is no way for
+      ordinary handler code to reach the engine's throwError command, the one
+      that actually routes a token through this catch instead of raising an
+      incident (see docs/engine-coverage.md). So "Charge payment (guarded)" is
+      wired to a manualControl action in index.ts: the reader chooses, right
+      when the job is reached, between completing it normally and firing the
+      thrown error directly against the session.
+    -->
+    <bpmn:boundaryEvent id="Event_ChargeDeclined" name="Charge declined" attachedToRef="Activity_guarded">
+      <bpmn:outgoing>Flow_caught</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_ChargeDeclined" errorRef="Error_ChargeDeclined" />
+    </bpmn:boundaryEvent>
+    <bpmn:endEvent id="Event_Caught" name="Handled — order cancelled">
+      <bpmn:incoming>Flow_caught</bpmn:incoming>
+    </bpmn:endEvent>
+    <!--
+      Activity_unguarded is deliberately identical in shape to Activity_guarded
+      but has NO boundary event attached. It exists to demonstrate the failure
+      mode this construct guards against: fire the same kind of thrown error
+      here (via its own manualControl action in index.ts) and the engine has
+      nothing to catch it with, so the job raises an incident instead of the
+      token being rerouted. Compare the two outcomes side by side to see what
+      forgetting the boundary event actually costs.
+    -->
+    <bpmn:serviceTask id="Activity_unguarded" name="Ship items (unguarded)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="ship-items" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_to_unguarded</bpmn:incoming>
+      <bpmn:outgoing>Flow_to_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Event_Done" name="Order shipped">
+      <bpmn:incoming>Flow_to_end</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_to_guarded" sourceRef="StartEvent_1" targetRef="Activity_guarded" />
+    <bpmn:sequenceFlow id="Flow_to_unguarded" sourceRef="Activity_guarded" targetRef="Activity_unguarded" />
+    <bpmn:sequenceFlow id="Flow_caught" sourceRef="Event_ChargeDeclined" targetRef="Event_Caught" />
+    <bpmn:sequenceFlow id="Flow_to_end" sourceRef="Activity_unguarded" targetRef="Event_Done" />
+  </bpmn:process>
+  <bpmn:error id="Error_ChargeDeclined" name="Charge declined" errorCode="CHARGE_DECLINED" />
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="learn_error_boundary">
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="182" y="212" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="160" y="255" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_guarded_di" bpmnElement="Activity_guarded">
+        <dc:Bounds x="270" y="190" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_unguarded_di" bpmnElement="Activity_unguarded">
+        <dc:Bounds x="430" y="190" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_Done_di" bpmnElement="Event_Done">
+        <dc:Bounds x="592" y="212" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="570" y="255" width="80" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_ChargeDeclined_di" bpmnElement="Event_ChargeDeclined">
+        <dc:Bounds x="322" y="252" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="299" y="295" width="82" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_Caught_di" bpmnElement="Event_Caught">
+        <dc:Bounds x="322" y="372" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="277" y="415" width="126" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_to_guarded_di" bpmnElement="Flow_to_guarded">
+        <di:waypoint x="218" y="230" />
+        <di:waypoint x="270" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_to_unguarded_di" bpmnElement="Flow_to_unguarded">
+        <di:waypoint x="370" y="230" />
+        <di:waypoint x="430" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_to_end_di" bpmnElement="Flow_to_end">
+        <di:waypoint x="530" y="230" />
+        <di:waypoint x="592" y="230" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_caught_di" bpmnElement="Flow_caught">
+        <di:waypoint x="340" y="288" />
+        <di:waypoint x="340" y="372" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
