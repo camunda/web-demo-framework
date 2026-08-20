@@ -33,6 +33,11 @@ export function App() {
 
   const activeId = route.kind === "example" ? route.id : EXAMPLES[0].id;
   const example = EXAMPLES.find((e) => e.id === activeId) ?? EXAMPLES[0];
+  // Split the gallery nav by `group` — existing scenario examples (no
+  // `group`, or `group: "scenario"`) render exactly as before; `learn-bpmn`
+  // examples get their own visibly-labelled section.
+  const scenarioExamples = EXAMPLES.filter((e) => e.group !== "learn-bpmn");
+  const learnBpmnExamples = EXAMPLES.filter((e) => e.group === "learn-bpmn");
 
   const goToExample = (id: string) => {
     navigate(examplePath(id), { hash: location.hash });
@@ -41,18 +46,37 @@ export function App() {
   const body = (
     <>
       {!embed && route.kind === "gallery" && (
-        <nav className="example-picker">
-          {EXAMPLES.map((e) => (
-            <Button
-              key={e.id}
-              size="sm"
-              variant={e.id === example.id ? "default" : "secondary"}
-              onClick={() => goToExample(e.id)}
-            >
-              {e.title}
-            </Button>
-          ))}
-        </nav>
+        <>
+          <nav className="example-picker">
+            {scenarioExamples.map((e) => (
+              <Button
+                key={e.id}
+                size="sm"
+                variant={e.id === example.id ? "default" : "secondary"}
+                onClick={() => goToExample(e.id)}
+              >
+                {e.title}
+              </Button>
+            ))}
+          </nav>
+          {learnBpmnExamples.length > 0 && (
+            <>
+              <h2 className="example-group-heading">Learn BPMN</h2>
+              <nav className="example-picker">
+                {learnBpmnExamples.map((e) => (
+                  <Button
+                    key={e.id}
+                    size="sm"
+                    variant={e.id === example.id ? "default" : "secondary"}
+                    onClick={() => goToExample(e.id)}
+                  >
+                    {e.title}
+                  </Button>
+                ))}
+              </nav>
+            </>
+          )}
+        </>
       )}
       {!embed && route.kind === "example" && (
         <div className="example-nav">
