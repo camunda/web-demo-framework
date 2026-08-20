@@ -34,10 +34,12 @@ describe("BPMN model", () => {
   });
 
   it("declares exactly one timer catch event with a timeDuration", () => {
-    expect(learnTimerCatchEvent.bpmn).toContain("<bpmn:intermediateCatchEvent");
-    expect(learnTimerCatchEvent.bpmn).toContain("<bpmn:timerEventDefinition");
-    expect(learnTimerCatchEvent.bpmn).toContain("<bpmn:timeDuration");
-    expect(learnTimerCatchEvent.bpmn).toContain("PT3S");
+    const count = (needle: string) =>
+      learnTimerCatchEvent.bpmn.split(needle).length - 1;
+    expect(count("<bpmn:intermediateCatchEvent")).toBe(1);
+    expect(count("<bpmn:timerEventDefinition")).toBe(1);
+    expect(count("<bpmn:timeDuration")).toBe(1);
+    expect(count("PT3S")).toBe(1);
   });
 
   it("supplies a handler for every service/script task in the model", () => {
