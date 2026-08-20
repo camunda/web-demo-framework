@@ -413,7 +413,31 @@ export function ExampleRunner({
           });
           break;
         }
-        if (round.handled === 0) break;
+        if (round.handled === 0) {
+          // A round with nothing to dispatch because every live instance is
+          // waiting on a signal is not actually stuck — a signal broadcast
+          // (`session.broadcastSignal`) unblocks every open subscription for
+          // it, exactly like `advanceTimers` fires a due timer above. Without
+          // this, a signal-catch construct would settle "Paused" forever
+          // instead of completing from a single Run click.
+          if (round.reason === "signals" && snap.signalSubscriptions.length > 0) {
+            const sub = snap.signalSubscriptions[0];
+            const next = run.broadcastSignal(sub.signalName, "{}");
+            if (next) {
+              snap = next;
+              trace({
+                kind: "vars",
+                text: `📡 broadcasting signal "${sub.signalName}" — every waiting subscription unblocks`,
+                elementId: sub.elementId,
+              });
+              const signalVars = snap.instances[0]?.variables;
+              if (signalVars) setDisplayVars({ ...signalVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+          }
+          break;
+        }
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
