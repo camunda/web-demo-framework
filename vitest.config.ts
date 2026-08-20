@@ -1,4 +1,44 @@
 import { defineConfig } from "vitest/config";
+import type { Plugin } from "vite";
+import { readFileSync } from "node:fs";
+
+// `@camunda/design-system` ships its compiled `dist/**/*.js` with
+// `//# sourceMappingURL=` comments whose `.js.map` files list `.ts` sources
+// that are NOT included in the published package. Because we inline the design
+// system (see `server.deps.inline` below), Vite reads each of those maps,
+// fails to find the source content behind it, and logs one
+// `Sourcemap for … points to missing source files` warning per module (~80
+// lines of noise on every `npm run test`). The broken maps are the
+// dependency's, not ours, and there is nothing for us to fix in them.
+//
+// The map is read by Vite's own `load` step (which also strips the sourcemap
+// comment before user `transform` hooks see the code), so neither a
+// `customLogger` (the warning comes from the per-environment logger Vitest
+// builds, not the root config logger) nor a `transform` hook can prevent it.
+// This `enforce: "pre"` `load` hook wins over Vite's default loader: it reads
+// the module itself, drops the trailing sourcemap comment, and returns
+// `map: null`, so the external `.js.map` is never resolved and no warning is
+// produced. Only design-system `.js` files are handled and only their
+// sourcemap comment is removed, so nothing about their runtime behaviour
+// changes.
+function stripDesignSystemSourcemaps(): Plugin {
+  return {
+    name: "strip-design-system-sourcemaps",
+    enforce: "pre",
+    load(id) {
+      const file = id.split("?")[0];
+      if (!file.includes("@camunda/design-system") || !file.endsWith(".js")) {
+        return null;
+      }
+      const code = readFileSync(file, "utf-8");
+      if (!code.includes("sourceMappingURL")) return null;
+      return {
+        code: code.replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, ""),
+        map: null,
+      };
+    },
+  };
+}
 
 /**
  * Test layering convention for this repo (see `docs` in issue #10's PR for
@@ -17,6 +57,7 @@ import { defineConfig } from "vitest/config";
  * `globalThis.location`.
  */
 export default defineConfig({
+  plugins: [stripDesignSystemSourcemaps()],
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
