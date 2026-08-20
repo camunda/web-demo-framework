@@ -44,7 +44,7 @@ const learnSignalBroadcast: ExampleDef = {
   title: "Signal intermediate catch event + broadcast",
   group: "learn-bpmn",
   blurb:
-    "A signal intermediate catch event parks the token until someone broadcasts a signal by name. Unlike a message, a signal isn't correlated to one waiting instance — broadcasting it unblocks every open subscription for that name, across every running instance, at once. Run this and watch the token park at \"Wait for all-clear\" the moment the process starts; the page then broadcasts the all-clear signal for you, which unblocks the wait, runs \"Resume operations\", and reaches the end event. Forget to declare a zeebe:subscription-free signalRef and the model still deploys, but nothing broadcasting that name ever exists to unblock it, so the run parks on the wait forever.",
+    "A signal intermediate catch event parks the token until someone broadcasts a signal by name. Unlike a message, a signal isn't correlated to one waiting instance — broadcasting it unblocks every open subscription for that name, across every running instance, at once. Run this and watch the token park at \"Wait for all-clear\" the moment the process starts; the page then broadcasts the all-clear signal for you, which unblocks the wait, runs \"Resume operations\", and reaches the end event. Point the catch event's signalRef at a name nothing ever broadcasts and the model still deploys, but no broadcast ever matches it, so the run parks on the wait forever.",
   docsUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/signal-events/signal-event/",
   bpmn,
   seed: {},
