@@ -26,14 +26,31 @@ function stripDesignSystemSourcemaps(): Plugin {
     name: "strip-design-system-sourcemaps",
     enforce: "pre",
     load(id) {
-      const file = id.split("?")[0];
-      if (!file.includes("@camunda/design-system") || !file.endsWith(".js")) {
+      // Vite module ids can use `\` separators on Windows and may carry a
+      // `/@fs/` prefix for absolute paths — normalize both the way
+      // vite.config.ts already does (its `id.replace(/\\/g, "/")` pattern)
+      // before matching or reading, or the plugin would silently no-op there.
+      const normalized = id.replace(/\\/g, "/").split("?")[0];
+      if (
+        !normalized.includes("@camunda/design-system") ||
+        !normalized.endsWith(".js")
+      ) {
         return null;
       }
-      const code = readFileSync(file, "utf-8");
+      const file = normalized.replace(/^\/@fs/, "");
+      let code: string;
+      try {
+        code = readFileSync(file, "utf-8");
+      } catch {
+        // If we can't read it, fall through to Vite's default loader rather
+        // than crash — worst case the (harmless) warning simply reappears.
+        return null;
+      }
       if (!code.includes("sourceMappingURL")) return null;
       return {
-        code: code.replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, ""),
+        // `\s*` before the comment absorbs the preceding newline whether it is
+        // LF or CRLF; `\s*$` absorbs any trailing newline after the URL.
+        code: code.replace(/\s*\/\/# sourceMappingURL=\S+\s*$/, ""),
         map: null,
       };
     },
