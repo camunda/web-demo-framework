@@ -34,7 +34,7 @@ const learnUserTaskForm: ExampleDef = {
   title: "User task + form",
   group: "learn-bpmn",
   blurb:
-    "A user task is a step a human completes, not a worker — the token parks at the task until someone submits its form, then moves on. Run this and watch the process reach 'Review request' and wait; fill in the decision form and submit it to see the token resume and the process reach its end event. A user task with no zeebe:formDefinition binding still deploys, but the runner has nothing to render for it, so there is no way for a human to ever complete it and the run parks there forever.",
+    "A user task is a step a human completes, not a worker — the token parks at the task until someone submits its form, then moves on. Run this and watch the process reach 'Review request' and wait; fill in the decision form and submit it to see the token resume and the process reach its end event. A user task with no zeebe:formDefinition binding still deploys and still parks the token, but the runner has no form to render for it, so it offers a bare Complete button that finishes the task with no variables.",
   docsUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/user-tasks/",
   bpmn,
   forms: {
