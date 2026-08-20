@@ -413,6 +413,29 @@ export function ExampleRunner({
           });
           break;
         }
+        if (round.handled === 0 && round.reason === "timers") {
+          // Nothing to dispatch, but a timer is pending and nobody's holding
+          // it back for a manual-control choice (that case surfaces as
+          // "unhandledJobs" instead, since the job itself is still waiting —
+          // see `HandlerDef.manualControl`). A plain intermediate/boundary
+          // timer catch event has no job at all, so left alone the run would
+          // look finished when it's merely waiting on the clock. Jump straight
+          // to the earliest due timer and keep driving — this is the same
+          // "advance to the next due timer" move `HandlerDef.manualControl`'s
+          // `kind: "timer"` button performs by hand (see
+          // `resolveManualControl` below), just applied automatically.
+          const due = snap.timers.reduce(
+            (min, t) => Math.min(min, t.dueInMs),
+            Infinity,
+          );
+          if (!Number.isFinite(due)) break;
+          const advanced = run.advanceTime(Math.max(due, 0) + 1);
+          if (!advanced) break;
+          snap = advanced;
+          trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
+          await new Promise((r) => setTimeout(r, BEAT));
+          continue;
+        }
         if (round.handled === 0) break;
         await new Promise((r) => setTimeout(r, BEAT));
       }
