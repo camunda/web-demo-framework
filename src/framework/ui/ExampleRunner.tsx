@@ -443,6 +443,14 @@ export function ExampleRunner({
               await new Promise((r) => setTimeout(r, BEAT));
               continue;
             }
+            // `correlateMessage` returns null when the engine call threw, so
+            // without this the loop stops right after the "correlating…" line
+            // above and the failure reads as a successful correlation.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — correlating "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey}) failed`,
+              elementId: pendingMessage.elementId,
+            });
           }
           break;
         }

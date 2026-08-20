@@ -23,10 +23,14 @@ import bpmn from "./model.bpmn?raw";
  * which reacts to `SettleReason: "messages"` by echoing the waiting
  * subscription's own `messageName`/`correlationKey` straight back via
  * `BojtosSession.correlateMessage`) — that's the in-browser stand-in for "some
- * other system published shipment-confirmed for this order". Get the
- * `correlationKey` expression wrong (or omit `zeebe:subscription` entirely)
- * and the model still deploys, but no correlation key is ever computed to
- * match against, so the catch event waits forever — see the note below.
+ * other system published shipment-confirmed for this order". Point the
+ * `correlationKey` expression at a variable the instance never sets and the
+ * model still deploys, but the key the engine computes is not the one a
+ * publish carries, so the catch event waits forever. Omitting
+ * `zeebe:subscription` altogether is the opposite failure: the engine rejects
+ * the model at DEPLOY time (`message '…' has no zeebe:subscription
+ * correlationKey`) — see `docs/engine-coverage.md`'s "Message intermediate
+ * catch event + correlation" row.
  */
 const RECORD_CONFIRMATION = `async (job, { text, trace }) => {
   const orderId = text("orderId", "unknown-order");
@@ -41,7 +45,7 @@ const learnMessageCorrelation: ExampleDef = {
   title: "Message catch event + correlation key",
   group: "learn-bpmn",
   blurb:
-    "A message intermediate catch event pauses the token until a message with a matching name and correlation key is published — the BPMN analogue of \"wait for this specific order's shipment to be confirmed\", not just \"wait for any shipment-confirmed message\". Run this and watch the token park on the catch event; there's no external broker in the browser, so the page correlates the message itself the instant the wait is reached, echoing back the exact correlationKey (`=orderId`) the subscription resolved to — then the token resumes into Record confirmation and on to the end event. Omit zeebe:subscription's correlationKey (or typo the variable it reads) and the model still deploys fine, but the engine never computes a key to match a publish against, so the catch event waits forever — docs/engine-coverage.md calls this out explicitly as a deploy-time-silent, run-time-stuck failure mode.",
+    "A message intermediate catch event pauses the token until a message with a matching name and correlation key is published — the BPMN analogue of \"wait for this specific order's shipment to be confirmed\", not just \"wait for any shipment-confirmed message\". Run this and watch the token park on the catch event; there's no external broker in the browser, so the page correlates the message itself the instant the wait is reached, echoing back the exact correlationKey (`=orderId`) the subscription resolved to — then the token resumes into Record confirmation and on to the end event. Typo the variable the correlationKey reads and the model still deploys fine, but the key the engine computes is not the one a publish carries, so the catch event waits forever. Leave zeebe:subscription off altogether and you get the opposite failure: the engine rejects the model at deploy time with \"has no zeebe:subscription correlationKey\" — docs/engine-coverage.md records both.",
   docsUrl:
     "https://docs.camunda.io/docs/components/modeler/bpmn/message-events/",
   bpmn,
