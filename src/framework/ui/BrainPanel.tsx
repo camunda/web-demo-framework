@@ -85,6 +85,14 @@ function TextBrain({ brain }: { brain: BrainControls }) {
   useEffect(() => {
     void loadBrowserModelRequirements().then(setModels);
   }, []);
+  // Auto-populate the endpoint model picker from the server's /models whenever
+  // the endpoint or key changes, debounced so typing a URL doesn't spam it.
+  const { kind: brainKind, endpointUrl, apiKey, listEndpointModels } = brain;
+  useEffect(() => {
+    if (brainKind !== "endpoint" || localBlocked) return;
+    const timer = setTimeout(() => void listEndpointModels(), 400);
+    return () => clearTimeout(timer);
+  }, [brainKind, endpointUrl, apiKey, localBlocked, listEndpointModels]);
   const selectedModel = models.find((m) => m.id === brain.browserModel);
   const vramReason = selectedModel
     ? insufficientVramReason(selectedModel, estimateAvailableVramMB())
@@ -198,14 +206,71 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             )}
           </div>
           <div className="field">
-            <Label htmlFor="endpoint-model">Model (blank = first served)</Label>
-            <Input
-              id="endpoint-model"
-              placeholder="llama3.2:3b"
-              value={brain.endpointModel}
-              onChange={(e) => brain.setEndpointModel(e.target.value)}
-              disabled={brain.status === "connecting"}
-            />
+            <Label htmlFor="endpoint-model">Model</Label>
+            <div className="endpoint-model-row">
+              <Select
+                value={brain.endpointModel}
+                onValueChange={brain.setEndpointModel}
+                disabled={
+                  brain.status === "connecting" ||
+                  brain.endpointModelsStatus === "loading" ||
+                  brain.endpointModels.length === 0
+                }
+              >
+                <SelectTrigger
+                  id="endpoint-model"
+                  className="endpoint-model-select"
+                >
+                  <SelectValue
+                    placeholder={
+                      brain.endpointModelsStatus === "loading"
+                        ? "Loading models…"
+                        : brain.endpointModelsStatus === "idle"
+                          ? "Enter an endpoint above"
+                          : brain.endpointModelsStatus === "error"
+                            ? "No models — check the endpoint"
+                            : brain.endpointModels.length === 0
+                              ? "No models served"
+                              : "Select a model"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {brain.endpointModels.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void brain.listEndpointModels()}
+                disabled={
+                  brain.status === "connecting" ||
+                  brain.endpointModelsStatus === "loading" ||
+                  localBlocked !== null
+                }
+              >
+                {brain.endpointModelsStatus === "loading"
+                  ? "Refreshing…"
+                  : "Refresh"}
+              </Button>
+            </div>
+            <p className="field-hint">
+              Fetched from the endpoint's <code>/models</code>. Tiny models
+              (e.g. SmolLM2) usually can't follow the tool-calling format —
+              prefer <code>llama3.2:3b</code>, <code>qwen2.5</code> or larger.
+            </p>
+            {brain.endpointModelsStatus === "error" && !localBlocked && (
+              <Alert variant="destructive">
+                <AlertTitle>Couldn't list models</AlertTitle>
+                <AlertDescription>
+                  {brain.endpointModelsError}
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
           <div className="field">
             <Label htmlFor="endpoint-key">API key (optional)</Label>
@@ -225,7 +290,13 @@ function TextBrain({ brain }: { brain: BrainControls }) {
           <Button
             size="sm"
             onClick={() => void brain.connect()}
-            disabled={brain.status === "connecting"}
+            disabled={
+              brain.status === "connecting" ||
+              (brain.kind === "endpoint" &&
+                (brain.endpointModel === "" ||
+                  brain.endpointModelsStatus === "loading" ||
+                  localBlocked !== null))
+            }
           >
             {brain.status === "ready" ? "Reconnect" : "Connect"}
           </Button>
