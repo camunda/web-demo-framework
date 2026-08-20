@@ -45,22 +45,25 @@ import bpmn from "./model.bpmn?raw";
 
 const CHARGE_PAYMENT = `async (job, { sleep }) => {
   // This job is held back manually (see index.ts's manualControl) rather
-  // than dispatched here — the runner offers a choice between completing it
-  // (this code, via the "Complete normally" button) and throwing a BPMN
-  // error on it directly (the "Simulate: card declined" button), which is
-  // what actually routes the token through the "Charge declined" boundary
-  // event below rather than just this handler failing.
+  // than dispatched here, so this body never runs on this page — both
+  // choices bypass it. "Complete normally" completes the job directly with
+  // {} (so no charged variable is set), and "Simulate: card declined"
+  // throws a BPMN error on it, which is what routes the token through the
+  // "Charge declined" boundary event below rather than just this handler
+  // failing. This is the worker you would write for the task in a real
+  // deployment, shown for reference.
   await sleep(400);
 
   return { charged: true };
 }`;
 
 const SHIP_ITEMS = `async (job, { sleep, trace }) => {
-  // Also held back manually — see CHARGE_PAYMENT's comment above. Unlike
-  // Activity_guarded, this task has no boundary event: firing its error
-  // action has nothing to catch it, so it becomes an incident instead of a
-  // handled alternate path. Completing it normally hands over to the
-  // carrier and reaches "Order shipped".
+  // Also held back manually — see CHARGE_PAYMENT's comment above; this body
+  // does not run either. Unlike Activity_guarded, this task has no boundary
+  // event: firing its error action has nothing to catch it, so it becomes an
+  // incident instead of a handled alternate path. Completing it normally
+  // completes the job with {} — no trace line, no shipped/tracking variables
+  // — and the token reaches "Order shipped".
   await sleep(400);
   trace("handing over to the carrier");
 
