@@ -58,6 +58,14 @@ export interface BrainControls {
   setEndpointUrl(url: string): void;
   endpointModel: string;
   setEndpointModel(model: string): void;
+  /** Models the endpoint advertises (from its OpenAI-compatible `/models` API). */
+  endpointModels: string[];
+  /** Lifecycle of the endpoint model-list fetch, for the picker's UI states. */
+  endpointModelsStatus: "idle" | "loading" | "ready" | "error";
+  /** Why listing the endpoint's models failed, if it did. */
+  endpointModelsError: string | null;
+  /** Query the endpoint's `/models` and populate {@link endpointModels}. */
+  listEndpointModels(): Promise<void>;
   apiKey: string;
   setApiKey(key: string): void;
 
@@ -120,6 +128,13 @@ export function useBrain(): BrainControls {
   const [browserModel, setBrowserModel] = useState(DEFAULT_BROWSER_MODEL);
   const [endpointUrl, setEndpointUrl] = useState(DEFAULT_ENDPOINT);
   const [endpointModel, setEndpointModel] = useState("");
+  const [endpointModels, setEndpointModels] = useState<string[]>([]);
+  const [endpointModelsStatus, setEndpointModelsStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [endpointModelsError, setEndpointModelsError] = useState<string | null>(
+    null,
+  );
   const [apiKey, setApiKey] = useState("");
 
   const [chat, setChat] = useState<ChatFn | null>(null);
@@ -283,6 +298,43 @@ export function useBrain(): BrainControls {
     setError(null);
   }, [disconnect]);
 
+  /**
+   * Query the endpoint's OpenAI-compatible `/models` and surface the result as
+   * a picker, so the reader chooses from what the server actually serves rather
+   * than typing a model id from memory (a wrong one only fails at connect). A
+   * page that structurally can't reach a local server says so instead of
+   * fetching — the same reason `connect` reports up front — and a fetch that
+   * succeeds defaults the selection to the first served model when the current
+   * pick is blank or no longer offered.
+   */
+  const listEndpointModels = useCallback(async () => {
+    const blocked = localEndpointBlockedReason(endpointUrl);
+    if (blocked) {
+      setEndpointModels([]);
+      setEndpointModelsStatus("error");
+      setEndpointModelsError(blocked);
+      return;
+    }
+    setEndpointModelsStatus("loading");
+    setEndpointModelsError(null);
+    const brain = new EndpointBrain(endpointUrl, apiKey);
+    try {
+      const ids = await brain.listModels();
+      setEndpointModels(ids);
+      setEndpointModelsStatus("ready");
+      setEndpointModel((current) =>
+        current && ids.includes(current) ? current : (ids[0] ?? ""),
+      );
+    } catch (e) {
+      setEndpointModels([]);
+      setEndpointModel("");
+      setEndpointModelsStatus("error");
+      setEndpointModelsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      brain.dispose();
+    }
+  }, [endpointUrl, apiKey]);
+
   const connect = useCallback(async () => {
     if (kind === "scripted") {
       setChat(null);
@@ -425,6 +477,10 @@ export function useBrain(): BrainControls {
     setEndpointUrl,
     endpointModel,
     setEndpointModel,
+    endpointModels,
+    endpointModelsStatus,
+    endpointModelsError,
+    listEndpointModels,
     apiKey,
     setApiKey,
     connect,

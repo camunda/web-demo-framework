@@ -102,8 +102,9 @@ describe("manifest wiring", () => {
     for (const id of handlerIds) expect(jobbedTaskIds).toContain(id);
   });
 
-  it("names the governance-critical assessment as a required tool", () => {
+  it("names the governance-critical tools as required", () => {
     expect(loanOrigination.requiredTools).toContain("AssessApplication");
+    expect(loanOrigination.requiredTools).toContain("UpdateApplicationStatus");
   });
 
   it("ships a scripted agent and two decision scenarios", () => {
