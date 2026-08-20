@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrainPanel } from "./BrainPanel";
 import { useBrain } from "../useBrain";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // stubGlobal is not undone by restoreAllMocks; unstub so the fake fetch
+  // can't leak into other test files and cause order-dependent failures.
+  vi.unstubAllGlobals();
+});
 
 /**
  * The endpoint brain's model picker. jsdom serves the page from `localhost`, so

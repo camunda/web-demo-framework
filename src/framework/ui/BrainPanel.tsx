@@ -292,7 +292,10 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             onClick={() => void brain.connect()}
             disabled={
               brain.status === "connecting" ||
-              (brain.kind === "endpoint" && brain.endpointModel === "")
+              (brain.kind === "endpoint" &&
+                (brain.endpointModel === "" ||
+                  brain.endpointModelsStatus === "loading" ||
+                  localBlocked !== null))
             }
           >
             {brain.status === "ready" ? "Reconnect" : "Connect"}

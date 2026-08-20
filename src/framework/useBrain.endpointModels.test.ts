@@ -2,7 +2,12 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBrain } from "./useBrain";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // stubGlobal is not undone by restoreAllMocks; unstub so the fake fetch
+  // can't leak into other test files and cause order-dependent failures.
+  vi.unstubAllGlobals();
+});
 
 /**
  * The endpoint-model picker seam `useBrain` exposes. The panel replaced its
