@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_ProbeExclusiveGateway"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-exclusive-gateway" name="Exclusive gateway probe" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>ToSetBranch</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="ToSetBranch" sourceRef="Start" targetRef="SetBranch" />
+    <bpmn:serviceTask id="SetBranch" name="Set branch">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-set-branch" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToSetBranch</bpmn:incoming>
+      <bpmn:outgoing>ToDecide</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToDecide" sourceRef="SetBranch" targetRef="Decide" />
+    <bpmn:exclusiveGateway id="Decide" name="Which route?" default="ToSlowPath">
+      <bpmn:incoming>ToDecide</bpmn:incoming>
+      <bpmn:outgoing>ToFastPath</bpmn:outgoing>
+      <bpmn:outgoing>ToSlowPath</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="ToFastPath" name="route = fast" sourceRef="Decide" targetRef="FastPath">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">=route = "fast"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="ToSlowPath" name="default" sourceRef="Decide" targetRef="SlowPath" />
+    <bpmn:serviceTask id="FastPath" name="Fast path">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-fast-path" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToFastPath</bpmn:incoming>
+      <bpmn:outgoing>FastToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="SlowPath" name="Slow path">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-slow-path" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>ToSlowPath</bpmn:incoming>
+      <bpmn:outgoing>SlowToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="FastToEnd" sourceRef="FastPath" targetRef="EndFast" />
+    <bpmn:sequenceFlow id="SlowToEnd" sourceRef="SlowPath" targetRef="EndSlow" />
+    <bpmn:endEvent id="EndFast" name="Fast route done">
+      <bpmn:incoming>FastToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndSlow" name="Slow route done">
+      <bpmn:incoming>SlowToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

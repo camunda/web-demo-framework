@@ -69,6 +69,19 @@ export interface ExampleRunControls {
     errorCode: string,
     errorMessage: string,
   ): Snapshot | null;
+  /**
+   * Publish `messageName`/`correlationKey` against the live session
+   * (`BojtosSession.correlateMessage`), unblocking any instance waiting on a
+   * matching message catch/boundary event and merging `variablesJson` into
+   * it. This is the in-browser stand-in for an external system publishing a
+   * message — the only way the UI can resolve a `SettleReason: "messages"`
+   * wait state (see `@nanobpm/bojtos-kit`'s `dispatchRound`/`settleReason`).
+   */
+  correlateMessage(
+    messageName: string,
+    correlationKey: string,
+    variablesJson: string,
+  ): Snapshot | null;
   reset(): void;
   /**
    * Hold this run's picked/uploaded image (contract B) in run-scoped context,
@@ -258,6 +271,12 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     [run],
   );
 
+  const correlateMessage = useCallback(
+    (messageName: string, correlationKey: string, variablesJson: string) =>
+      run((s) => s.correlateMessage(messageName, correlationKey, variablesJson)),
+    [run],
+  );
+
   const stepWorkers = useCallback(
     async (workers: Record<string, JobHandler>, opts?: DispatchOptions) => {
       const session = sessionRef.current;
@@ -323,6 +342,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     broadcastSignal,
     completeJobManually,
     throwJobError,
+    correlateMessage,
     reset,
     redeploy,
     setRunImage,
