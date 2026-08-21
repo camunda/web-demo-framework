@@ -1192,7 +1192,7 @@ export function ExampleRunner({
             className="editors"
             data-tour={TOUR_ANCHOR.codePanel}
             title="Code"
-            description="One handler per BPMN element. Return variables to merge, or throw to fail the job."
+            description="One handler per BPMN element, plus a model tab holding the editable diagram — select an element there to edit its properties. Return variables to merge, or throw to fail the job."
           >
             <Suspense
               fallback={
@@ -1223,7 +1223,10 @@ export function ExampleRunner({
                 <TabsContent value={MODEL_TAB}>
                   <div className="editor-meta">
                     <strong>Model</strong>
-                    <code>edit the diagram visually — Run re-checks it below</code>
+                    <code>
+                      click an element to edit its properties on the right — Run
+                      re-reads whatever you leave here
+                    </code>
                     <Button
                       variant="secondary"
                       size="sm"

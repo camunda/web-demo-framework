@@ -110,6 +110,27 @@ export interface ModelEditorProps {
   onChange: (value: string) => void;
 }
 
+/**
+ * `fit-viewport` throws whenever there is nothing to fit *into*: before the
+ * first import has given the canvas a root, and while the container still
+ * measures 0×0 (the scale it computes is then non-finite, and `SVGMatrix`
+ * rejects it). Both are ordinary states on the way to a rendered diagram — a
+ * lazily-mounted editor inside a tab panel hits the second on mount — not
+ * failures, and the ResizeObserver below refits once the box is real.
+ */
+function fitViewport(modeler: InstanceType<typeof Modeler>) {
+  const canvas = modeler.get<{
+    resized?: () => void;
+    zoom: (mode: string) => void;
+  }>("canvas");
+  try {
+    canvas.resized?.();
+    canvas.zoom("fit-viewport");
+  } catch {
+    // Not yet fittable; a later resize will fit it.
+  }
+}
+
 function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const propertiesRef = useRef<HTMLDivElement | null>(null);
@@ -225,11 +246,13 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
       .importXML(value)
       .then(() => {
         if (cancelled || importSeqRef.current !== initialImportSeq) return;
-        modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
-          "fit-viewport",
-        );
+        fitViewport(modeler);
       })
       .catch((err: unknown) => {
+        // An import still in flight when this effect is torn down (a fast tab
+        // switch, or React's StrictMode double-mount in dev) fails against the
+        // now-destroyed canvas. That's the teardown working, not a bad model.
+        if (cancelled) return;
         // Malformed XML (e.g. a partial hand-edit made before this component
         // existed, or mid-typing in a sibling XML view) — leave the modeler
         // showing a blank canvas rather than crashing the editor.
@@ -308,9 +331,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
       .then(() => {
         if (cancelled || importSeqRef.current !== importSeq) return;
         lastExportedRef.current = null;
-        modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
-          "fit-viewport",
-        );
+        fitViewport(modeler);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -388,22 +409,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     const modeler = modelerRef.current;
     const canvasEl = containerRef.current;
     if (!modeler || !canvasEl) return;
-    const refit = () => {
-      const canvas = modeler.get<{
-        resized: () => void;
-        zoom: (mode: string) => void;
-      }>("canvas");
-      try {
-        canvas.resized();
-        canvas.zoom("fit-viewport");
-      } catch {
-        // A ResizeObserver reports the element's initial size as soon as it's
-        // observed, which is before the first `importXML` has given the canvas
-        // a root — `fit-viewport` has nothing to fit and throws. Ignore it: the
-        // import fits the viewport itself, and every later resize has a root.
-      }
-    };
-    const observer = new ResizeObserver(() => refit());
+    const observer = new ResizeObserver(() => fitViewport(modeler));
     observer.observe(canvasEl);
     return () => observer.disconnect();
   }, []);
