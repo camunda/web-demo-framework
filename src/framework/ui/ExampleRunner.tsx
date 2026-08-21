@@ -421,9 +421,9 @@ export function ExampleRunner({
           // own `messageName`/`correlationKey` straight back via
           // `correlateMessage` (no extra variables) so a plain Run completes
           // the demo without a separate manual step; the panel below still
-          // shows the correlation happening. Any other settle reason
-          // (timers, signals, an unhandled job type, an incident) still
-          // just stops the loop here as before.
+          // shows the correlation happening. Any settle reason not handled
+          // here (timers, an unhandled job type, an incident) still just
+          // stops the loop below as before.
           const pendingMessage = snap.messageSubscriptions[0];
           if (round.reason === "messages" && pendingMessage) {
             trace({
@@ -450,6 +450,32 @@ export function ExampleRunner({
               kind: "error",
               text: `▶ run stopped — correlating "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey}) failed`,
               elementId: pendingMessage.elementId,
+            });
+          }
+          // The signal equivalent: a broadcast unblocks every open
+          // subscription for the name at once, so the construct runs to
+          // completion from a single Run click instead of settling "Paused".
+          if (round.reason === "signals" && snap.signalSubscriptions.length > 0) {
+            const sub = snap.signalSubscriptions[0];
+            const next = run.broadcastSignal(sub.signalName, "{}");
+            if (next) {
+              snap = next;
+              trace({
+                kind: "vars",
+                text: `📡 broadcasting signal "${sub.signalName}" — every waiting subscription unblocks`,
+                elementId: sub.elementId,
+              });
+              const signalVars = snap.instances[0]?.variables;
+              if (signalVars) setDisplayVars({ ...signalVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+            // `broadcastSignal` returns null when the engine call threw — say so
+            // rather than dropping out of the loop as if the run had quiesced.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — broadcasting signal "${sub.signalName}" failed`,
+              elementId: sub.elementId,
             });
           }
           break;
