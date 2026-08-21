@@ -20,11 +20,13 @@ import bpmn from "./model.bpmn?raw";
  *
  * A signal is a broadcast, not a correlation: unlike the message construct's
  * `correlationKey` (which targets exactly one waiting instance), broadcasting
- * a signal unblocks *every* open subscription for that signal name across
- * *every* instance. This example only ever creates one instance, so that
- * distinction isn't directly visible on the page, but the blurb below calls
- * it out — it's the whole reason a reader would reach for a signal instead
- * of a message.
+ * a signal unblocks *every* open subscription for that signal name. The model
+ * forks into two branches that each park on their own catch event for
+ * `all-clear`, so a single `broadcastSignal` visibly releases both at once —
+ * the property that distinguishes a signal from a message, demonstrated
+ * rather than only asserted in the blurb. (Two concurrent subscriptions in
+ * one instance is enough to show it; the runner only ever creates one
+ * instance, so the cross-instance half of the claim stays prose.)
  *
  * Runs to completion unattended from a single Run click: `ExampleRunner`'s
  * drive loop now auto-broadcasts the first open signal subscription whenever
@@ -39,12 +41,19 @@ const RESUME_OPERATIONS = `async (job, { sleep, trace }) => {
   return { resumed: true };
 }`;
 
+const REOPEN_FLOOR = `async (job, { sleep, trace }) => {
+  trace("same all-clear — reopening the floor");
+  await sleep(400);
+
+  return { floorReopened: true };
+}`;
+
 const learnSignalBroadcast: ExampleDef = {
   id: "learn-signal-broadcast",
   title: "Signal intermediate catch event + broadcast",
   group: "learn-bpmn",
   blurb:
-    "A signal intermediate catch event parks the token until someone broadcasts a signal by name. Unlike a message, a signal isn't correlated to one waiting instance — broadcasting it unblocks every open subscription for that name, across every running instance, at once. Run this and watch the token park at \"Wait for all-clear\" the moment the process starts; the page then broadcasts the all-clear signal for you, which unblocks the wait, runs \"Resume operations\", and reaches the end event. Point the catch event's signalRef at a name nothing ever broadcasts and the model still deploys, but no broadcast ever matches it, so the run parks on the wait forever.",
+    "A signal intermediate catch event parks the token until someone broadcasts a signal by name. Unlike a message, a signal isn't correlated to one waiting instance — broadcasting it unblocks every open subscription for that name at once. That's why this model forks: both \"Ops waits for all-clear\" and \"Floor waits for all-clear\" park on the same signal, and one broadcast releases the pair together, so 'Resume operations' and 'Reopen the floor' both run before the join lets the token reach the end event. Run it and watch both branches light up off a single broadcast — a message could not do that, because a correlation key targets exactly one waiting subscription. To see the name being matched: in the Code panel, open the model tab, click either catch event, and expand Signal in the properties panel on the right — Name holds `all-clear` on both. Change it on just one of them and hit Run: the Activity panel now shows two 📡 broadcast lines instead of one, because the branches no longer share a name and each needs its own broadcast to be released — the count of broadcasts is exactly the count of distinct signal names being waited on.",
   docsUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/signal-events/signal-event/",
   bpmn,
   seed: {},
@@ -53,6 +62,11 @@ const learnSignalBroadcast: ExampleDef = {
       elementId: "Activity_resume",
       standsInFor: "job worker — resume-operations",
       source: RESUME_OPERATIONS,
+    },
+    {
+      elementId: "Activity_reopen",
+      standsInFor: "job worker — reopen-floor",
+      source: REOPEN_FLOOR,
     },
   ],
 };
