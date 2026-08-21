@@ -47,7 +47,7 @@ export function App() {
     <>
       {!embed && route.kind === "gallery" && (
         <>
-          <nav className="example-picker">
+          <nav className="example-picker" aria-label="Scenario examples">
             {scenarioExamples.map((e) => (
               <Button
                 key={e.id}
@@ -61,8 +61,10 @@ export function App() {
           </nav>
           {learnBpmnExamples.length > 0 && (
             <>
-              <h2 className="example-group-heading">Learn BPMN</h2>
-              <nav className="example-picker">
+              <h2 className="example-group-heading" id="learn-bpmn-heading">
+                Learn BPMN
+              </h2>
+              <nav className="example-picker" aria-labelledby="learn-bpmn-heading">
                 {learnBpmnExamples.map((e) => (
                   <Button
                     key={e.id}

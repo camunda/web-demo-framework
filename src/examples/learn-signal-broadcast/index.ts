@@ -14,9 +14,10 @@ import bpmn from "./model.bpmn?raw";
  * The model is based on `tools/probe/fixtures/signal.bpmn` — already
  * `✅ Verified` in `docs/engine-coverage.md` ("Signal intermediate catch
  * event + broadcast" — `session.broadcastSignal(name, vars)` unblocks every
- * matching open subscription; completes in 3 rounds) — trimmed down for
- * teaching rather than probe realism: one `intermediateCatchEvent` waiting on
- * a `bpmn:signal`, one service task after it, nothing incidental.
+ * matching open subscription; completes in 3 rounds) — reshaped for teaching
+ * rather than probe realism: a parallel fork into two `intermediateCatchEvent`s
+ * that both wait on the same `bpmn:signal`, a service task on each branch, and
+ * a parallel join — nothing incidental.
  *
  * A signal is a broadcast, not a correlation: unlike the message construct's
  * `correlationKey` (which targets exactly one waiting instance), broadcasting

@@ -494,6 +494,14 @@ export function ExampleRunner({
               Infinity,
             );
             if (Number.isFinite(due)) {
+              // Log the parked state before jumping the clock, otherwise the
+              // wait — the whole point of a timer catch event — leaves no
+              // trace at all and the fast-forward reads as if nothing waited.
+              trace({
+                kind: "step",
+                text: `⏳ parked on a timer — ${(Math.max(due, 0) / 1000).toFixed(1)}s left on the clock`,
+              });
+              await new Promise((r) => setTimeout(r, BEAT));
               const advanced = run.advanceTime(Math.max(due, 0) + 1);
               if (advanced) {
                 snap = advanced;
