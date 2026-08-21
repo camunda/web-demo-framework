@@ -25,6 +25,8 @@ const results = [];
 
 function record(name, ok, detail) {
   results.push({ name, ok, detail });
+  // A printed ❌ has to reach the exit status too, or CI reads a failed run as a pass.
+  if (!ok) process.exitCode = 1;
   console.log(`${ok ? "✅" : "❌"} ${name}: ${detail}`);
 }
 
