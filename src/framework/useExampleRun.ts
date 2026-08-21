@@ -36,6 +36,15 @@ export interface ExampleRunControls {
   /** Advance the virtual clock by `byMs`, firing any timer now due. */
   advanceTime(byMs: number): Snapshot | null;
   /**
+   * Broadcast a signal by name, unblocking every open subscription waiting
+   * on it (`BojtosSession.broadcastSignal`) — the counterpart to
+   * `advanceTime` for a signal intermediate/boundary catch event. Used by
+   * `ExampleRunner`'s drive loop to resolve a `reason: "signals"` settle
+   * automatically, so a signal-broadcast construct still runs to completion
+   * from a single Run button rather than pausing forever on the wait.
+   */
+  broadcastSignal(signalName: string, variablesJson: string): Snapshot | null;
+  /**
    * Activate one waiting job of `jobType` and complete it directly against
    * the session, bypassing the normal `dispatchRound`/`workers` map. For a
    * job type an example deliberately excludes from the drive loop (see
@@ -230,6 +239,12 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     [run],
   );
 
+  const broadcastSignal = useCallback(
+    (signalName: string, variablesJson: string) =>
+      run((s) => s.broadcastSignal(signalName, variablesJson)),
+    [run],
+  );
+
   /** Activate the one waiting job of `jobType`, or throw if none is waiting. */
   function activateOne(session: BojtosSession, jobType: string) {
     const [job] = session.activateJobs(jobType, 1, 30_000, "manual-control");
@@ -324,6 +339,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     stepWorkers,
     completeUserTask,
     advanceTime,
+    broadcastSignal,
     completeJobManually,
     throwJobError,
     correlateMessage,

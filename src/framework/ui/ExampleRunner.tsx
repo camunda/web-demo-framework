@@ -452,6 +452,32 @@ export function ExampleRunner({
               elementId: pendingMessage.elementId,
             });
           }
+          // The signal equivalent: a broadcast unblocks every open
+          // subscription for the name at once, so the construct runs to
+          // completion from a single Run click instead of settling "Paused".
+          if (round.reason === "signals" && snap.signalSubscriptions.length > 0) {
+            const sub = snap.signalSubscriptions[0];
+            const next = run.broadcastSignal(sub.signalName, "{}");
+            if (next) {
+              snap = next;
+              trace({
+                kind: "vars",
+                text: `📡 broadcasting signal "${sub.signalName}" — every waiting subscription unblocks`,
+                elementId: sub.elementId,
+              });
+              const signalVars = snap.instances[0]?.variables;
+              if (signalVars) setDisplayVars({ ...signalVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+            // `broadcastSignal` returns null when the engine call threw — say so
+            // rather than dropping out of the loop as if the run had quiesced.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — broadcasting signal "${sub.signalName}" failed`,
+              elementId: sub.elementId,
+            });
+          }
           // The timer equivalent: a pending timer that nobody's holding back
           // for a manual-control choice (that case surfaces as
           // "unhandledJobs" instead, since the job itself is still waiting —
