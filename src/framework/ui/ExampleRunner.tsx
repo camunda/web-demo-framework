@@ -413,7 +413,47 @@ export function ExampleRunner({
           });
           break;
         }
-        if (round.handled === 0) break;
+        if (round.handled === 0) {
+          // A round with nothing handled but a waiting message subscription
+          // (`SettleReason: "messages"`) means the process is parked on a
+          // message catch/boundary event — the in-browser equivalent of an
+          // external system needing to publish it. Echo the subscription's
+          // own `messageName`/`correlationKey` straight back via
+          // `correlateMessage` (no extra variables) so a plain Run completes
+          // the demo without a separate manual step; the panel below still
+          // shows the correlation happening. Any other settle reason
+          // (timers, signals, an unhandled job type, an incident) still
+          // just stops the loop here as before.
+          const pendingMessage = snap.messageSubscriptions[0];
+          if (round.reason === "messages" && pendingMessage) {
+            trace({
+              kind: "vars",
+              text: `📨 correlating message "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey})`,
+              elementId: pendingMessage.elementId,
+            });
+            const correlated = run.correlateMessage(
+              pendingMessage.messageName,
+              pendingMessage.correlationKey,
+              "{}",
+            );
+            if (correlated) {
+              snap = correlated;
+              const correlatedVars = snap.instances[0]?.variables;
+              if (correlatedVars) setDisplayVars({ ...correlatedVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+            // `correlateMessage` returns null when the engine call threw, so
+            // without this the loop stops right after the "correlating…" line
+            // above and the failure reads as a successful correlation.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — correlating "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey}) failed`,
+              elementId: pendingMessage.elementId,
+            });
+          }
+          break;
+        }
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
