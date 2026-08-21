@@ -413,30 +413,75 @@ export function ExampleRunner({
           });
           break;
         }
-        if (round.handled === 0 && round.reason === "timers") {
-          // Nothing to dispatch, but a timer is pending and nobody's holding
-          // it back for a manual-control choice (that case surfaces as
+        if (round.handled === 0) {
+          // A round with nothing handled but a waiting message subscription
+          // (`SettleReason: "messages"`) means the process is parked on a
+          // message catch/boundary event — the in-browser equivalent of an
+          // external system needing to publish it. Echo the subscription's
+          // own `messageName`/`correlationKey` straight back via
+          // `correlateMessage` (no extra variables) so a plain Run completes
+          // the demo without a separate manual step; the panel below still
+          // shows the correlation happening. Any settle reason not handled
+          // here (an unhandled job type, an incident) still just stops the
+          // loop below as before.
+          const pendingMessage = snap.messageSubscriptions[0];
+          if (round.reason === "messages" && pendingMessage) {
+            trace({
+              kind: "vars",
+              text: `📨 correlating message "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey})`,
+              elementId: pendingMessage.elementId,
+            });
+            const correlated = run.correlateMessage(
+              pendingMessage.messageName,
+              pendingMessage.correlationKey,
+              "{}",
+            );
+            if (correlated) {
+              snap = correlated;
+              const correlatedVars = snap.instances[0]?.variables;
+              if (correlatedVars) setDisplayVars({ ...correlatedVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+            // `correlateMessage` returns null when the engine call threw, so
+            // without this the loop stops right after the "correlating…" line
+            // above and the failure reads as a successful correlation.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — correlating "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey}) failed`,
+              elementId: pendingMessage.elementId,
+            });
+          }
+          // The timer equivalent: a pending timer that nobody's holding back
+          // for a manual-control choice (that case surfaces as
           // "unhandledJobs" instead, since the job itself is still waiting —
           // see `HandlerDef.manualControl`). A plain intermediate/boundary
           // timer catch event has no job at all, so left alone the run would
           // look finished when it's merely waiting on the clock. Jump straight
-          // to the earliest due timer and keep driving — this is the same
-          // "advance to the next due timer" move `HandlerDef.manualControl`'s
-          // `kind: "timer"` button performs by hand (see
-          // `resolveManualControl` below), just applied automatically.
-          const due = snap.timers.reduce(
-            (min, t) => Math.min(min, t.dueInMs),
-            Infinity,
-          );
-          if (!Number.isFinite(due)) break;
-          const advanced = run.advanceTime(Math.max(due, 0) + 1);
-          if (!advanced) break;
-          snap = advanced;
-          trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
-          await new Promise((r) => setTimeout(r, BEAT));
-          continue;
+          // to the earliest due timer and keep driving — the same move
+          // `HandlerDef.manualControl`'s `kind: "timer"` button performs by
+          // hand (see `resolveManualControl` below), just applied
+          // automatically.
+          if (round.reason === "timers") {
+            const due = snap.timers.reduce(
+              (min, t) => Math.min(min, t.dueInMs),
+              Infinity,
+            );
+            if (Number.isFinite(due)) {
+              const advanced = run.advanceTime(Math.max(due, 0) + 1);
+              if (advanced) {
+                snap = advanced;
+                trace({
+                  kind: "step",
+                  text: "🕐 the clock advanced — timer fired",
+                });
+                await new Promise((r) => setTimeout(r, BEAT));
+                continue;
+              }
+            }
+          }
+          break;
         }
-        if (round.handled === 0) break;
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
