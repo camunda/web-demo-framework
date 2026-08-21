@@ -427,6 +427,13 @@ export function ExampleRunner({
           const pendingMessage = snap.messageSubscriptions[0];
           if (round.reason === "messages" && pendingMessage) {
             trace({
+              kind: "step",
+              text: `⏳ parked on a message catch event — waiting for "${pendingMessage.messageName}"`,
+              elementId: pendingMessage.elementId,
+            });
+            await new Promise((r) => setTimeout(r, BEAT));
+            if (runSeqRef.current !== seq) return snap;
+            trace({
               kind: "vars",
               text: `📨 correlating message "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey})`,
               elementId: pendingMessage.elementId,
@@ -457,6 +464,14 @@ export function ExampleRunner({
           // completion from a single Run click instead of settling "Paused".
           if (round.reason === "signals" && snap.signalSubscriptions.length > 0) {
             const sub = snap.signalSubscriptions[0];
+            const waiting = snap.signalSubscriptions.length;
+            trace({
+              kind: "step",
+              text: `⏳ parked on ${waiting} open signal subscription${waiting === 1 ? "" : "s"} — waiting for "${sub.signalName}"`,
+              elementId: sub.elementId,
+            });
+            await new Promise((r) => setTimeout(r, BEAT));
+            if (runSeqRef.current !== seq) return snap;
             const next = run.broadcastSignal(sub.signalName, "{}");
             if (next) {
               snap = next;
@@ -502,6 +517,7 @@ export function ExampleRunner({
                 text: `⏳ parked on a timer — ${(Math.max(due, 0) / 1000).toFixed(1)}s left on the clock`,
               });
               await new Promise((r) => setTimeout(r, BEAT));
+              if (runSeqRef.current !== seq) return snap;
               const advanced = run.advanceTime(Math.max(due, 0) + 1);
               if (advanced) {
                 snap = advanced;
@@ -519,6 +535,10 @@ export function ExampleRunner({
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
+      // Every `continue` above re-tests the generation in the `while` head,
+      // but falling out of the loop lands here directly — without this a run
+      // superseded by Reset still appends its outcome to the cleared log.
+      if (runSeqRef.current !== seq) return snap;
       if (snap && snap.completedInstances >= 1)
         trace({ kind: "done", text: "✅ process instance completed" });
       else if (snap && snap.incidentElementIds.length > 0)
@@ -884,6 +904,11 @@ export function ExampleRunner({
       JSON.stringify(reviewValues),
     );
     trace({ kind: "human", text: `👤 ${safeStringify(reviewValues)}` });
+    // A completed instance reports `variables: {}`, so read the snapshot over
+    // the submission only while there's still an instance carrying state —
+    // otherwise completing the last task would blank the card.
+    const vars = snap?.instances[0]?.variables;
+    setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
     if (snap && snap.completedInstances >= 1)
       trace({ kind: "done", text: "✅ process instance completed" });
   }, [openUserTask, reviewValues, run, trace]);

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_learn_signal_broadcast" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.36.1" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.8.0">
-  <bpmn:signal id="Signal_AllClear" name="all-clear" />
+  <bpmn:signal id="Signal_AllClearOps" name="all-clear" />
+  <bpmn:signal id="Signal_AllClearFloor" name="all-clear" />
   <bpmn:process id="learn_signal_broadcast" name="Signal intermediate catch event + broadcast" isExecutable="true">
     <bpmn:startEvent id="StartEvent_1" name="Shift begins">
       <bpmn:outgoing>Flow_to_fork</bpmn:outgoing>
@@ -13,12 +14,12 @@
     <bpmn:intermediateCatchEvent id="Event_wait_ops" name="Ops waits for all-clear">
       <bpmn:incoming>Flow_fork_ops</bpmn:incoming>
       <bpmn:outgoing>Flow_ops_resume</bpmn:outgoing>
-      <bpmn:signalEventDefinition id="SignalEventDefinition_ops" signalRef="Signal_AllClear" />
+      <bpmn:signalEventDefinition id="SignalEventDefinition_ops" signalRef="Signal_AllClearOps" />
     </bpmn:intermediateCatchEvent>
     <bpmn:intermediateCatchEvent id="Event_wait_floor" name="Floor waits for all-clear">
       <bpmn:incoming>Flow_fork_floor</bpmn:incoming>
       <bpmn:outgoing>Flow_floor_reopen</bpmn:outgoing>
-      <bpmn:signalEventDefinition id="SignalEventDefinition_floor" signalRef="Signal_AllClear" />
+      <bpmn:signalEventDefinition id="SignalEventDefinition_floor" signalRef="Signal_AllClearFloor" />
     </bpmn:intermediateCatchEvent>
     <bpmn:serviceTask id="Activity_resume" name="Resume operations">
       <bpmn:extensionElements>

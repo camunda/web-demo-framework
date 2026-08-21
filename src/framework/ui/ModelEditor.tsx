@@ -252,7 +252,8 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
         // An import still in flight when this effect is torn down (a fast tab
         // switch, or React's StrictMode double-mount in dev) fails against the
         // now-destroyed canvas. That's the teardown working, not a bad model.
-        if (cancelled) return;
+        // A superseded import rejecting is the same non-event.
+        if (cancelled || importSeqRef.current !== initialImportSeq) return;
         // Malformed XML (e.g. a partial hand-edit made before this component
         // existed, or mid-typing in a sibling XML view) — leave the modeler
         // showing a blank canvas rather than crashing the editor.
@@ -326,6 +327,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // while this `importXML` is still in flight.
     let cancelled = false;
     const importSeq = ++importSeqRef.current;
+    // Accepting an external value also retires any export still in flight from
+    // an earlier edit — otherwise a save that resolves after a Revert lands
+    // would hand the reverted-away XML straight back through `onChange`.
+    exportSeqRef.current++;
     modeler
       .importXML(value)
       .then(() => {
@@ -334,7 +339,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
         fitViewport(modeler);
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled || importSeqRef.current !== importSeq) return;
         console.warn("ModelEditor: import failed", err);
       });
     return () => {
