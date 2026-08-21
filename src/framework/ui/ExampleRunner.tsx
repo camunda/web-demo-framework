@@ -422,8 +422,8 @@ export function ExampleRunner({
           // `correlateMessage` (no extra variables) so a plain Run completes
           // the demo without a separate manual step; the panel below still
           // shows the correlation happening. Any settle reason not handled
-          // here (timers, an unhandled job type, an incident) still just
-          // stops the loop below as before.
+          // here (an unhandled job type, an incident) still just stops the
+          // loop below as before.
           const pendingMessage = snap.messageSubscriptions[0];
           if (round.reason === "messages" && pendingMessage) {
             trace({
@@ -477,6 +477,34 @@ export function ExampleRunner({
               text: `▶ run stopped — broadcasting signal "${sub.signalName}" failed`,
               elementId: sub.elementId,
             });
+          }
+          // The timer equivalent: a pending timer that nobody's holding back
+          // for a manual-control choice (that case surfaces as
+          // "unhandledJobs" instead, since the job itself is still waiting —
+          // see `HandlerDef.manualControl`). A plain intermediate/boundary
+          // timer catch event has no job at all, so left alone the run would
+          // look finished when it's merely waiting on the clock. Jump straight
+          // to the earliest due timer and keep driving — the same move
+          // `HandlerDef.manualControl`'s `kind: "timer"` button performs by
+          // hand (see `resolveManualControl` below), just applied
+          // automatically.
+          if (round.reason === "timers") {
+            const due = snap.timers.reduce(
+              (min, t) => Math.min(min, t.dueInMs),
+              Infinity,
+            );
+            if (Number.isFinite(due)) {
+              const advanced = run.advanceTime(Math.max(due, 0) + 1);
+              if (advanced) {
+                snap = advanced;
+                trace({
+                  kind: "step",
+                  text: "🕐 the clock advanced — timer fired",
+                });
+                await new Promise((r) => setTimeout(r, BEAT));
+                continue;
+              }
+            }
           }
           break;
         }
