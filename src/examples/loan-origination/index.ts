@@ -228,12 +228,15 @@ export const loanOrigination: ExampleDef = {
   scriptedAgent: SCRIPTED_AGENT,
   templates: prompts,
   tour: loanTour,
-  // The one tool whose absence changes what a human reviews: the gateway can
-  // only mean something if the officer has a policy recommendation and risk
-  // band in front of them, and those are what AssessApplication produces. A
-  // model that reports done without running it hands the reviewer a case with
-  // nothing assessed.
-  requiredTools: ["AssessApplication"],
+  // The tools whose absence changes what a human reviews. The gateway can only
+  // mean something if the officer has a policy recommendation and risk band in
+  // front of them, and those are what AssessApplication produces — a model that
+  // reports done without running it hands the reviewer a case with nothing
+  // assessed. UpdateApplicationStatus is the mandatory write-back that records
+  // the case as being with a human; a small model (e.g. Qwen 2.5B) tends to
+  // declare itself done before calling it, so it is required too and the guard
+  // nudges the model once more rather than letting the case skip it.
+  requiredTools: ["AssessApplication", "UpdateApplicationStatus"],
   handlers: [
     { elementId: "QueryCustomer", standsInFor: "CRM connector — customer lookup", source: QUERY_CUSTOMER },
     { elementId: "CreditBureauLookup", standsInFor: "REST connector — credit bureau", source: CREDIT_BUREAU_LOOKUP },

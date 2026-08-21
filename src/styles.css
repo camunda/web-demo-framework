@@ -553,6 +553,14 @@ body {
   display: flex;
   flex-direction: column;
 }
+.endpoint-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.endpoint-model-select {
+  flex: 1;
+}
 .brain-recommended-badge {
   margin-left: 6px;
 }
