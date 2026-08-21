@@ -3,62 +3,130 @@
   <bpmn:signal id="Signal_AllClear" name="all-clear" />
   <bpmn:process id="learn_signal_broadcast" name="Signal intermediate catch event + broadcast" isExecutable="true">
     <bpmn:startEvent id="StartEvent_1" name="Shift begins">
-      <bpmn:outgoing>Flow_to_wait</bpmn:outgoing>
+      <bpmn:outgoing>Flow_to_fork</bpmn:outgoing>
     </bpmn:startEvent>
-    <bpmn:intermediateCatchEvent id="Event_wait_signal" name="Wait for all-clear">
-      <bpmn:incoming>Flow_to_wait</bpmn:incoming>
-      <bpmn:outgoing>Flow_to_resume</bpmn:outgoing>
-      <bpmn:signalEventDefinition id="SignalEventDefinition_1" signalRef="Signal_AllClear" />
+    <bpmn:parallelGateway id="Gateway_fork" name="Both teams stand by">
+      <bpmn:incoming>Flow_to_fork</bpmn:incoming>
+      <bpmn:outgoing>Flow_fork_ops</bpmn:outgoing>
+      <bpmn:outgoing>Flow_fork_floor</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:intermediateCatchEvent id="Event_wait_ops" name="Ops waits for all-clear">
+      <bpmn:incoming>Flow_fork_ops</bpmn:incoming>
+      <bpmn:outgoing>Flow_ops_resume</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="SignalEventDefinition_ops" signalRef="Signal_AllClear" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="Event_wait_floor" name="Floor waits for all-clear">
+      <bpmn:incoming>Flow_fork_floor</bpmn:incoming>
+      <bpmn:outgoing>Flow_floor_reopen</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="SignalEventDefinition_floor" signalRef="Signal_AllClear" />
     </bpmn:intermediateCatchEvent>
     <bpmn:serviceTask id="Activity_resume" name="Resume operations">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="resume-operations" />
       </bpmn:extensionElements>
-      <bpmn:incoming>Flow_to_resume</bpmn:incoming>
-      <bpmn:outgoing>Flow_to_end</bpmn:outgoing>
+      <bpmn:incoming>Flow_ops_resume</bpmn:incoming>
+      <bpmn:outgoing>Flow_ops_join</bpmn:outgoing>
     </bpmn:serviceTask>
+    <bpmn:serviceTask id="Activity_reopen" name="Reopen the floor">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="reopen-floor" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_floor_reopen</bpmn:incoming>
+      <bpmn:outgoing>Flow_floor_join</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:parallelGateway id="Gateway_join">
+      <bpmn:incoming>Flow_ops_join</bpmn:incoming>
+      <bpmn:incoming>Flow_floor_join</bpmn:incoming>
+      <bpmn:outgoing>Flow_to_end</bpmn:outgoing>
+    </bpmn:parallelGateway>
     <bpmn:endEvent id="Event_done" name="Back to work">
       <bpmn:incoming>Flow_to_end</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:sequenceFlow id="Flow_to_wait" sourceRef="StartEvent_1" targetRef="Event_wait_signal" />
-    <bpmn:sequenceFlow id="Flow_to_resume" sourceRef="Event_wait_signal" targetRef="Activity_resume" />
-    <bpmn:sequenceFlow id="Flow_to_end" sourceRef="Activity_resume" targetRef="Event_done" />
+    <bpmn:sequenceFlow id="Flow_to_fork" sourceRef="StartEvent_1" targetRef="Gateway_fork" />
+    <bpmn:sequenceFlow id="Flow_fork_ops" sourceRef="Gateway_fork" targetRef="Event_wait_ops" />
+    <bpmn:sequenceFlow id="Flow_fork_floor" sourceRef="Gateway_fork" targetRef="Event_wait_floor" />
+    <bpmn:sequenceFlow id="Flow_ops_resume" sourceRef="Event_wait_ops" targetRef="Activity_resume" />
+    <bpmn:sequenceFlow id="Flow_floor_reopen" sourceRef="Event_wait_floor" targetRef="Activity_reopen" />
+    <bpmn:sequenceFlow id="Flow_ops_join" sourceRef="Activity_resume" targetRef="Gateway_join" />
+    <bpmn:sequenceFlow id="Flow_floor_join" sourceRef="Activity_reopen" targetRef="Gateway_join" />
+    <bpmn:sequenceFlow id="Flow_to_end" sourceRef="Gateway_join" targetRef="Event_done" />
   </bpmn:process>
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
     <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="learn_signal_broadcast">
       <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
-        <dc:Bounds x="182" y="212" width="36" height="36" />
+        <dc:Bounds x="152" y="222" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="160" y="255" width="80" height="14" />
+          <dc:Bounds x="146" y="265" width="49" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Event_wait_signal_di" bpmnElement="Event_wait_signal">
-        <dc:Bounds x="272" y="212" width="36" height="36" />
+      <bpmndi:BPMNShape id="Gateway_fork_di" bpmnElement="Gateway_fork">
+        <dc:Bounds x="240" y="215" width="50" height="50" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="248" y="255" width="84" height="27" />
+          <dc:Bounds x="228" y="182" width="75" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_wait_ops_di" bpmnElement="Event_wait_ops">
+        <dc:Bounds x="352" y="102" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="330" y="62" width="81" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_wait_floor_di" bpmnElement="Event_wait_floor">
+        <dc:Bounds x="352" y="342" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="330" y="385" width="81" height="27" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Activity_resume_di" bpmnElement="Activity_resume">
-        <dc:Bounds x="370" y="190" width="100" height="80" />
-        <bpmndi:BPMNLabel />
+        <dc:Bounds x="450" y="80" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_reopen_di" bpmnElement="Activity_reopen">
+        <dc:Bounds x="450" y="320" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_join_di" bpmnElement="Gateway_join">
+        <dc:Bounds x="620" y="215" width="50" height="50" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Event_done_di" bpmnElement="Event_done">
-        <dc:Bounds x="532" y="212" width="36" height="36" />
+        <dc:Bounds x="732" y="222" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="510" y="255" width="80" height="27" />
+          <dc:Bounds x="723" y="265" width="55" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="Flow_to_wait_di" bpmnElement="Flow_to_wait">
-        <di:waypoint x="218" y="230" />
-        <di:waypoint x="272" y="230" />
+      <bpmndi:BPMNEdge id="Flow_to_fork_di" bpmnElement="Flow_to_fork">
+        <di:waypoint x="188" y="240" />
+        <di:waypoint x="240" y="240" />
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Flow_to_resume_di" bpmnElement="Flow_to_resume">
-        <di:waypoint x="308" y="230" />
-        <di:waypoint x="370" y="230" />
+      <bpmndi:BPMNEdge id="Flow_fork_ops_di" bpmnElement="Flow_fork_ops">
+        <di:waypoint x="265" y="215" />
+        <di:waypoint x="265" y="120" />
+        <di:waypoint x="352" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_fork_floor_di" bpmnElement="Flow_fork_floor">
+        <di:waypoint x="265" y="265" />
+        <di:waypoint x="265" y="360" />
+        <di:waypoint x="352" y="360" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ops_resume_di" bpmnElement="Flow_ops_resume">
+        <di:waypoint x="388" y="120" />
+        <di:waypoint x="450" y="120" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_floor_reopen_di" bpmnElement="Flow_floor_reopen">
+        <di:waypoint x="388" y="360" />
+        <di:waypoint x="450" y="360" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ops_join_di" bpmnElement="Flow_ops_join">
+        <di:waypoint x="550" y="120" />
+        <di:waypoint x="645" y="120" />
+        <di:waypoint x="645" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_floor_join_di" bpmnElement="Flow_floor_join">
+        <di:waypoint x="550" y="360" />
+        <di:waypoint x="645" y="360" />
+        <di:waypoint x="645" y="265" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_to_end_di" bpmnElement="Flow_to_end">
-        <di:waypoint x="470" y="230" />
-        <di:waypoint x="532" y="230" />
+        <di:waypoint x="670" y="240" />
+        <di:waypoint x="732" y="240" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
