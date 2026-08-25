@@ -182,6 +182,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   // a stale promise could overwrite newer state with older XML.
   const importSeqRef = useRef(0);
   const exportSeqRef = useRef(0);
+  // Holds the pending `commandStack.changed` -> `doExport` timer (if any), so
+  // an external value change can cancel it — otherwise it fires after a
+  // "Revert" and can save the pre-revert diagram right back through `onChange`.
+  const scheduledExportRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -287,11 +291,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // intermediate event — this avoids redundant `saveXML()` calls and the
     // resulting `onChange`-triggered draft rebuilds causing jank on larger
     // diagrams.
-    let scheduledExport: ReturnType<typeof setTimeout> | null = null;
     const exportChange = () => {
-      if (scheduledExport !== null) return;
-      scheduledExport = setTimeout(() => {
-        scheduledExport = null;
+      if (scheduledExportRef.current !== null) return;
+      scheduledExportRef.current = setTimeout(() => {
+        scheduledExportRef.current = null;
         doExport();
       }, 0);
     };
@@ -299,7 +302,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
 
     return () => {
       cancelled = true;
-      if (scheduledExport !== null) clearTimeout(scheduledExport);
+      if (scheduledExportRef.current !== null) {
+        clearTimeout(scheduledExportRef.current);
+        scheduledExportRef.current = null;
+      }
       modeler.off("commandStack.changed", exportChange);
       modeler.destroy();
       modelerRef.current = null;
@@ -331,6 +337,13 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // an earlier edit — otherwise a save that resolves after a Revert lands
     // would hand the reverted-away XML straight back through `onChange`.
     exportSeqRef.current++;
+    // ...and cancels one merely queued (a zero-delay `commandStack.changed`
+    // timer): left running, it would fire after this reimport and save the
+    // pre-revert diagram right back through `onChange`.
+    if (scheduledExportRef.current !== null) {
+      clearTimeout(scheduledExportRef.current);
+      scheduledExportRef.current = null;
+    }
     modeler
       .importXML(value)
       .then(() => {

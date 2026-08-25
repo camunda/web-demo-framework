@@ -593,8 +593,13 @@ export function ExampleRunner({
           });
         }
       } finally {
-        runningRef.current = false;
-        setRunning(false);
+        // Same generation guard as `start` above — a Reset followed by a new
+        // run before this call's own awaits settle must not have this stale
+        // call mark the new run idle.
+        if (runSeqRef.current === seq) {
+          runningRef.current = false;
+          setRunning(false);
+        }
       }
     },
     [pendingManualJob, run, trace, driveLoop],
@@ -782,11 +787,13 @@ export function ExampleRunner({
     // kick off a second redeploy/createInstance.
     runningRef.current = true;
     setRunning(true);
+    // Captured before the `try` (not inside it) so the `finally` below can
+    // still read it after a superseded call's awaits settle.
+    const seq = ++runSeqRef.current;
     try {
       let workers = workersRef.current;
       let agents = agentsRef.current;
       let snap = run.snapshot;
-      const seq = ++runSeqRef.current;
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
@@ -801,8 +808,14 @@ export function ExampleRunner({
 
       await driveLoop(workers, agents, snap, seq);
     } finally {
-      runningRef.current = false;
-      setRunning(false);
+      // A Reset (bumping `runSeqRef`) followed by a new Start/manual-resume
+      // before this call's own awaits settle would otherwise have this stale
+      // call's cleanup mark the *new* run idle — only clear state if this is
+      // still the current generation.
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setRunning(false);
+      }
     }
   }, [run, stepping, draft.hasErrors, canResume, beginRun, driveLoop]);
 
@@ -827,6 +840,10 @@ export function ExampleRunner({
     // pending slips past the check above and starts a second instance.
     runningRef.current = true;
     setStepping(true);
+    // Captured for the same reason `start`/`resolveManualControl` capture it —
+    // a Reset during one of this call's awaits must stop it from clobbering a
+    // newer run's state in the `finally` below.
+    const seq = ++runSeqRef.current;
     try {
       let workers = workersRef.current;
       let agents = agentsRef.current;
@@ -865,8 +882,10 @@ export function ExampleRunner({
         describeRound(round, flows, elementLabels, manualControls),
       );
     } finally {
-      runningRef.current = false;
-      setStepping(false);
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setStepping(false);
+      }
     }
   }, [
     run,
