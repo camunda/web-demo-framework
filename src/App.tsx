@@ -2,7 +2,7 @@ import { AppHeader, Button } from "@camunda/design-system";
 import { ExampleRunner } from "./framework/ui/ExampleRunner";
 import { EXAMPLES } from "./examples";
 import { useRoute } from "./framework/useRoute";
-import { examplePath, galleryPath, navigate } from "./framework/routing";
+import { examplePath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
 import { readTourParam } from "./framework/tour";
 import { useEmbedHeightReporter } from "./framework/embedHeight";
@@ -45,7 +45,7 @@ export function App() {
 
   const body = (
     <>
-      {!embed && route.kind === "gallery" && (
+      {!embed && (
         <>
           <nav className="example-picker" aria-label="Scenario examples">
             {scenarioExamples.map((e) => (
@@ -53,6 +53,7 @@ export function App() {
                 key={e.id}
                 size="sm"
                 variant={e.id === example.id ? "default" : "secondary"}
+                aria-current={e.id === example.id ? "page" : undefined}
                 onClick={() => goToExample(e.id)}
               >
                 {e.title}
@@ -70,6 +71,7 @@ export function App() {
                     key={e.id}
                     size="sm"
                     variant={e.id === example.id ? "default" : "secondary"}
+                    aria-current={e.id === example.id ? "page" : undefined}
                     onClick={() => goToExample(e.id)}
                   >
                     {e.title}
@@ -79,13 +81,6 @@ export function App() {
             </>
           )}
         </>
-      )}
-      {!embed && route.kind === "example" && (
-        <div className="example-nav">
-          <Button size="sm" variant="secondary" onClick={() => navigate(galleryPath())}>
-            ← All examples
-          </Button>
-        </div>
       )}
       <div className="example-meta">
         {example.docsUrl && (
