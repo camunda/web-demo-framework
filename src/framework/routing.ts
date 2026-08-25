@@ -55,6 +55,50 @@ export function examplePath(id: string): string {
 }
 
 /**
+ * Query parameter the site-root `404.html` uses to hand a deep-linked preview
+ * path back to the preview's own build. Shared with the shim that writes it —
+ * see `spaFallback404` in vite.config.ts.
+ */
+export const HANDOFF_PARAM = "p";
+
+/**
+ * Rewrites `<base>/?p=/examples/x` back to `<base>/examples/x` in the address
+ * bar, undoing the site-root `404.html` handoff before anything reads the
+ * route.
+ *
+ * GitHub Pages answers *every* unmatched path with the site-root `404.html`,
+ * including paths under `pr-preview/pr-<n>/` where a separate build lives — so
+ * refreshing a preview deep link would otherwise boot the root (production)
+ * bundle, which can't parse a preview path and lands on the gallery. The shim
+ * in that document redirects to the preview's real `index.html` with the route
+ * in `p`; this puts it back.
+ *
+ * Returns whether it rewrote anything, for the test.
+ */
+export function restoreHandoffRoute(): boolean {
+  const params = new URLSearchParams(location.search);
+  const handoff = params.get(HANDOFF_PARAM);
+  // Same-origin, absolute-path values only: `//evil.com` and `/\evil.com` are
+  // both read as protocol-relative URLs by browsers, so a redirect built from
+  // an attacker-supplied `?p=` could leave the origin.
+  if (
+    !handoff ||
+    !handoff.startsWith("/") ||
+    handoff.startsWith("//") ||
+    handoff.startsWith("/\\")
+  )
+    return false;
+  params.delete(HANDOFF_PARAM);
+  const search = params.toString();
+  history.replaceState(
+    null,
+    "",
+    `${basePath()}${handoff.slice(1)}${search ? `?${search}` : ""}${location.hash}`,
+  );
+  return true;
+}
+
+/**
  * Navigates client-side (no full reload) to `path`, preserving `search`/`hash`
  * unless explicitly overridden, and notifies listeners (see `useRoute`).
  */

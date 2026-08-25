@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // `index.html` ships a baseline CSP <meta> tag intended for hosted/production
@@ -32,21 +32,54 @@ function stripDevCsp(): Plugin {
 // src/framework/routing.ts. `vite preview` doesn't emulate this Pages
 // behaviour, so verify deep-linked routes against a real deployment too, not
 // just `npm run preview`.
+//
+// Pages resolves that 404 against the SITE ROOT, though, even for a path under
+// `pr-preview/pr-<n>/` where a whole separate build lives. So the root copy
+// also has to rescue preview deep links: without the shim below, refreshing
+// one boots the production bundle (base `/`), which can't match a preview path
+// and silently lands on the gallery — the preview appears to "revert to main".
+// Only the root build carries the shim; a preview's own copy is already
+// correctly based, so it just serves as a plain fallback.
+//
+// The redirect target is always the preview's real `index.html`, which exists,
+// so this cannot loop: a torn-down preview 404s again at `pr-preview/pr-<n>/`,
+// where the shim finds nothing left to hand off and falls through.
+const PREVIEW_HANDOFF_SHIM = `<script>
+      (function () {
+        var base = location.pathname.match(/^\\/pr-preview\\/pr-\\d+\\//);
+        if (!base) return;
+        var route = location.pathname.slice(base[0].length);
+        if (!route) return;
+        var params = new URLSearchParams(location.search);
+        params.set("p", "/" + route);
+        location.replace(base[0] + "?" + params + location.hash);
+      })();
+    </script>
+  `;
+
 function spaFallback404(): Plugin {
   let outDir = "dist";
+  let isRootBuild = false;
   return {
     name: "spa-fallback-404",
     apply: "build",
     configResolved(config) {
       outDir = config.build.outDir;
+      isRootBuild = config.base === "/";
     },
     closeBundle() {
       const resolvedOutDir = resolve(process.cwd(), outDir);
       try {
-        copyFileSync(
+        const html = readFileSync(
           resolve(resolvedOutDir, "index.html"),
-          resolve(resolvedOutDir, "404.html"),
+          "utf8",
         );
+        // Ahead of the module bundle, which is deferred, so the redirect wins
+        // the race against the app booting on the wrong base.
+        const fallback = isRootBuild
+          ? html.replace("</head>", `  ${PREVIEW_HANDOFF_SHIM}</head>`)
+          : html;
+        writeFileSync(resolve(resolvedOutDir, "404.html"), fallback);
       } catch (err) {
         // Best-effort — a custom outDir or a failed build shouldn't crash the
         // rest of the pipeline over this fallback file, but it should be
