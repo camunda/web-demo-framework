@@ -953,11 +953,24 @@ export function ExampleRunner({
     return <Badge variant="neutral">Ready</Badge>;
   }, [run.phase, run.snapshot, running, stepping, openUserTask]);
 
+  // A blurb is plain prose authored with blank lines between paragraphs; one
+  // `<p>` per paragraph so a long explanation isn't a single wall of text.
+  const blurbParagraphs = useMemo(
+    () =>
+      example.blurb
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean),
+    [example.blurb],
+  );
+
   return (
     <div className="runner">
       <section className="intro">
         <h1>{example.title}</h1>
-        <p>{example.blurb}</p>
+        {blurbParagraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
         <div className="controls">
           <Button
             data-tour={TOUR_ANCHOR.runButton}
