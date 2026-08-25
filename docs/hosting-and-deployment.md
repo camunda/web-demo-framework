@@ -30,14 +30,14 @@ insurance:
   default Pages URL, which is already a distinct origin from `camunda.com`
   and fully automatic. Because the repo is **internal**, that is an
   access-controlled generated host
-  (`https://<random>.pages.github.io/`), served from the **root** \u2014 not
+  (`https://<random>.pages.github.io/`), served from the **root** — not
   `https://camunda.github.io/web-demo-framework/`; the `/<repo>/` project-path
   convention applies only to a *public* repo. The custom domain can be layered
-  on later (one line \u2014 see the commented `CNAME` step in the workflow) without
+  on later (one line — see the commented `CNAME` step in the workflow) without
   touching the pipeline, and a custom domain is likewise root-served, so the
   Vite build `base` stays correct across that change: `vite.config.ts` reads
   it from the `VITE_BASE_PATH` env var (defaulting to `/`), and `deploy.yml`
-  sets it to `/` unless the `PAGES_BASE_PATH` repo variable overrides \u2014 set
+  sets it to `/` unless the `PAGES_BASE_PATH` repo variable overrides — set
   that to `/web-demo-framework/` only if this repo is ever made public and
   served as a project site, otherwise every asset URL 404s.
 
@@ -105,7 +105,10 @@ it together, and breaking any one of them reintroduces the bug:
    concurrently.
 3. `preview.yml` passes `pages-base-url` (defaulting to the generated host,
    overridable via the `PAGES_BASE_URL` repo variable) so the comment links to
-   the host that actually serves the site.
+   the host that actually serves the site. That value must be a **bare
+   hostname — no scheme, no trailing slash**; the action prepends `https://`
+   itself, so setting it to `https://demos.camunda.io` produces
+   `https://https://demos.camunda.io/pr-preview/pr-N/`.
 
 `preview.yml` can also hold the comment back until the preview is live, via
 `wait-for-pages-deployment`. That is gated behind the `PAGES_PREVIEW_WAIT`

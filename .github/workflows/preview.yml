@@ -13,9 +13,9 @@ name: Preview
 # subfolder (publish on open/sync, tear down on close) using only the
 # built-in GITHUB_TOKEN — no external hosting account needed.
 #
-# Two things must stay true for the advertised link to be real, both of
-# which were broken until #99 and are the reason previews silently
-# resolved to main's deployment instead:
+# Two things must stay true for the advertised link to be real, and both
+# were broken when these workflows first shipped — which is why previews
+# silently resolved to main's deployment:
 #
 # 1. The repo's Pages source must be "Deploy from a branch" → gh-pages.
 #    GitHub Pages serves exactly one source; while it was set to
@@ -97,7 +97,10 @@ jobs:
       - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           source-dir: dist/
-          # Host serving this repo's Pages site. Overridable via the
+          # Host serving this repo's Pages site. Must be a bare hostname with
+          # no scheme and no trailing slash — the action prepends https://
+          # itself, so a value like https://example.com yields
+          # https://https://example.com/pr-preview/pr-N/. Overridable via the
           # PAGES_BASE_URL repo variable, which is what to set if the
           # generated hostname ever changes (it is regenerated if Pages is
           # disabled and re-enabled) or once a custom domain lands.
