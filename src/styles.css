@@ -300,8 +300,69 @@ body {
   color: #0e7490;
 }
 
-/* Trace timeline (see ui/TraceTimeline.tsx) — reuses the .log-* colours
-   above for the ungrouped rows, adding turn-card structure on top. */
+/* Trace timeline — rendered by `@nanobpm/bojtos-react`'s shared `TraceTimeline`
+   component (nanobpm/bojtos#8/#9), not a local copy. It keeps the class names
+   the framework's retired fork used (`timeline`, `timeline-turn`, `log-line
+   log-<kind>`, …) so this stylesheet applies unchanged; `.timeline-panel`,
+   `.timeline-header` and `.timeline-badge*` below style the bits the shared
+   component renders as plain markup instead of `@camunda/design-system`'s
+   `Card`/`Badge` (it doesn't depend on that package). Reuses the .log-*
+   colours above for the ungrouped rows, adding turn-card structure on top. */
+.timeline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--card, #fff);
+}
+.timeline-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.timeline-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.timeline-description {
+  font-size: 12px;
+  color: var(--muted-foreground, #6b7280);
+}
+.timeline-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.timeline-badge-info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.timeline-badge-warning {
+  background: #fef3c7;
+  color: #b45309;
+}
+.timeline-badge-neutral {
+  background: var(--muted, #f3f4f6);
+  color: var(--muted-foreground, #374151);
+}
+/* The shared TraceTimeline is nested in the runner's own CollapsibleCard
+   (sectionId="activity"), which already draws the panel chrome and the Activity
+   heading — so flatten the kit's own panel wrapper and hide its duplicate
+   header when it renders inside a `.panel`. */
+.panel .timeline-panel {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.panel .timeline-header {
+  display: none;
+}
 .timeline-toolbar {
   display: flex;
   justify-content: flex-end;

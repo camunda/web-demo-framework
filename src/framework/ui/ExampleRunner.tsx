@@ -34,7 +34,8 @@ import { BrainPanel } from "./BrainPanel";
 import { ImageInputPanel } from "./ImageInputPanel";
 import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
-import { TraceTimeline } from "./TraceTimeline";
+import { TraceTimeline } from "@nanobpm/bojtos-react";
+import { traceEntriesToRows, type TraceEntry as KitTraceEntry } from "@nanobpm/bojtos-kit";
 import { CollapsibleCard } from "./CollapsibleCard";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
@@ -258,7 +259,7 @@ export function ExampleRunner({
   // Shared with `buildWorkers` (compile.ts) and `makeLiveAgentRouter`
   // (agent/liveAgent.ts) for one run, so a tool's own trace entries land in
   // the same turn group as the agent entry that activated it — see
-  // `TraceTimeline.tsx`. Recreated fresh in `start` below, per run.
+  // `@nanobpm/bojtos-react`'s TraceTimeline. Recreated fresh in `start` below, per run.
   const turnRef = useRef<TurnRef>({ current: undefined });
   // The workers/agents maps from the run currently in progress, kept around
   // so a manual-control resolution (below) can resume the same drive loop
@@ -1010,12 +1011,19 @@ export function ExampleRunner({
               <pre className="vars">{safeStringify(displayVars, 2)}</pre>
             </CollapsibleCard>
 
-            <TraceTimeline
-              log={log}
-              elementStats={run.snapshot?.elementStats}
-              incidents={run.snapshot?.incidents}
-              labelFor={elementLabels}
-            />
+            <CollapsibleCard
+              sectionId="activity"
+              className="grow"
+              title="Activity"
+              description="Agent turns, model replies, and tool calls — read top to bottom as a story."
+            >
+              <TraceTimeline
+                rows={traceEntriesToRows(log as unknown as KitTraceEntry[])}
+                elementStats={run.snapshot?.elementStats}
+                incidents={run.snapshot?.incidents}
+                labelFor={elementLabels}
+              />
+            </CollapsibleCard>
           </div>
         </div>
 

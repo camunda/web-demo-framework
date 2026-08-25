@@ -24,8 +24,11 @@ export interface TraceEntry {
   /** True while the entry is still being produced (renders a spinner). */
   pending?: boolean;
   /**
-   * Additive fields — used by `TraceTimeline` (see `ui/TraceTimeline.tsx`) to
-   * render a run as a turn-by-turn story instead of a flat log. Every field
+   * Additive fields — used by the shared `TraceTimeline`
+   * (`@nanobpm/bojtos-react`) to render a run as a turn-by-turn story instead
+   * of a flat log. This shape mirrors the kit's `TraceEntry` (its
+   * `traceEntriesToRows` adapter consumes it directly), widened locally with
+   * the `"step"` kind the kit does not yet carry. Every field
    * here is optional and safe to ignore: a consumer reading only `kind`/`text`
    * (or an example never touching an agent) is unaffected.
    *

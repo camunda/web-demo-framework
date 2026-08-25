@@ -351,7 +351,7 @@ function resolveArguments(
  * A shared counter, written by the currently-running agent turn and read by
  * `compile.ts`'s job wrapper, so a tool's "started"/"result" trace entries
  * land in the same turn group as the "agent" entry that activated it — see
- * `TraceEntry.turn` and `TraceTimeline.tsx`. Plain mutable object rather than
+ * `TraceEntry.turn` and the shared `TraceTimeline`. Plain mutable object rather than
  * a return value: the agent and the job-dispatch loop run on two different
  * call paths (`stepWorkers`) that don't otherwise share state.
  *
