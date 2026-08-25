@@ -78,24 +78,37 @@ export const HANDOFF_PARAM = "p";
 export function restoreHandoffRoute(): boolean {
   const params = new URLSearchParams(location.search);
   const handoff = params.get(HANDOFF_PARAM);
-  // Same-origin, absolute-path values only: `//evil.com` and `/\evil.com` are
-  // both read as protocol-relative URLs by browsers, so a redirect built from
-  // an attacker-supplied `?p=` could leave the origin.
+  if (!handoff) return false;
+
+  // Test what the URL parser will see, not the raw value: it strips tab, LF
+  // and CR before parsing, so `/<TAB>/evil.example` slips past a literal `//`
+  // check and only then reads as protocol-relative.
+  const candidate = handoff.replace(/[\t\n\r]/g, "");
   if (
-    !handoff ||
-    !handoff.startsWith("/") ||
-    handoff.startsWith("//") ||
-    handoff.startsWith("/\\")
+    !candidate.startsWith("/") ||
+    candidate.startsWith("//") ||
+    candidate.startsWith("/\\")
   )
     return false;
+
   params.delete(HANDOFF_PARAM);
-  const search = params.toString();
-  history.replaceState(
-    null,
-    "",
-    `${basePath()}${handoff.slice(1)}${search ? `?${search}` : ""}${location.hash}`,
-  );
-  return true;
+
+  // Nothing here may throw: this runs before the first render, so an
+  // unhandled error would leave the app unmounted rather than merely
+  // mis-routed.
+  try {
+    const base = new URL(basePath(), location.href);
+    const target = new URL(candidate.slice(1), base);
+    // `replaceState` rejects a cross-origin URL, which an absolute BASE_URL
+    // (assets on a CDN) would produce.
+    if (target.origin !== location.origin) return false;
+    target.search = params.toString();
+    target.hash = location.hash;
+    history.replaceState(null, "", target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

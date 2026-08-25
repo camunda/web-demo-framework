@@ -91,4 +91,23 @@ describe("restoreHandoffRoute", () => {
       expect(location.pathname).toBe(base);
     }
   });
+
+  // The URL parser strips these before parsing, so a raw prefix check on the
+  // undecorated value sees `/x/evil.example` and lets `//evil.example` through.
+  it("refuses a value made protocol-relative by stripped control characters", () => {
+    const { origin } = location;
+    for (const evil of ["/\t/evil.example", "/\n/evil.example", "/\r/evil.example"]) {
+      at(`${base}?p=${encodeURIComponent(evil)}`);
+      expect(restoreHandoffRoute()).toBe(false);
+      expect(location.origin).toBe(origin);
+      expect(location.pathname).toBe(base);
+    }
+  });
+
+  it("never throws, so a crafted value can't stop the app mounting", () => {
+    for (const value of ["", "/", "//", "/\t/evil.example", "http://evil.example", "/%", "/".repeat(5000)]) {
+      at(`${base}?p=${encodeURIComponent(value)}`);
+      expect(() => restoreHandoffRoute()).not.toThrow();
+    }
+  });
 });
