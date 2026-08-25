@@ -26,17 +26,20 @@ insurance:
 - Recommended: a custom domain such as `demos.camunda.io`, CNAME'd to this
   repo's GitHub Pages deployment. This is infra work (DNS + Pages custom
   domain config) — see blockers below.
-- Until that lands, `.github/workflows/deploy.yml` publishes to the default
-  GitHub Pages URL (`https://camunda.github.io/web-demo-framework/`), which
-  is already a distinct origin from `camunda.com` and fully automatic. The
-  custom domain can be layered on later (one line — see the commented `CNAME`
-  step in the workflow) without touching the pipeline, **except** for the
-  Vite build `base`: `vite.config.ts` reads it from the `VITE_BASE_PATH` env
-  var (defaulting to `/`), and `deploy.yml` currently sets it to
-  `/web-demo-framework/` to match the project-Pages subpath. If/when the
-  custom domain lands, the site becomes root-served and `VITE_BASE_PATH`
-  should change to `/` (or be dropped) at the same time — otherwise asset
-  URLs stay rooted at the old subpath and 404.
+- Until that lands, `.github/workflows/deploy.yml` publishes to this repo's
+  default Pages URL, which is already a distinct origin from `camunda.com`
+  and fully automatic. Because the repo is **internal**, that is an
+  access-controlled generated host
+  (`https://<random>.pages.github.io/`), served from the **root** — not
+  `https://camunda.github.io/web-demo-framework/`; the `/<repo>/` project-path
+  convention applies only to a *public* repo. The custom domain can be layered
+  on later (one line — see the commented `CNAME` step in the workflow) without
+  touching the pipeline, and a custom domain is likewise root-served, so the
+  Vite build `base` stays correct across that change: `vite.config.ts` reads
+  it from the `VITE_BASE_PATH` env var (defaulting to `/`), and `deploy.yml`
+  sets it to `/` unless the `PAGES_BASE_PATH` repo variable overrides — set
+  that to `/web-demo-framework/` only if this repo is ever made public and
+  served as a project site, otherwise every asset URL 404s.
 
 This coordinated with, but did not block on, #18: the CSP and sandbox design
 there applies regardless of which origin serves the bundle. #18 has since
@@ -55,13 +58,15 @@ below.
 
 - **`.github/workflows/deploy.yml`** — on every push to `main`: `npm ci`,
   `npm run build` (which already runs `tsc --noEmit` then `vite build`), then
-  publish `dist/` via `actions/upload-pages-artifact` +
-  `actions/deploy-pages`. A merge to `main` results in an updated public URL
-  automatically, with no extra step.
+  publish `dist/` to the **root of the `gh-pages` branch** via
+  [`JamesIves/github-pages-deploy-action`](https://github.com/JamesIves/github-pages-deploy-action).
+  A merge to `main` results in an updated public URL automatically, with no
+  extra step.
 - **`.github/workflows/preview.yml`** — on every PR (opened / synchronize /
   reopened / closed): builds the same way (with `VITE_BASE_PATH` set to the
   matching `pr-preview/pr-<number>/` subpath so preview assets resolve),
-  then publishes to a per-PR path (`pr-preview/pr-<number>/`) using
+  then publishes to a per-PR path (`pr-preview/pr-<number>/`) on the same
+  branch using
   [`rossjrw/pr-preview-action`](https://github.com/rossjrw/pr-preview-action),
   which needs only the built-in `GITHUB_TOKEN` — no external hosting account.
   Closing the PR tears the preview down. With many parallel issues in flight,
@@ -75,15 +80,50 @@ Both workflows run the existing `npm run build`, so they inherit whatever a
 future CI/tests task (tracked separately) adds to that script; they don't
 duplicate a test step.
 
-**Known follow-up, not a blocker:** the preview action's classic `gh-pages`
-branch publishing target and the production `actions/deploy-pages` flow are
-two different Pages sources. They can't both be the *live* Pages source at
-once. Two ways to reconcile, either is fine — pick one when the custom domain
-work happens: (a) point the repo's Pages source at the `gh-pages` branch
-instead of the `deploy-pages` environment, and have `deploy.yml` also publish
-to that branch's root; or (b) serve previews from a distinct subdomain (e.g.
-`previews.demos.camunda.io`). Documented here so whoever does the DNS/Pages
-config picks deliberately rather than by discovering the conflict live.
+**Resolved: the Pages-source conflict.** This was previously logged here as a
+"known follow-up, not a blocker", and it turned out to be an active bug rather
+than a latent one. GitHub Pages serves exactly **one** source per repo. The
+repo was set to the `actions/deploy-pages` ("GitHub Actions") source, so the
+`gh-pages` branch that `pr-preview-action` pushes to was never served at all —
+every PR still got a comment advertising a preview URL, and that URL resolved
+to main's deployment. Compounding it, the advertised host was wrong: this repo
+is **internal**, so its access-controlled Pages site is served from a
+generated `https://<random>.pages.github.io/` host, not from
+`camunda.github.io/web-demo-framework/`, and the latter redirects to the
+generated host's *root*, discarding the `pr-preview/` path. A reviewer
+clicking "View preview" was looking at `main`.
+
+Option (a) was taken: **the Pages source is the `gh-pages` branch, and
+`deploy.yml` publishes main's build to that branch's root.** Three things hold
+it together, and breaking any one of them reintroduces the bug:
+
+1. Repo Settings → Pages → Source must stay **Deploy from a branch →
+   `gh-pages` / `/`**. Switching it back to "GitHub Actions" silently
+   un-serves every preview.
+2. `deploy.yml` passes `clean-exclude: pr-preview/` and `force: false`, so a
+   main deployment neither deletes live previews nor clobbers one published
+   concurrently.
+3. `preview.yml` passes `pages-base-url` (defaulting to the generated host,
+   overridable via the `PAGES_BASE_URL` repo variable) so the comment links to
+   the host that actually serves the site. That value must be a **bare
+   hostname — no scheme, no trailing slash**; the action prepends `https://`
+   itself, so setting it to `https://demos.camunda.io` produces
+   `https://https://demos.camunda.io/pr-preview/pr-N/`.
+
+`preview.yml` can also hold the comment back until the preview is live, via
+`wait-for-pages-deployment`. That is gated behind the `PAGES_PREVIEW_WAIT`
+repo variable and **off by default**, because it depends on invariant 1 above:
+it polls `/repos/{repo}/pages/builds`, which is empty while Pages is
+workflow-sourced, so enabling it before the source flip makes every preview
+job poll for 180s and then fail. Set `PAGES_PREVIEW_WAIT` to `true` once the
+flip is done. (The job needs `pages: read` for that endpoint — note it is the
+Pages builds API, not the Deployments API.)
+
+If the custom domain (decision 1) lands, set `PAGES_BASE_URL` to it in the
+same change as the `CNAME` step — otherwise previews start pointing at the
+old generated host. Option (b) from the original note (previews on a distinct
+subdomain, e.g. `previews.demos.camunda.io`) remains available but is no
+longer needed.
 
 ## 3. Repo visibility
 

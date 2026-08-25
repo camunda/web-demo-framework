@@ -8,21 +8,27 @@ name: Preview
 #
 # Implementation: the preview bundle is published under
 # pr-preview/pr-<number>/ on the gh-pages branch, alongside (but never
-# overwriting) the production deployment that deploy.yml publishes via
-# GitHub Pages' native `actions/deploy-pages` flow. rossjrw/pr-preview-action
-# manages that subfolder (publish on open/sync, tear down on close) using
-# only the built-in GITHUB_TOKEN — no external hosting account needed.
+# overwriting) the production deployment that deploy.yml publishes to the
+# root of that same branch. rossjrw/pr-preview-action manages the
+# subfolder (publish on open/sync, tear down on close) using only the
+# built-in GITHUB_TOKEN — no external hosting account needed.
 #
-# Note: GitHub Pages serves a single artifact per deployment when using
-# actions/deploy-pages (deploy.yml). This workflow instead pushes to the
-# gh-pages branch directly, which is a second, classic Pages source. Both
-# can coexist on the same custom domain by pointing Pages at the gh-pages
-# branch instead of the deploy-pages environment, or by serving previews
-# from a distinct path/subdomain (e.g. previews.demos.camunda.io) — this
-# is exactly the kind of infra decision flagged in
-# docs/hosting-and-deployment.md as needing sign-off. Until that's
-# settled, treat this workflow as the mechanism and the exact URL
-# shape as pending infra approval.
+# Two things must stay true for the advertised link to be real, and both
+# were broken when these workflows first shipped — which is why previews
+# silently resolved to main's deployment:
+#
+# 1. The repo's Pages source must be "Deploy from a branch" → gh-pages.
+#    GitHub Pages serves exactly one source; while it was set to
+#    "GitHub Actions" (actions/deploy-pages), nothing ever served this
+#    branch. deploy.yml now publishes to gh-pages too, so both live under
+#    one source.
+# 2. `pages-base-url` must be set explicitly. This repo is **internal**,
+#    so its access-controlled Pages site is served from a generated host
+#    (https://<random>.pages.github.io/), not from
+#    camunda.github.io/web-demo-framework/ — which is what the action
+#    assumes by default. That org-path URL redirects to the generated
+#    host's ROOT, discarding the pr-preview path, which is precisely how
+#    a "preview" link ended up showing main.
 
 on:
   pull_request:
@@ -78,6 +84,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # wait-for-pages-deployment polls /repos/{repo}/pages/builds.
+      pages: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,6 +97,20 @@ jobs:
       - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           source-dir: dist/
+          # Host serving this repo's Pages site. Must be a bare hostname with
+          # no scheme and no trailing slash — the action prepends https://
+          # itself, so a value like https://example.com yields
+          # https://https://example.com/pr-preview/pr-N/. Overridable via the
+          # PAGES_BASE_URL repo variable, which is what to set if the
+          # generated hostname ever changes (it is regenerated if Pages is
+          # disabled and re-enabled) or once a custom domain lands.
+          pages-base-url: ${{ vars.PAGES_BASE_URL || 'fluffy-succotash-1vv1kjr.pages.github.io' }}
+          # Holds the comment back until the preview is actually reachable.
+          # Off until the Pages source is switched to the gh-pages branch:
+          # /pages/builds is empty while Pages is workflow-sourced, so the
+          # step would poll for 180s and then fail. Set the
+          # PAGES_PREVIEW_WAIT repo variable to true once that flip is done.
+          wait-for-pages-deployment: ${{ vars.PAGES_PREVIEW_WAIT || false }}
 
   close:
     # Same fork-PR limitation as the build job above: a fork PR's close

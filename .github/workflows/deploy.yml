@@ -7,10 +7,23 @@ name: Deploy
 # Target: GitHub Pages, served from a Camunda-controlled custom domain
 # (recommended: demos.camunda.io, a separate origin from docs — see
 # docs/hosting-and-deployment.md, decision 1). Until that CNAME/DNS work
-# is approved by infra, this still deploys to the default
-# <org>.github.io/<repo> Pages URL, which is a real, working, automatic
-# public URL — the CNAME can be layered on later without touching this
-# workflow (see the commented-out CNAME example in the build job below).
+# is approved by infra, this still deploys to the repo's default Pages
+# URL, which is a real, working, automatic URL — the CNAME can be layered
+# on later without touching this workflow (see the commented-out CNAME
+# example in the deploy job below).
+#
+# Publishing target: the `gh-pages` branch, NOT `actions/deploy-pages`.
+# GitHub Pages serves exactly one source per repo, and preview.yml needs
+# that source to be a branch so per-PR previews under pr-preview/pr-<n>/
+# are actually reachable. While this repo was on the `actions/deploy-pages`
+# ("GitHub Actions") source, every preview commit landed on a branch
+# nothing served, and the link posted on each PR silently resolved to this
+# production deployment instead — see docs/hosting-and-deployment.md,
+# decision 2. Consequences of publishing from a branch:
+#   - `clean-exclude: pr-preview/` — main's deployment must not delete the
+#     umbrella directory that holds live PR previews.
+#   - `force: false` — rebase rather than force-push, so a preview
+#     published concurrently with a main deploy isn't clobbered.
 
 on:
   push:
@@ -18,16 +31,14 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,16 +67,9 @@ jobs:
       # If/when a custom domain is approved (decision 1 in the hosting
       # doc), drop a CNAME file into the published output here, e.g.:
       #   - run: echo "demos.camunda.io" > dist/CNAME
-      - uses: actions/upload-pages-artifact@v3
+      - uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
         with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          folder: dist
+          branch: gh-pages
+          clean-exclude: pr-preview/
+          force: false
