@@ -28,9 +28,10 @@ export function runInSandbox(
     onTrace?: (text: string) => void;
     onVision?: (prompt: string) => Promise<string> | string;
     onImage?: () => Promise<unknown> | unknown;
+    onReads?: (reads: string[]) => void;
   } = {},
 ): Promise<unknown> {
-  const { timeoutMs = 5000, onTrace, onVision, onImage } = opts;
+  const { timeoutMs = 5000, onTrace, onVision, onImage, onReads } = opts;
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   return new Promise((resolve, reject) => {
@@ -88,6 +89,7 @@ export function runInSandbox(
       } else if (msg.kind === "image-request") {
         respondToHelper(msg.callId, onImage, "image");
       } else if (msg.kind === "result") {
+        if (msg.reads && onReads) onReads(msg.reads);
         settle(() => resolve(msg.value));
       } else if (msg.kind === "error") {
         settle(() => reject(new Error(msg.message)));

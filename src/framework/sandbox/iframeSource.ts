@@ -30,6 +30,23 @@ export function buildSandboxDocument(): string {
       return Number.isFinite(n) ? n : (fallback === undefined ? 0 : fallback);
     }
 
+    // Wrap a handler's variables so every read is recorded into readsOut, both
+    // via the text()/num() accessors and via direct property access
+    // (job.variables.riskBand). This is the raw material the host turns into a
+    // data-dependency DAG (see reify.ts) — the write-set is the value the
+    // handler returns; the read-set is captured here. Recording only observes
+    // reads on data already inside the sandbox, so it changes nothing about the
+    // origin isolation the iframe boundary provides.
+    function recordingVariables(variables, readsOut) {
+      if (!variables || typeof variables !== "object") return variables;
+      return new Proxy(variables, {
+        get: function (target, key, receiver) {
+          if (typeof key === "string") readsOut[key] = true;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+    }
+
     function sleep(ms) {
       return new Promise(function (resolve) { setTimeout(resolve, ms); });
     }
@@ -86,8 +103,22 @@ export function buildSandboxDocument(): string {
       try {
         if (msg.kind === "run-handler") {
           var handler = compile(msg.source, "Handler code");
-          var out = await handler(msg.job, helpersFor(msg.job, msg.id, msg.hasVision));
-          post({ kind: "result", id: msg.id, value: out === undefined ? undefined : out });
+          var reads = {};
+          var job = msg.job || {};
+          var recordingJob = {
+            key: job.key,
+            type: job.type,
+            elementId: job.elementId,
+            instanceKey: job.instanceKey,
+            variables: recordingVariables(job.variables, reads),
+          };
+          var out = await handler(recordingJob, helpersFor(recordingJob, msg.id, msg.hasVision));
+          post({
+            kind: "result",
+            id: msg.id,
+            value: out === undefined ? undefined : out,
+            reads: Object.keys(reads),
+          });
         } else if (msg.kind === "run-agent") {
           var agent = compile(msg.source, "Agent code");
           var result = await agent(msg.job);

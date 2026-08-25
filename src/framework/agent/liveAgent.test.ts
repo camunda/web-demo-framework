@@ -355,6 +355,19 @@ describe("makeLiveAgent — trace timeline correlation (turn/elementId/args)", (
     expect(turnRef.current).toBe(1);
   });
 
+  it("carries the model's stated reason onto the tool-activation entry", async () => {
+    const trace: import("../types").TraceEntry[] = [];
+    const chat = fakeChat([
+      '{"tool": "ToolA", "arguments": {"code": "A1"}, "reason": "ToolA runs first", "done": false}',
+    ]);
+    const agent = makeLiveAgent(makeSpec(), chat, (e) => trace.push(e));
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    const activation = trace.find((e) => e.kind === "agent" && e.elementId === "ToolA");
+    expect(activation?.reason).toBe("ToolA runs first");
+  });
+
   it("still stamps its own entries with turn even when no TurnRef is supplied (compile.ts's tool entries just won't correlate)", async () => {
     const trace: import("../types").TraceEntry[] = [];
     const chat = fakeChat([

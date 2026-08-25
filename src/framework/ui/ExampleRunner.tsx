@@ -35,6 +35,7 @@ import { ImageInputPanel } from "./ImageInputPanel";
 import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
+import { ReifiedProcess } from "./ReifiedProcess";
 import { CollapsibleCard } from "./CollapsibleCard";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
@@ -1017,6 +1018,15 @@ export function ExampleRunner({
               labelFor={elementLabels}
             />
           </div>
+
+          {model.agent && (
+            <ReifiedProcess
+              log={log}
+              labelFor={elementLabels}
+              processId={`${example.id}-reified`}
+              processName={`${example.title} — reified`}
+            />
+          )}
         </div>
 
         <div className="col">

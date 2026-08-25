@@ -147,12 +147,24 @@ export function buildWorkers(
       const label = labels.get(job.elementId) ?? job.elementId;
       const turn = turnRef?.current;
       trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
-      const out = await handler(job, helpersFor(job, trace, turn, vision));
+      // Capture the run's read-set (which variables the handler consumed) so it
+      // can be paired with the write-set (the returned value's keys) and
+      // reified into a data-dependency DAG (see reify.ts). `onReads` is an
+      // internal wiring field the sandbox path reads off the helpers object.
+      const helpers = helpersFor(job, trace, turn, vision) as HandlerHelpers & {
+        onReads?: (reads: string[]) => void;
+      };
+      let reads: string[] = [];
+      helpers.onReads = (r) => {
+        reads = r;
+      };
+      const out = await handler(job, helpers);
       trace({
         kind: "vars",
         text: `  ↳ ${safeStringify(out)}`,
         elementId: job.elementId,
         result: out,
+        reads,
         turn,
       });
       return out as Record<string, unknown> | undefined;

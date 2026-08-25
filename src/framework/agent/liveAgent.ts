@@ -83,14 +83,15 @@ may use, one per block:
 
 ${callable.map(toolBlock).join("\n\n")}
 
-Reply with JSON only — no prose, no explanation, no markdown fence — in exactly
+Reply with JSON only — no prose outside the JSON, no markdown fence — in exactly
 this shape:
 
-{"tool": "${example?.elementId ?? "ToolName"}", "arguments": ${exampleArgs}, "done": false}
+{"tool": "${example?.elementId ?? "ToolName"}", "arguments": ${exampleArgs}, "reason": "one short sentence on why this tool, now", "done": false}
 
 The value of "tool" must be one of the names listed above, copied character for
-character, with nothing added. When your work is finished, reply exactly
-{"done": true} and no tool.`;
+character, with nothing added. "reason" is a brief plain-English explanation of
+your choice this turn. When your work is finished, reply exactly {"done": true}
+and no tool.`;
   }
 
   // Multi-tool turns: costs the reader one round trip per independent tool on
@@ -108,14 +109,15 @@ use, one per block:
 
 ${callable.map(toolBlock).join("\n\n")}
 
-Reply with JSON only — no prose, no explanation, no markdown fence — in exactly
+Reply with JSON only — no prose outside the JSON, no markdown fence — in exactly
 this shape:
 
-{"tools": [{"tool": "${example?.elementId ?? "ToolName"}", "arguments": ${exampleArgs}}], "done": false}
+{"tools": [{"tool": "${example?.elementId ?? "ToolName"}", "arguments": ${exampleArgs}, "reason": "one short sentence on why"}], "done": false}
 
 List one entry per tool you're calling this turn (often just one). Each
 "tool" value must be one of the names listed above, copied character for
-character, with nothing added. When your work is finished, reply exactly
+character, with nothing added. Each "reason" is a brief plain-English
+explanation of that choice. When your work is finished, reply exactly
 {"done": true} and no tools.`;
 }
 
@@ -560,7 +562,7 @@ export function makeLiveAgent(
     }
 
     // Exact-match only. A name that isn't a real element activates nothing.
-    const resolved: { tool: ToolSpec; args: Record<string, unknown> }[] = [];
+    const resolved: { tool: ToolSpec; args: Record<string, unknown>; reason?: string }[] = [];
     const unknown: string[] = [];
     const repeats: string[] = [];
     for (const call of stated) {
@@ -573,7 +575,7 @@ export function makeLiveAgent(
         repeats.push(tool.elementId);
         continue;
       }
-      resolved.push({ tool, args: call.args });
+      resolved.push({ tool, args: call.args, reason: call.reason });
     }
 
     if (unknown.length)
@@ -627,13 +629,14 @@ export function makeLiveAgent(
     // One trace entry per activated tool — not a single combined line — so
     // the trace timeline can show exactly which tool was chosen with which
     // arguments, rather than a joined name list.
-    for (const { tool } of resolved) {
+    for (const { tool, reason } of resolved) {
       trace({
         kind: "agent",
         text: `🤖 calling ${tool.elementId}`,
         turn,
         elementId: tool.elementId,
         args: forHistory.get(tool.elementId) ?? {},
+        reason,
       });
     }
 

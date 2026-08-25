@@ -21,6 +21,12 @@ export function runHandlerSandboxed(
   // host-side accessors — they alone hold this run's image pixels and the
   // active brain, which never cross into the reader-controlled sandbox.
   const hasVision = typeof helpers.vision === "function";
+  // `onReads`, when present, is stamped onto `helpers` by the caller
+  // (`compile.ts`'s `buildWorkers`) so the run's captured read-set can be
+  // surfaced on the trace and reified into a data-dependency DAG. Kept off the
+  // public `HandlerHelpers` type — it's an internal wiring detail of the
+  // sandbox path, not something a reader's handler ever sees.
+  const onReads = (helpers as { onReads?: (reads: string[]) => void }).onReads;
   return runInSandbox(
     { kind: "run-handler", source, job: toSandboxJob(job), hasVision },
     {
@@ -29,6 +35,7 @@ export function runHandlerSandboxed(
         ? (prompt: string) => helpers.vision!(prompt)
         : undefined,
       onImage: helpers.image ? () => helpers.image!() : undefined,
+      onReads,
     },
   );
 }
