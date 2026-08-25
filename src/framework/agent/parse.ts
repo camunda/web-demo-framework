@@ -42,6 +42,8 @@ export function shorten(text: string, max = 220): string {
 export interface StatedCall {
   name: string;
   args: Record<string, unknown>;
+  /** The model's plain-English rationale for this call, when it gave one. */
+  reason?: string;
 }
 
 function argsOf(rec: Record<string, unknown>): Record<string, unknown> {
@@ -49,6 +51,12 @@ function argsOf(rec: Record<string, unknown>): Record<string, unknown> {
   return raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : {};
+}
+
+/** The model's stated rationale for a call, tolerating the field names it drifts to. */
+function reasonOf(rec: Record<string, unknown>): string | undefined {
+  const raw = rec.reason ?? rec.why ?? rec.rationale ?? rec.thought ?? rec.explanation;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
 }
 
 /**
@@ -65,7 +73,7 @@ export function collectToolCalls(
   // Single-call shape first — what we ask for, and what small models manage.
   const single = json.tool ?? json.name ?? json.action;
   if (typeof single === "string" && single.trim())
-    return [{ name: single.trim(), args: argsOf(json) }];
+    return [{ name: single.trim(), args: argsOf(json), reason: reasonOf(json) }];
 
   const preferred = json.tools ?? json.tool_calls ?? json.toolset ?? json.actions;
   const arr = Array.isArray(preferred)
@@ -80,7 +88,7 @@ export function collectToolCalls(
       const rec = item as Record<string, unknown>;
       const label = rec.name ?? rec.tool ?? rec.id ?? rec.function;
       if (typeof label === "string" && label.trim())
-        calls.push({ name: label.trim(), args: argsOf(rec) });
+        calls.push({ name: label.trim(), args: argsOf(rec), reason: reasonOf(rec) });
     }
   }
   return calls;

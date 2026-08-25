@@ -64,6 +64,20 @@ describe("collectToolCalls", () => {
     ]);
   });
 
+  it("captures the model's reason on a single call, tolerating synonyms", () => {
+    expect(
+      collectToolCalls({ tool: "Foo", arguments: {}, reason: "  because X  " }),
+    ).toEqual([{ name: "Foo", args: {}, reason: "because X" }]);
+    // A synonym field, and per-entry reasons in the multi-call shape.
+    expect(collectToolCalls({ tool: "Foo", rationale: "why" })[0].reason).toBe("why");
+    expect(
+      collectToolCalls({ tools: [{ tool: "A", reason: "ra" }, { tool: "B", why: "rb" }] }),
+    ).toEqual([
+      { name: "A", args: {}, reason: "ra" },
+      { name: "B", args: {}, reason: "rb" },
+    ]);
+  });
+
   it("tolerates {name, args} in place of {tool, arguments}", () => {
     expect(collectToolCalls({ name: "Foo", args: { a: 1 } })).toEqual([
       { name: "Foo", args: { a: 1 } },

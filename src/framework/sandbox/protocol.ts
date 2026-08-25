@@ -93,6 +93,14 @@ export interface ResultMessage {
   kind: "result";
   id: string;
   value: unknown;
+  /**
+   * The process-variable names the handler read while it ran (captured in the
+   * sandbox — see `iframeSource.ts`'s `recordingVariables`). Present for a
+   * `run-handler` call; omitted for `run-agent`. Paired with the returned
+   * value's keys (the write-set), this is what `reify.ts` uses to reconstruct
+   * the run as a data-dependency DAG.
+   */
+  reads?: string[];
 }
 
 /** iframe → host: the call threw, or the source didn't compile. */
