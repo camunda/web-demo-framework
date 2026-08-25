@@ -175,13 +175,11 @@ export function RuntimeDiagram({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
   }, [activeIds, incidentIds]);
 
-  return (
-    <div
-      ref={containerRef}
-      className={className}
-      style={{ width: "100%", height: "100%" }}
-    />
-  );
+  // No inline sizing: an inline `height` beats the caller's class selector, and
+  // `height: 100%` against an auto-height parent resolves back to auto, leaving
+  // the box at the SVG's intrinsic 150px instead of the `.diagram` rule's 340px.
+  // The caller's class owns the box.
+  return <div ref={containerRef} className={className} />;
 }
 
 export default RuntimeDiagram;
