@@ -84,9 +84,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # wait-for-pages-deployment polls the Deployments API for the
-      # gh-pages build triggered by the push above.
-      deployments: read
+      # wait-for-pages-deployment polls /repos/{repo}/pages/builds.
+      pages: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,8 +102,12 @@ jobs:
           # generated hostname ever changes (it is regenerated if Pages is
           # disabled and re-enabled) or once a custom domain lands.
           pages-base-url: ${{ vars.PAGES_BASE_URL || 'fluffy-succotash-1vv1kjr.pages.github.io' }}
-          # Don't post the link until the preview is actually reachable.
-          wait-for-pages-deployment: true
+          # Holds the comment back until the preview is actually reachable.
+          # Off until the Pages source is switched to the gh-pages branch:
+          # /pages/builds is empty while Pages is workflow-sourced, so the
+          # step would poll for 180s and then fail. Set the
+          # PAGES_PREVIEW_WAIT repo variable to true once that flip is done.
+          wait-for-pages-deployment: ${{ vars.PAGES_PREVIEW_WAIT || false }}
 
   close:
     # Same fork-PR limitation as the build job above: a fork PR's close

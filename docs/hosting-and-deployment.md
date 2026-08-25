@@ -105,8 +105,16 @@ it together, and breaking any one of them reintroduces the bug:
    concurrently.
 3. `preview.yml` passes `pages-base-url` (defaulting to the generated host,
    overridable via the `PAGES_BASE_URL` repo variable) so the comment links to
-   the host that actually serves the site, plus
-   `wait-for-pages-deployment: true` so the link isn't posted before it works.
+   the host that actually serves the site.
+
+`preview.yml` can also hold the comment back until the preview is live, via
+`wait-for-pages-deployment`. That is gated behind the `PAGES_PREVIEW_WAIT`
+repo variable and **off by default**, because it depends on invariant 1 above:
+it polls `/repos/{repo}/pages/builds`, which is empty while Pages is
+workflow-sourced, so enabling it before the source flip makes every preview
+job poll for 180s and then fail. Set `PAGES_PREVIEW_WAIT` to `true` once the
+flip is done. (The job needs `pages: read` for that endpoint — note it is the
+Pages builds API, not the Deployments API.)
 
 If the custom domain (decision 1) lands, set `PAGES_BASE_URL` to it in the
 same change as the `CNAME` step — otherwise previews start pointing at the
