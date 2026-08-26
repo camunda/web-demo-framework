@@ -55,6 +55,63 @@ export function examplePath(id: string): string {
 }
 
 /**
+ * Query parameter the site-root `404.html` uses to hand a deep-linked preview
+ * path back to the preview's own build. Shared with the shim that writes it —
+ * see `spaFallback404` in vite.config.ts.
+ */
+export const HANDOFF_PARAM = "p";
+
+/**
+ * Rewrites `<base>/?p=/examples/x` back to `<base>/examples/x` in the address
+ * bar, undoing the site-root `404.html` handoff before anything reads the
+ * route.
+ *
+ * GitHub Pages answers *every* unmatched path with the site-root `404.html`,
+ * including paths under `pr-preview/pr-<n>/` where a separate build lives — so
+ * refreshing a preview deep link would otherwise boot the root (production)
+ * bundle, which can't parse a preview path and lands on the gallery. The shim
+ * in that document redirects to the preview's real `index.html` with the route
+ * in `p`; this puts it back.
+ *
+ * Returns whether it rewrote anything, for the test.
+ */
+export function restoreHandoffRoute(): boolean {
+  const params = new URLSearchParams(location.search);
+  const handoff = params.get(HANDOFF_PARAM);
+  if (!handoff) return false;
+
+  // Test what the URL parser will see, not the raw value: it strips tab, LF
+  // and CR before parsing, so `/<TAB>/evil.example` slips past a literal `//`
+  // check and only then reads as protocol-relative.
+  const candidate = handoff.replace(/[\t\n\r]/g, "");
+  if (
+    !candidate.startsWith("/") ||
+    candidate.startsWith("//") ||
+    candidate.startsWith("/\\")
+  )
+    return false;
+
+  params.delete(HANDOFF_PARAM);
+
+  // Nothing here may throw: this runs before the first render, so an
+  // unhandled error would leave the app unmounted rather than merely
+  // mis-routed.
+  try {
+    const base = new URL(basePath(), location.href);
+    const target = new URL(candidate.slice(1), base);
+    // `replaceState` rejects a cross-origin URL, which an absolute BASE_URL
+    // (assets on a CDN) would produce.
+    if (target.origin !== location.origin) return false;
+    target.search = params.toString();
+    target.hash = location.hash;
+    history.replaceState(null, "", target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Navigates client-side (no full reload) to `path`, preserving `search`/`hash`
  * unless explicitly overridden, and notifies listeners (see `useRoute`).
  */

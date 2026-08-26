@@ -211,7 +211,7 @@ body {
   }
 }
 
-.diagram,
+.runtime-diagram,
 .diagram-fallback {
   height: 340px;
   width: 100%;

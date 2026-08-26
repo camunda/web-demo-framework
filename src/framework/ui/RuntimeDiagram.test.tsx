@@ -33,6 +33,25 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>`;
 
 describe("RuntimeDiagram", () => {
+  // The sizing lives on `runtime-diagram`; without it bpmn-js has no definite
+  // height to fit against and the canvas collapses to the SVG's intrinsic 150px.
+  it("always carries its own sizing class, with or without a caller class", () => {
+    const { container: bare } = render(
+      <RuntimeDiagram xml={XML} activeIds={[]} incidentIds={[]} />,
+    );
+    expect(bare.firstElementChild).toHaveClass("runtime-diagram");
+
+    const { container: classed } = render(
+      <RuntimeDiagram
+        xml={XML}
+        activeIds={[]}
+        incidentIds={[]}
+        className="diagram"
+      />,
+    );
+    expect(classed.firstElementChild).toHaveClass("runtime-diagram", "diagram");
+  });
+
   it("imports the diagram and renders its elements", async () => {
     const { container } = render(
       <RuntimeDiagram xml={XML} activeIds={[]} incidentIds={[]} />,

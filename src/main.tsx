@@ -17,6 +17,12 @@ import "./styles.css";
 
 import { C4Provider } from "@camunda/design-system";
 import { App } from "./App";
+import { restoreHandoffRoute } from "./framework/routing";
+
+// Must run before the first render: `App` reads the route on its very first
+// pass, and a handed-off URL still says `/?p=/examples/x` until this rewrites
+// it (see `restoreHandoffRoute`).
+restoreHandoffRoute();
 
 // Dev-only hook for the sandbox self-test (src/framework/sandbox/selfTest.ts):
 // `await window.__runSandboxSelfTest()` in the devtools console. See

@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // `index.html` ships a baseline CSP <meta> tag intended for hosted/production
@@ -32,21 +32,73 @@ function stripDevCsp(): Plugin {
 // src/framework/routing.ts. `vite preview` doesn't emulate this Pages
 // behaviour, so verify deep-linked routes against a real deployment too, not
 // just `npm run preview`.
+//
+// Pages resolves that 404 against the SITE ROOT, though, even for a path under
+// `pr-preview/pr-<n>/` where a whole separate build lives. So the site-root
+// copy also has to rescue preview deep links: without the shim below,
+// refreshing one boots the production bundle, which is based elsewhere, can't
+// match a preview path, and silently lands on the gallery — the preview
+// appears to "revert to main".
+//
+// Everything is derived from `base` rather than assuming a root deployment:
+// production is only served from `/` until the PAGES_BASE_PATH repo variable
+// says otherwise (see deploy.yml), and previews sit under the site path too.
+// A preview's own 404 copy is left plain — Pages never serves it, and it is
+// already correctly based if some other host does.
+//
+// The redirect target is always the preview's real `index.html`, so this can't
+// loop: a torn-down preview 404s again at its directory root, where the shim
+// finds no route left to hand off and falls through.
+function previewHandoffShim(sitePath: string): string {
+  return `<script>
+      (function () {
+        var site = ${JSON.stringify(sitePath)};
+        if (location.pathname.indexOf(site) !== 0) return;
+        var rest = location.pathname.slice(site.length);
+        var dir = rest.match(/^pr-preview\\/pr-\\d+\\//);
+        if (!dir) return;
+        var route = rest.slice(dir[0].length);
+        if (!route) return;
+        var params = new URLSearchParams(location.search);
+        params.set("p", "/" + route);
+        location.replace(site + dir[0] + "?" + params + location.hash);
+      })();
+    </script>
+  `;
+}
+
 function spaFallback404(): Plugin {
   let outDir = "dist";
+  let shim = "";
   return {
     name: "spa-fallback-404",
     apply: "build",
     configResolved(config) {
       outDir = config.build.outDir;
+      // An absolute base (`https://host/x/`) still resolves to a path at
+      // runtime, which is all `location.pathname` can be compared against.
+      const sitePath = /^[a-z][a-z\d+\-.]*:\/\//i.test(config.base)
+        ? new URL(config.base).pathname
+        : config.base;
+      // Every build gets the shim except a preview's own, so a production
+      // deploy under a non-root PAGES_BASE_PATH still rescues preview links.
+      shim = /pr-preview\/pr-\d+\/$/.test(sitePath)
+        ? ""
+        : previewHandoffShim(sitePath);
     },
     closeBundle() {
       const resolvedOutDir = resolve(process.cwd(), outDir);
       try {
-        copyFileSync(
+        const html = readFileSync(
           resolve(resolvedOutDir, "index.html"),
-          resolve(resolvedOutDir, "404.html"),
+          "utf8",
         );
+        // Ahead of the module bundle, which is deferred, so the redirect wins
+        // the race against the app booting on the wrong base.
+        const fallback = shim
+          ? html.replace("</head>", `  ${shim}</head>`)
+          : html;
+        writeFileSync(resolve(resolvedOutDir, "404.html"), fallback);
       } catch (err) {
         // Best-effort — a custom outDir or a failed build shouldn't crash the
         // rest of the pipeline over this fallback file, but it should be
