@@ -31,7 +31,7 @@ export interface RuntimeDiagramProps {
   activeIds: string[];
   /** Element ids to highlight as incidents — marker class `nano-incident`. */
   incidentIds: string[];
-  /** Optional class for the container element (it always fills its parent). */
+  /** Extra class for the container, added alongside `runtime-diagram`. */
   className?: string;
 }
 
@@ -175,11 +175,14 @@ export function RuntimeDiagram({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
   }, [activeIds, incidentIds]);
 
+  // No inline sizing: an inline `height` beats every class selector, and
+  // `height: 100%` against an auto-height parent resolves back to auto, leaving
+  // the box at the SVG's intrinsic 150px. `runtime-diagram` carries the height
+  // instead, so the canvas has a definite one to fit against either way.
   return (
     <div
       ref={containerRef}
-      className={className}
-      style={{ width: "100%", height: "100%" }}
+      className={className ? `runtime-diagram ${className}` : "runtime-diagram"}
     />
   );
 }

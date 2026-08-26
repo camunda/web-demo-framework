@@ -12,6 +12,9 @@ import {
 } from "bpmn-js-element-templates";
 import ZeebeBehaviorsModule from "camunda-bpmn-js-behaviors/lib/camunda-cloud";
 import "bpmn-js/dist/assets/diagram-js.css";
+// Not optional: it takes the drilldown breadcrumbs out of flow, which
+// otherwise shrink the canvas below the size bpmn-js fits the model to.
+import "bpmn-js/dist/assets/bpmn-js.css";
 import "bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css";
 import "@bpmn-io/properties-panel/dist/assets/properties-panel.css";
 import "bpmn-js-element-templates/dist/assets/element-templates.css";

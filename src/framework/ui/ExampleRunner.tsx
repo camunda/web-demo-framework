@@ -62,6 +62,10 @@ const BpmnRuntimeView = lazy(async () => {
   // same dynamic import instead.
   await Promise.all([
     import("bpmn-js/dist/assets/diagram-js.css"),
+    // Not optional: it takes the drilldown breadcrumbs out of flow. Left in
+    // flow they eat ~20px inside the container that the canvas still measures
+    // as its own, so `fit-viewport` overshoots and clips the model's bottom.
+    import("bpmn-js/dist/assets/bpmn-js.css"),
     import("bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css"),
   ]);
   // `./RuntimeDiagram`, not `@nanobpm/bojtos-react`'s `BpmnRuntimeView`: that
