@@ -36,6 +36,15 @@ export interface ExampleRunControls {
   /** Advance the virtual clock by `byMs`, firing any timer now due. */
   advanceTime(byMs: number): Snapshot | null;
   /**
+   * Broadcast a signal by name, unblocking every open subscription waiting
+   * on it (`BojtosSession.broadcastSignal`) — the counterpart to
+   * `advanceTime` for a signal intermediate/boundary catch event. Used by
+   * `ExampleRunner`'s drive loop to resolve a `reason: "signals"` settle
+   * automatically, so a signal-broadcast construct still runs to completion
+   * from a single Run button rather than pausing forever on the wait.
+   */
+  broadcastSignal(signalName: string, variablesJson: string): Snapshot | null;
+  /**
    * Activate one waiting job of `jobType` and complete it directly against
    * the session, bypassing the normal `dispatchRound`/`workers` map. For a
    * job type an example deliberately excludes from the drive loop (see
@@ -59,6 +68,19 @@ export interface ExampleRunControls {
     jobType: string,
     errorCode: string,
     errorMessage: string,
+  ): Snapshot | null;
+  /**
+   * Publish `messageName`/`correlationKey` against the live session
+   * (`BojtosSession.correlateMessage`), unblocking any instance waiting on a
+   * matching message catch/boundary event and merging `variablesJson` into
+   * it. This is the in-browser stand-in for an external system publishing a
+   * message — the only way the UI can resolve a `SettleReason: "messages"`
+   * wait state (see `@nanobpm/bojtos-kit`'s `dispatchRound`/`settleReason`).
+   */
+  correlateMessage(
+    messageName: string,
+    correlationKey: string,
+    variablesJson: string,
   ): Snapshot | null;
   reset(): void;
   /**
@@ -217,6 +239,12 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     [run],
   );
 
+  const broadcastSignal = useCallback(
+    (signalName: string, variablesJson: string) =>
+      run((s) => s.broadcastSignal(signalName, variablesJson)),
+    [run],
+  );
+
   /** Activate the one waiting job of `jobType`, or throw if none is waiting. */
   function activateOne(session: BojtosSession, jobType: string) {
     const [job] = session.activateJobs(jobType, 1, 30_000, "manual-control");
@@ -240,6 +268,12 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
         const job = activateOne(s, jobType);
         return s.throwError(job.key, errorCode, errorMessage);
       }),
+    [run],
+  );
+
+  const correlateMessage = useCallback(
+    (messageName: string, correlationKey: string, variablesJson: string) =>
+      run((s) => s.correlateMessage(messageName, correlationKey, variablesJson)),
     [run],
   );
 
@@ -305,8 +339,10 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     stepWorkers,
     completeUserTask,
     advanceTime,
+    broadcastSignal,
     completeJobManually,
     throwJobError,
+    correlateMessage,
     reset,
     redeploy,
     setRunImage,

@@ -53,8 +53,11 @@ body {
   flex-wrap: wrap;
 }
 
-.example-nav {
-  display: flex;
+.example-group-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--cds-text-secondary, #525252);
 }
 
 .example-meta {

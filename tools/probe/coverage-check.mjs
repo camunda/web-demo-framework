@@ -25,6 +25,8 @@ const results = [];
 
 function record(name, ok, detail) {
   results.push({ name, ok, detail });
+  // A printed ❌ has to reach the exit status too, or CI reads a failed run as a pass.
+  if (!ok) process.exitCode = 1;
   console.log(`${ok ? "✅" : "❌"} ${name}: ${detail}`);
 }
 
@@ -120,6 +122,50 @@ async function runMultiInstanceFixture() {
   }
 }
 
+// `route` comes from the instance variables, not from `SetBranch` — that task
+// is a no-op stub standing in for whatever would compute the branch upstream,
+// so the seed is what actually decides the route here.
+async function runExclusiveGatewayFixture() {
+  const file = path.join(fixturesDir, "exclusive-gateway.bpmn");
+  const xml = readFileSync(file, "utf8");
+  const cases = [
+    { name: "route: \"fast\"", vars: { route: "fast" }, expect: "FastPath" },
+    { name: "route: \"slow\"", vars: { route: "slow" }, expect: "SlowPath" },
+    { name: "route unset", vars: {}, expect: "SlowPath" },
+  ];
+  const workers = {
+    "probe-set-branch": () => ({}),
+    "probe-fast-path": () => ({}),
+    "probe-slow-path": () => ({}),
+  };
+  const taken = [];
+  for (const c of cases) {
+    const wasm = loadWasm();
+    const session = await createBojtosSession({ wasm });
+    try {
+      const { processIds } = session.deploy(xml);
+      session.createInstance(processIds[0], JSON.stringify(c.vars));
+      const { snapshot } = await driveToQuiescence(session, workers, {}, 50);
+      const instance = snapshot.instances.find((i) => i.processId === processIds[0]);
+      const went = snapshot.takenSequenceFlows.find((f) => f.from === "Decide")?.to;
+      taken.push(
+        `${c.name} → ${went ?? "nothing"}${instance?.completed ? "" : " (did not complete!)"}`,
+      );
+      if (went !== c.expect || !instance?.completed) {
+        record(
+          "exclusive gateway (conditional + default flow)",
+          false,
+          `${c.name} took ${went ?? "no flow"} (expected ${c.expect})${instance?.completed ? "" : " and did not complete"}`,
+        );
+        return;
+      }
+    } finally {
+      session.free();
+    }
+  }
+  record("exclusive gateway (conditional + default flow)", true, taken.join(", "));
+}
+
 async function runDmnFixture() {
   // No .dmn deploy path exists in this framework yet (see issue-23's finding),
   // so this deliberately deploys the BPMN alone and expects a business-rule
@@ -146,6 +192,7 @@ async function main() {
   await runCompensationRejection();
   await runMultiInstanceFixture();
   await runErrorBoundaryFixture();
+  await runExclusiveGatewayFixture();
   await runDmnFixture();
 
   console.log("\nSummary:");

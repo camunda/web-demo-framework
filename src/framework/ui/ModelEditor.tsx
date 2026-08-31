@@ -113,6 +113,27 @@ export interface ModelEditorProps {
   onChange: (value: string) => void;
 }
 
+/**
+ * `fit-viewport` throws whenever there is nothing to fit *into*: before the
+ * first import has given the canvas a root, and while the container still
+ * measures 0×0 (the scale it computes is then non-finite, and `SVGMatrix`
+ * rejects it). Both are ordinary states on the way to a rendered diagram — a
+ * lazily-mounted editor inside a tab panel hits the second on mount — not
+ * failures, and the ResizeObserver below refits once the box is real.
+ */
+function fitViewport(modeler: InstanceType<typeof Modeler>) {
+  const canvas = modeler.get<{
+    resized?: () => void;
+    zoom: (mode: string) => void;
+  }>("canvas");
+  try {
+    canvas.resized?.();
+    canvas.zoom("fit-viewport");
+  } catch {
+    // Not yet fittable; a later resize will fit it.
+  }
+}
+
 function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const propertiesRef = useRef<HTMLDivElement | null>(null);
@@ -164,6 +185,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   // a stale promise could overwrite newer state with older XML.
   const importSeqRef = useRef(0);
   const exportSeqRef = useRef(0);
+  // Holds the pending `commandStack.changed` -> `doExport` timer (if any), so
+  // an external value change can cancel it — otherwise it fires after a
+  // "Revert" and can save the pre-revert diagram right back through `onChange`.
+  const scheduledExportRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -228,11 +253,14 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
       .importXML(value)
       .then(() => {
         if (cancelled || importSeqRef.current !== initialImportSeq) return;
-        modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
-          "fit-viewport",
-        );
+        fitViewport(modeler);
       })
       .catch((err: unknown) => {
+        // An import still in flight when this effect is torn down (a fast tab
+        // switch, or React's StrictMode double-mount in dev) fails against the
+        // now-destroyed canvas. That's the teardown working, not a bad model.
+        // A superseded import rejecting is the same non-event.
+        if (cancelled || importSeqRef.current !== initialImportSeq) return;
         // Malformed XML (e.g. a partial hand-edit made before this component
         // existed, or mid-typing in a sibling XML view) — leave the modeler
         // showing a blank canvas rather than crashing the editor.
@@ -266,11 +294,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // intermediate event — this avoids redundant `saveXML()` calls and the
     // resulting `onChange`-triggered draft rebuilds causing jank on larger
     // diagrams.
-    let scheduledExport: ReturnType<typeof setTimeout> | null = null;
     const exportChange = () => {
-      if (scheduledExport !== null) return;
-      scheduledExport = setTimeout(() => {
-        scheduledExport = null;
+      if (scheduledExportRef.current !== null) return;
+      scheduledExportRef.current = setTimeout(() => {
+        scheduledExportRef.current = null;
         doExport();
       }, 0);
     };
@@ -278,7 +305,10 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
 
     return () => {
       cancelled = true;
-      if (scheduledExport !== null) clearTimeout(scheduledExport);
+      if (scheduledExportRef.current !== null) {
+        clearTimeout(scheduledExportRef.current);
+        scheduledExportRef.current = null;
+      }
       modeler.off("commandStack.changed", exportChange);
       modeler.destroy();
       modelerRef.current = null;
@@ -306,17 +336,26 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     // while this `importXML` is still in flight.
     let cancelled = false;
     const importSeq = ++importSeqRef.current;
+    // Accepting an external value also retires any export still in flight from
+    // an earlier edit — otherwise a save that resolves after a Revert lands
+    // would hand the reverted-away XML straight back through `onChange`.
+    exportSeqRef.current++;
+    // ...and cancels one merely queued (a zero-delay `commandStack.changed`
+    // timer): left running, it would fire after this reimport and save the
+    // pre-revert diagram right back through `onChange`.
+    if (scheduledExportRef.current !== null) {
+      clearTimeout(scheduledExportRef.current);
+      scheduledExportRef.current = null;
+    }
     modeler
       .importXML(value)
       .then(() => {
         if (cancelled || importSeqRef.current !== importSeq) return;
         lastExportedRef.current = null;
-        modeler.get<{ zoom: (mode: string) => void }>("canvas").zoom(
-          "fit-viewport",
-        );
+        fitViewport(modeler);
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled || importSeqRef.current !== importSeq) return;
         console.warn("ModelEditor: import failed", err);
       });
     return () => {
@@ -391,22 +430,7 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     const modeler = modelerRef.current;
     const canvasEl = containerRef.current;
     if (!modeler || !canvasEl) return;
-    const refit = () => {
-      const canvas = modeler.get<{
-        resized: () => void;
-        zoom: (mode: string) => void;
-      }>("canvas");
-      try {
-        canvas.resized();
-        canvas.zoom("fit-viewport");
-      } catch {
-        // A ResizeObserver reports the element's initial size as soon as it's
-        // observed, which is before the first `importXML` has given the canvas
-        // a root — `fit-viewport` has nothing to fit and throws. Ignore it: the
-        // import fits the viewport itself, and every later resize has a root.
-      }
-    };
-    const observer = new ResizeObserver(() => refit());
+    const observer = new ResizeObserver(() => fitViewport(modeler));
     observer.observe(canvasEl);
     return () => observer.disconnect();
   }, []);

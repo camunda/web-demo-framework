@@ -2,7 +2,7 @@ import { AppHeader, Button } from "@camunda/design-system";
 import { ExampleRunner } from "./framework/ui/ExampleRunner";
 import { EXAMPLES } from "./examples";
 import { useRoute } from "./framework/useRoute";
-import { examplePath, galleryPath, navigate } from "./framework/routing";
+import { examplePath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
 import { readTourParam } from "./framework/tour";
 import { useEmbedHeightReporter } from "./framework/embedHeight";
@@ -33,6 +33,11 @@ export function App() {
 
   const activeId = route.kind === "example" ? route.id : EXAMPLES[0].id;
   const example = EXAMPLES.find((e) => e.id === activeId) ?? EXAMPLES[0];
+  // Split the gallery nav by `group` — existing scenario examples (no
+  // `group`, or `group: "scenario"`) render exactly as before; `learn-bpmn`
+  // examples get their own visibly-labelled section.
+  const scenarioExamples = EXAMPLES.filter((e) => e.group !== "learn-bpmn");
+  const learnBpmnExamples = EXAMPLES.filter((e) => e.group === "learn-bpmn");
 
   const goToExample = (id: string) => {
     navigate(examplePath(id), { hash: location.hash });
@@ -40,26 +45,42 @@ export function App() {
 
   const body = (
     <>
-      {!embed && route.kind === "gallery" && (
-        <nav className="example-picker">
-          {EXAMPLES.map((e) => (
-            <Button
-              key={e.id}
-              size="sm"
-              variant={e.id === example.id ? "default" : "secondary"}
-              onClick={() => goToExample(e.id)}
-            >
-              {e.title}
-            </Button>
-          ))}
-        </nav>
-      )}
-      {!embed && route.kind === "example" && (
-        <div className="example-nav">
-          <Button size="sm" variant="secondary" onClick={() => navigate(galleryPath())}>
-            ← All examples
-          </Button>
-        </div>
+      {!embed && (
+        <>
+          <nav className="example-picker" aria-label="Scenario examples">
+            {scenarioExamples.map((e) => (
+              <Button
+                key={e.id}
+                size="sm"
+                variant={e.id === example.id ? "default" : "secondary"}
+                aria-current={e.id === example.id ? "page" : undefined}
+                onClick={() => goToExample(e.id)}
+              >
+                {e.title}
+              </Button>
+            ))}
+          </nav>
+          {learnBpmnExamples.length > 0 && (
+            <>
+              <h2 className="example-group-heading" id="learn-bpmn-heading">
+                Learn BPMN
+              </h2>
+              <nav className="example-picker" aria-labelledby="learn-bpmn-heading">
+                {learnBpmnExamples.map((e) => (
+                  <Button
+                    key={e.id}
+                    size="sm"
+                    variant={e.id === example.id ? "default" : "secondary"}
+                    aria-current={e.id === example.id ? "page" : undefined}
+                    onClick={() => goToExample(e.id)}
+                  >
+                    {e.title}
+                  </Button>
+                ))}
+              </nav>
+            </>
+          )}
+        </>
       )}
       <div className="example-meta">
         {example.docsUrl && (

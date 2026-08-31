@@ -417,10 +417,132 @@ export function ExampleRunner({
           });
           break;
         }
-        if (round.handled === 0) break;
+        if (round.handled === 0) {
+          // A round with nothing handled but a waiting message subscription
+          // (`SettleReason: "messages"`) means the process is parked on a
+          // message catch/boundary event — the in-browser equivalent of an
+          // external system needing to publish it. Echo the subscription's
+          // own `messageName`/`correlationKey` straight back via
+          // `correlateMessage` (no extra variables) so a plain Run completes
+          // the demo without a separate manual step; the panel below still
+          // shows the correlation happening. Any settle reason not handled
+          // here (an unhandled job type, an incident) still just stops the
+          // loop below as before.
+          const pendingMessage = snap.messageSubscriptions[0];
+          if (round.reason === "messages" && pendingMessage) {
+            trace({
+              kind: "step",
+              text: `⏳ parked on a message catch event — waiting for "${pendingMessage.messageName}"`,
+              elementId: pendingMessage.elementId,
+            });
+            await new Promise((r) => setTimeout(r, BEAT));
+            if (runSeqRef.current !== seq) return snap;
+            trace({
+              kind: "vars",
+              text: `📨 correlating message "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey})`,
+              elementId: pendingMessage.elementId,
+            });
+            const correlated = run.correlateMessage(
+              pendingMessage.messageName,
+              pendingMessage.correlationKey,
+              "{}",
+            );
+            if (correlated) {
+              snap = correlated;
+              const correlatedVars = snap.instances[0]?.variables;
+              if (correlatedVars) setDisplayVars({ ...correlatedVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+            // `correlateMessage` returns null when the engine call threw, so
+            // without this the loop stops right after the "correlating…" line
+            // above and the failure reads as a successful correlation.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — correlating "${pendingMessage.messageName}" (key: ${pendingMessage.correlationKey}) failed`,
+              elementId: pendingMessage.elementId,
+            });
+          }
+          // The signal equivalent: a broadcast unblocks every open
+          // subscription for the name at once, so the construct runs to
+          // completion from a single Run click instead of settling "Paused".
+          if (round.reason === "signals" && snap.signalSubscriptions.length > 0) {
+            const sub = snap.signalSubscriptions[0];
+            const waiting = snap.signalSubscriptions.length;
+            trace({
+              kind: "step",
+              text: `⏳ parked on ${waiting} open signal subscription${waiting === 1 ? "" : "s"} — waiting for "${sub.signalName}"`,
+              elementId: sub.elementId,
+            });
+            await new Promise((r) => setTimeout(r, BEAT));
+            if (runSeqRef.current !== seq) return snap;
+            const next = run.broadcastSignal(sub.signalName, "{}");
+            if (next) {
+              snap = next;
+              trace({
+                kind: "vars",
+                text: `📡 broadcasting signal "${sub.signalName}" — every waiting subscription unblocks`,
+                elementId: sub.elementId,
+              });
+              const signalVars = snap.instances[0]?.variables;
+              if (signalVars) setDisplayVars({ ...signalVars });
+              await new Promise((r) => setTimeout(r, BEAT));
+              continue;
+            }
+            // `broadcastSignal` returns null when the engine call threw — say so
+            // rather than dropping out of the loop as if the run had quiesced.
+            trace({
+              kind: "error",
+              text: `▶ run stopped — broadcasting signal "${sub.signalName}" failed`,
+              elementId: sub.elementId,
+            });
+          }
+          // The timer equivalent: a pending timer that nobody's holding back
+          // for a manual-control choice (that case surfaces as
+          // "unhandledJobs" instead, since the job itself is still waiting —
+          // see `HandlerDef.manualControl`). A plain intermediate/boundary
+          // timer catch event has no job at all, so left alone the run would
+          // look finished when it's merely waiting on the clock. Jump straight
+          // to the earliest due timer and keep driving — the same move
+          // `HandlerDef.manualControl`'s `kind: "timer"` button performs by
+          // hand (see `resolveManualControl` below), just applied
+          // automatically.
+          if (round.reason === "timers") {
+            const due = snap.timers.reduce(
+              (min, t) => Math.min(min, t.dueInMs),
+              Infinity,
+            );
+            if (Number.isFinite(due)) {
+              // Log the parked state before jumping the clock, otherwise the
+              // wait — the whole point of a timer catch event — leaves no
+              // trace at all and the fast-forward reads as if nothing waited.
+              trace({
+                kind: "step",
+                text: `⏳ parked on a timer — ${(Math.max(due, 0) / 1000).toFixed(1)}s left on the clock`,
+              });
+              await new Promise((r) => setTimeout(r, BEAT));
+              if (runSeqRef.current !== seq) return snap;
+              const advanced = run.advanceTime(Math.max(due, 0) + 1);
+              if (advanced) {
+                snap = advanced;
+                trace({
+                  kind: "step",
+                  text: "🕐 the clock advanced — timer fired",
+                });
+                await new Promise((r) => setTimeout(r, BEAT));
+                continue;
+              }
+            }
+          }
+          break;
+        }
         await new Promise((r) => setTimeout(r, BEAT));
       }
 
+      // Every `continue` above re-tests the generation in the `while` head,
+      // but falling out of the loop lands here directly — without this a run
+      // superseded by Reset still appends its outcome to the cleared log.
+      if (runSeqRef.current !== seq) return snap;
       if (snap && snap.completedInstances >= 1)
         trace({ kind: "done", text: "✅ process instance completed" });
       else if (snap && snap.incidentElementIds.length > 0)
@@ -475,8 +597,13 @@ export function ExampleRunner({
           });
         }
       } finally {
-        runningRef.current = false;
-        setRunning(false);
+        // Same generation guard as `start` above — a Reset followed by a new
+        // run before this call's own awaits settle must not have this stale
+        // call mark the new run idle.
+        if (runSeqRef.current === seq) {
+          runningRef.current = false;
+          setRunning(false);
+        }
       }
     },
     [pendingManualJob, run, trace, driveLoop],
@@ -664,11 +791,13 @@ export function ExampleRunner({
     // kick off a second redeploy/createInstance.
     runningRef.current = true;
     setRunning(true);
+    // Captured before the `try` (not inside it) so the `finally` below can
+    // still read it after a superseded call's awaits settle.
+    const seq = ++runSeqRef.current;
     try {
       let workers = workersRef.current;
       let agents = agentsRef.current;
       let snap = run.snapshot;
-      const seq = ++runSeqRef.current;
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
@@ -683,8 +812,14 @@ export function ExampleRunner({
 
       await driveLoop(workers, agents, snap, seq);
     } finally {
-      runningRef.current = false;
-      setRunning(false);
+      // A Reset (bumping `runSeqRef`) followed by a new Start/manual-resume
+      // before this call's own awaits settle would otherwise have this stale
+      // call's cleanup mark the *new* run idle — only clear state if this is
+      // still the current generation.
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setRunning(false);
+      }
     }
   }, [run, stepping, draft.hasErrors, canResume, beginRun, driveLoop]);
 
@@ -709,6 +844,10 @@ export function ExampleRunner({
     // pending slips past the check above and starts a second instance.
     runningRef.current = true;
     setStepping(true);
+    // Captured for the same reason `start`/`resolveManualControl` capture it —
+    // a Reset during one of this call's awaits must stop it from clobbering a
+    // newer run's state in the `finally` below.
+    const seq = ++runSeqRef.current;
     try {
       let workers = workersRef.current;
       let agents = agentsRef.current;
@@ -747,8 +886,10 @@ export function ExampleRunner({
         describeRound(round, flows, elementLabels, manualControls),
       );
     } finally {
-      runningRef.current = false;
-      setStepping(false);
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setStepping(false);
+      }
     }
   }, [
     run,
@@ -786,6 +927,11 @@ export function ExampleRunner({
       JSON.stringify(reviewValues),
     );
     trace({ kind: "human", text: `👤 ${safeStringify(reviewValues)}` });
+    // A completed instance reports `variables: {}`, so read the snapshot over
+    // the submission only while there's still an instance carrying state —
+    // otherwise completing the last task would blank the card.
+    const vars = snap?.instances[0]?.variables;
+    setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
     if (snap && snap.completedInstances >= 1)
       trace({ kind: "done", text: "✅ process instance completed" });
   }, [openUserTask, reviewValues, run, trace]);
@@ -811,11 +957,24 @@ export function ExampleRunner({
     return <Badge variant="neutral">Ready</Badge>;
   }, [run.phase, run.snapshot, running, stepping, openUserTask]);
 
+  // A blurb is plain prose authored with blank lines between paragraphs; one
+  // `<p>` per paragraph so a long explanation isn't a single wall of text.
+  const blurbParagraphs = useMemo(
+    () =>
+      example.blurb
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean),
+    [example.blurb],
+  );
+
   return (
     <div className="runner">
       <section className="intro">
         <h1>{example.title}</h1>
-        <p>{example.blurb}</p>
+        {blurbParagraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
         <div className="controls">
           <Button
             data-tour={TOUR_ANCHOR.runButton}
@@ -1102,7 +1261,7 @@ export function ExampleRunner({
             className="editors"
             data-tour={TOUR_ANCHOR.codePanel}
             title="Code"
-            description="One handler per BPMN element. Return variables to merge, or throw to fail the job."
+            description="One handler per BPMN element, plus a model tab holding the editable diagram — select an element there to edit its properties. Return variables to merge, or throw to fail the job."
           >
             <Suspense
               fallback={
@@ -1133,7 +1292,10 @@ export function ExampleRunner({
                 <TabsContent value={MODEL_TAB}>
                   <div className="editor-meta">
                     <strong>Model</strong>
-                    <code>edit the diagram visually — Run re-checks it below</code>
+                    <code>
+                      click an element to edit its properties on the right — Run
+                      re-reads whatever you leave here
+                    </code>
                     <Button
                       variant="secondary"
                       size="sm"
