@@ -233,17 +233,19 @@ export function ExampleRunner({
   const [activeTab, setActiveTab] = useState<string>(
     model.agent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
   );
-  // Which preset the segmented scenario picker shows as chosen. Seeded by
-  // matching the starting payload rather than assuming the first entry, so an
-  // example whose `seed` isn't one of its scenarios starts with none selected.
-  const [selectedScenario, setSelectedScenario] = useState<number | null>(() => {
+  // Which preset the segmented picker shows as chosen. Derived from the live
+  // payload rather than held as state, so editing the start form deselects a
+  // preset the input no longer matches instead of leaving a stale pill lit.
+  // Matched against `startValues`, not `example.seed`: the two differ whenever
+  // a start form contributes defaults.
+  const selectedScenario = useMemo(() => {
     const i = (example.scenarios ?? []).findIndex((s) =>
       Object.entries(s.variables).every(
-        ([k, v]) => JSON.stringify(example.seed[k]) === JSON.stringify(v),
+        ([k, v]) => JSON.stringify(startValues[k]) === JSON.stringify(v),
       ),
     );
     return i === -1 ? null : i;
-  });
+  }, [example.scenarios, startValues]);
   // An example with a real start form opens it on a first visit — its fields
   // may be required, and Run stays disabled until they're filled.
   const [startOpen, setStartOpen] = usePersistentDisclosure("start", !!startSchema);
@@ -1032,10 +1034,9 @@ export function ExampleRunner({
                 variant={i === selectedScenario ? "default" : "secondary"}
                 aria-pressed={i === selectedScenario}
                 disabled={running}
-                onClick={() => {
-                  setSelectedScenario(i);
-                  setStartValues((prev) => ({ ...prev, ...s.variables }));
-                }}
+                onClick={() =>
+                  setStartValues((prev) => ({ ...prev, ...s.variables }))
+                }
               >
                 {s.label}
               </Button>
