@@ -46,7 +46,9 @@ function systemMessage(
   spec: AgentSpec,
   allowMultiToolTurns: boolean,
   /**
-   * The tools that can still be called. Only these are listed.
+   * The tools that can still be called. Only these are listed, and there is
+   * always at least one — the agent completes rather than asking a model to
+   * confirm a conclusion it has no move left to reach.
    *
    * Listing the full set every turn and relying on "do not call these again"
    * elsewhere in the prompt does not work on a small model: the manifest reads
@@ -62,15 +64,6 @@ function systemMessage(
   // Show the format with a real tool name from this diagram — a small model
   // copies the example far more reliably than it follows a description of it.
   const example = callable[0] ?? spec.tools[0];
-
-  if (callable.length === 0) {
-    return `${authored}
-
-Every tool has already run. Reply with JSON only — no prose, no explanation, no
-markdown fence — exactly:
-
-{"done": true}`;
-  }
   const exampleArgs = example?.args.length
     ? `{${example.args.map((a) => `"${a.name}": "…"`).join(", ")}}`
     : "{}";
@@ -410,6 +403,20 @@ export interface LiveAgentOptions {
   requiredTools?: string[];
   /** How many premature "done" replies to answer with a reminder. Default 1. */
   maxEarlyDoneNudges?: number;
+  /**
+   * How many turns in a row may activate nothing before the agent completes.
+   * Default 3.
+   *
+   * A retry is only worth spending when the next reply might differ. Past a
+   * few rejected turns it doesn't: the model has stopped tracking the format
+   * and is emitting fragments — `{"toolCallResult": "cleared"}`,
+   * `{"geneMarker": "TP53"}`, the same spent tool again — until
+   * `spec.maxModelCalls` finally stops it. Observed end to end with Chrome's
+   * Gemini Nano, which did its four tool calls correctly and then spent six
+   * more turns failing to say so. Ending on the streak reports what actually
+   * happened instead of padding the trace with six identical refusals.
+   */
+  maxUnproductiveTurns?: number;
 }
 
 export function makeLiveAgent(
@@ -425,6 +432,7 @@ export function makeLiveAgent(
     turnRef,
     requiredTools = [],
     maxEarlyDoneNudges = 1,
+    maxUnproductiveTurns = 3,
   } = opts;
 
   // Per-run state. The engine re-emits the agent job after each activated tool
@@ -460,10 +468,26 @@ export function makeLiveAgent(
     //
     // Unit tests didn't catch it because they call this handler in a loop
     // themselves, which is precisely the behaviour the engine does not provide.
+    //
+    // Every retry in a sequence happens inside this one invocation — a turn
+    // that activates something returns to the engine — so a local counter is
+    // exactly the "in a row" the streak cap means.
+    let unproductive = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const outcome = await runTurn();
       if (outcome) return outcome;
+      unproductive += 1;
+      if (unproductive >= maxUnproductiveTurns) {
+        trace({
+          kind: "error",
+          text:
+            `🤖 ${unproductive} turns in a row activated nothing — completing the agent. ` +
+            "The model has lost the reply format; whatever it has already run stands.",
+          turn,
+        });
+        return { completionConditionFulfilled: true };
+      }
     }
 
     /** One model call. Returns a result to hand back, or `null` to try again. */
@@ -483,6 +507,21 @@ export function makeLiveAgent(
     const remaining = allowRepeats
       ? spec.tools
       : spec.tools.filter((t) => !called.has(t.elementId));
+
+    // Nothing is callable, so there is no reply that could change anything:
+    // "done" is accepted and anything else is refused. Asking anyway is a
+    // formality only a capable model passes — Gemini Nano answered the
+    // "reply {"done": true}" prompt with six more turns of spent tool names
+    // and JSON fragments. The agent is finished; say so rather than spending
+    // the rest of the budget waiting to be told.
+    if (remaining.length === 0) {
+      trace({
+        kind: "agent",
+        text: "🤖 every tool has run — completing the agent",
+        turn,
+      });
+      return { completionConditionFulfilled: true };
+    }
 
     const messages: ChatMessage[] = [
       {

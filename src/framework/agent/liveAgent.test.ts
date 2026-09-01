@@ -184,25 +184,76 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
     expect(systems[1]).toContain("ToolB");
   });
 
-  it("tells the model to finish when nothing is left to call", async () => {
+  it("completes without asking once nothing is left to call", async () => {
+    // Asking a model to confirm a conclusion it has no move left to reach is
+    // a formality only a capable model passes. Gemini Nano answered it with
+    // six turns of spent tool names and JSON fragments before the budget ran
+    // out; there is no reply that could have changed the outcome.
     const systems: string[] = [];
     const replies = [
       '{"tool": "ToolA", "arguments": {"code": "A1"}}',
       '{"tool": "ToolB", "arguments": {"code": "B1"}}',
-      '{"done": true}',
     ];
     const chat: ChatFn = async (messages) => {
       systems.push(messages[0]!.content);
-      return replies.shift() ?? '{"done": true}';
+      return replies.shift() ?? '{"tool": "ToolA", "arguments": {}}';
     };
-    const agent = makeLiveAgent(makeSpec(), chat, () => {});
+    const trace: { kind: string; text: string }[] = [];
+    const agent = makeLiveAgent(makeSpec(), chat, (e) => trace.push(e));
 
     await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
     await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
     const third = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
 
-    expect(systems[2]).toContain("Every tool has already run");
     expect(third.completionConditionFulfilled).toBe(true);
+    // The third invocation never reached the model.
+    expect(systems).toHaveLength(2);
+    expect(trace.some((e) => e.text.includes("every tool has run"))).toBe(true);
+  });
+
+  it("stops after a streak of turns that activate nothing", async () => {
+    // The backstop for the case the check above doesn't cover: tools are still
+    // callable, but the model has lost the format and every reply is refused.
+    // `spec.maxModelCalls` would eventually end it — after filling the trace
+    // with identical refusals the reader has to scroll past.
+    const trace: { kind: string; text: string }[] = [];
+    const chat = fakeChat([
+      '{"toolCallResult": "cleared"}',
+      '{"tool": "NotARealTool", "arguments": {}}',
+      '{"geneMarker": "TP53"}',
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+    ]);
+    const spec = { ...makeSpec(), maxModelCalls: 20 };
+    const result = await makeLiveAgent(spec, chat, (e) => trace.push(e))({
+      elementId: "Agent",
+      variables: {},
+      type: "x",
+    } as never);
+
+    expect(result.completionConditionFulfilled).toBe(true);
+    expect(result.activateElements).toBeUndefined();
+    expect(trace.some((e) => e.text.includes("activated nothing"))).toBe(true);
+    expect(trace.some((e) => e.text.includes("Turn budget spent"))).toBe(false);
+  });
+
+  it("counts the streak consecutively, not cumulatively", async () => {
+    // A model that recovers must not be punished for earlier bad turns: the
+    // counter is per-invocation, and a turn that activates something returns
+    // to the engine.
+    const chat = fakeChat([
+      "not json at all",
+      '{"tool": "NotARealTool", "arguments": {}}',
+      '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+      "not json at all",
+      '{"tool": "ToolB", "arguments": {"code": "B1"}}',
+    ]);
+    const agent = makeLiveAgent({ ...makeSpec(), maxModelCalls: 20 }, chat, () => {});
+
+    const first = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    const second = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(first.activateElements?.[0]?.elementId).toBe("ToolA");
+    expect(second.activateElements?.[0]?.elementId).toBe("ToolB");
   });
 
   it("does not forbid repeats when the caller allows them", async () => {
@@ -233,10 +284,13 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
   it("stops asking once the model-call budget is spent", async () => {
     const trace: { kind: string; text: string }[] = [];
     // Never says anything usable: the budget is what has to end this, and it
-    // has to end as a completion rather than an empty result.
+    // has to end as a completion rather than an empty result. The streak cap
+    // is lifted so the budget is the thing under test.
     const chat = fakeChat(Array.from({ length: 20 }, () => "nonsense"));
     const spec = { ...makeSpec(), maxModelCalls: 3 };
-    const result = await makeLiveAgent(spec, chat, (e) => trace.push(e))({
+    const result = await makeLiveAgent(spec, chat, (e) => trace.push(e), {
+      maxUnproductiveTurns: 20,
+    })({
       elementId: "Agent",
       variables: {},
       type: "x",

@@ -19,6 +19,7 @@ import { repeatCall } from "./fixtures/repeatCall.mjs";
 import { inventedTool } from "./fixtures/inventedTool.mjs";
 import { proseWrappedReply } from "./fixtures/proseWrappedReply.mjs";
 import { markdownFenceReply } from "./fixtures/markdownFenceReply.mjs";
+import { neverSaysDone, lostTheFormat } from "./fixtures/neverSaysDone.mjs";
 
 const DONE = '{"done": true}';
 
@@ -253,6 +254,50 @@ export const scenarios = [
       return result.variables.complianceScore === 12
         ? []
         : [`expected complianceScore 12 from coerced string args, got ${JSON.stringify(result.variables.complianceScore)}`];
+    },
+  },
+  {
+    name: "a model that can't say done still ends after its last tool",
+    description:
+      'Gemini Nano\'s real failure mode: all four tools called correctly, then six turns of echoed results and spent tool names because it can\'t produce {"done": true}. With nothing left to call there is no reply that could change anything, so the model is never asked.',
+    spec: complianceAgentSpec,
+    toolStubs: complianceToolStubs,
+    replies: [
+      '{"tool": "VerifyGeneticMarker", "arguments": {"geneMarker": "TP53"}, "done": false}',
+      '{"tool": "CheckDestinationCountry", "arguments": {"countryCode": "BR"}, "done": false}',
+      '{"tool": "ComputeComplianceScore", "arguments": {"intA": 4, "intB": 8}, "done": false}',
+      '{"tool": "RecordComplianceDecision", "arguments": {"decision": "cleared"}, "done": false}',
+      ...neverSaysDone,
+    ],
+    check(result) {
+      const reasons = [];
+      if (result.variables.decision !== "cleared")
+        reasons.push(`expected decision "cleared", got ${JSON.stringify(result.variables.decision)}`);
+      if (!result.completed) reasons.push("run did not complete");
+      if (result.activatedOrder.length !== 4)
+        reasons.push(`expected exactly the four tools to run, got ${result.activatedOrder}`);
+      if (includesTrace(result.trace, "Turn budget spent"))
+        reasons.push("the budget ended the run — the junk turns were spent, not skipped");
+      if (!includesTrace(result.trace, "every tool has run"))
+        reasons.push("expected the run to end on 'every tool has run' without asking again");
+      return reasons;
+    },
+  },
+  {
+    name: "a streak of turns that activate nothing ends the run",
+    description:
+      "The same failure with tools still callable: the model has lost the reply format, so retrying only produces more of the same. Ends on the streak rather than filling the trace with identical refusals until the budget runs out.",
+    spec: complianceAgentSpec,
+    toolStubs: complianceToolStubs,
+    replies: lostTheFormat,
+    check(result) {
+      const reasons = [];
+      if (!result.completed) reasons.push("run did not complete");
+      if (result.activatedOrder.length !== 0)
+        reasons.push(`expected nothing activated, got ${result.activatedOrder}`);
+      if (!includesTrace(result.trace, "activated nothing"))
+        reasons.push("expected a trace entry naming the unproductive streak");
+      return reasons;
     },
   },
 ];
