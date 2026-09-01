@@ -1,4 +1,5 @@
 import { AppHeader, Button } from "@camunda/design-system";
+import { Fragment } from "react";
 import { ExampleRunner } from "./framework/ui/ExampleRunner";
 import { EXAMPLES } from "./examples";
 import { useRoute } from "./framework/useRoute";
@@ -6,6 +7,28 @@ import { examplePath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
 import { readTourParam } from "./framework/tour";
 import { useEmbedHeightReporter } from "./framework/embedHeight";
+import type { ExampleHero } from "./framework/types";
+
+/** The hero shown for an example that doesn't supply one of its own. */
+const DEFAULT_HERO: ExampleHero = {
+  headline: "The model *runs*. The code is *yours* to edit.",
+  lede: "Every example on this page is a real BPMN process executing in your browser on the nano WebAssembly engine — edit the model, edit the handlers, swap the LLM, and run it again.",
+  tagline: "Runnable Camunda examples",
+};
+
+/**
+ * Renders a headline, turning `*emphasised*` runs into accent-coloured `<em>`.
+ * Keeps example manifests as plain `.ts` data (see `ExampleHero`).
+ */
+function Headline({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/\*([^*]+)\*/g).map((part, i) =>
+        i % 2 === 1 ? <em key={i}>{part}</em> : <Fragment key={i}>{part}</Fragment>,
+      )}
+    </>
+  );
+}
 
 /**
  * The gallery shell, plus routing:
@@ -43,10 +66,18 @@ export function App() {
     navigate(examplePath(id), { hash: location.hash });
   };
 
+  const hero = example.hero ?? DEFAULT_HERO;
+
   const body = (
     <>
       {!embed && (
         <>
+          <section className="hero">
+            <h1>
+              <Headline text={hero.headline} />
+            </h1>
+            {hero.lede && <p>{hero.lede}</p>}
+          </section>
           <nav className="example-picker" aria-label="Scenario examples">
             {scenarioExamples.map((e) => (
               <Button
@@ -127,16 +158,20 @@ export function App() {
   return (
     <div className="c4-ui app-shell">
       <AppHeader
+        className="topbar"
+        logo={<span className="brand-dot" aria-hidden />}
         appName="Runnable Camunda examples"
         trailing={
-          <span className="app-subtitle">
-            model + code + optional LLM, in your browser
-          </span>
+          <span className="app-subtitle">{hero.tagline ?? DEFAULT_HERO.tagline}</span>
         }
       />
       <main id="main" className="layout">
         {body}
       </main>
+      <footer className="footer">
+        Running locally in your browser on the nano WebAssembly BPMN engine — no
+        cluster, no server, no data leaving the page.
+      </footer>
     </div>
   );
 }

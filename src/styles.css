@@ -1,5 +1,69 @@
+/* Design tokens matched to camunda.com/orchestrate/agents: white page and
+   surfaces, gray-200 hairlines, gray-900 ink over gray-500 muted, Camunda
+   orange (#FC5D0D) accent, green for positive, Inter type. Shared with the
+   seed-export-compliance-agent demo so the two read as one product surface.
+
+   Names here are deliberately distinct from the design system's own token
+   names (--background, --foreground, --border, --muted, --radius), which it
+   defines on `.c4-ui`; those are re-pointed in the block below instead of
+   being shadowed with different meanings. */
 :root {
   color-scheme: light;
+
+  --page-bg: #ffffff;
+  --surface: #ffffff;
+  --surface-3: #f7f8fa;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --ink: #18181b;
+  --ink-muted: #3f3f46;
+  --ink-muted-2: #6b7280;
+  --orange: #fc5d0d;
+  --orange-hover: #e04d00;
+  --orange-tint-bg: rgba(252, 93, 13, 0.1);
+  --orange-tint-border: rgba(252, 93, 13, 0.35);
+  --green: #12905a;
+  --green-tint: rgba(18, 144, 90, 0.1);
+  --red: #dc2626;
+  --red-tint: rgba(220, 38, 38, 0.08);
+  --blue: #2563eb;
+  --blue-tint: rgba(37, 99, 235, 0.06);
+  --amber: #d97706;
+  --amber-ink: #b45309;
+  --amber-tint: rgba(217, 119, 6, 0.07);
+
+  --card-radius: 16px;
+  --panel-radius: 12px;
+  --card-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  --ui-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --ui-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Re-point the design system's own tokens (declared on `.c4-ui` in
+   @camunda/design-system/styles.css) at the palette above, so Button, Badge,
+   Alert, Tabs and Card inherit the re-skin rather than being replaced by
+   hand-rolled markup. This stylesheet is imported after the design system's,
+   so the equal specificity resolves our way. */
+.c4-ui {
+  --font-sans: var(--ui-sans);
+  --font-mono: var(--ui-mono);
+  --background: var(--page-bg);
+  --foreground: var(--ink);
+  --border: var(--line);
+  --radius: 0.75rem;
+
+  /* The design system reserves brand orange for focus rings and keeps its
+     primary action neutral-dark (zinc-950). The demo's primary CTA is the
+     orange itself, so re-point the primary-action tokens — every default
+     `Button` picks this up without touching a call site. */
+  --primary-action-default: var(--orange);
+  --primary-action-hover: var(--orange-hover);
+  --primary-action-active: var(--orange-hover);
+  --primary-action-disabled: rgba(252, 93, 13, 0.45);
+  --primary-action-foreground: #ffffff;
 }
 
 * {
@@ -23,23 +87,48 @@ body,
 }
 
 body {
-  background: var(--background, #f7f8fa);
-  color: var(--foreground, #1a1a1a);
-  font-family:
-    "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    sans-serif;
+  background: var(--page-bg);
+  color: var(--ink);
+  font-family: var(--ui-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .app-shell {
   min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--page-bg);
+}
+
+/* AppHeader, re-skinned as the demo's hairline top bar. `logo` carries the
+   accent dot; `trailing` carries the example's uppercase tagline. */
+.topbar {
+  background: var(--page-bg);
+  border-bottom: 1px solid var(--line);
+}
+.brand-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--orange);
+  box-shadow: 0 0 0 4px var(--orange-tint-bg);
 }
 .app-subtitle {
-  font-size: 13px;
-  opacity: 0.6;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-muted-2);
 }
 
 .layout {
+  flex: 1 1 auto;
   max-width: 1360px;
+  width: 100%;
   margin: 0 auto;
   padding: 20px 20px 48px;
   display: flex;
@@ -47,17 +136,78 @@ body {
   gap: 20px;
 }
 
+/* Per-example headline (ExampleDef.hero); `*emphasis*` renders as accented
+   <em> — see the `Headline` component in App.tsx. */
+.hero {
+  max-width: 820px;
+  padding: 20px 2px 4px;
+}
+.hero h1 {
+  margin: 0 0 16px;
+  font-size: clamp(30px, 5vw, 50px);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--orange);
+}
+.hero p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--ink-muted);
+}
+
+.footer {
+  max-width: 1360px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 22px 20px 40px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-muted-2);
+}
+
+/* Gallery nav as a row of pills, matching the demo's scenario toggle. A
+   segmented track would be wrong here: there are enough examples to wrap onto
+   several rows, which a single 999px-radius container can't sit around. The
+   children stay design-system `Button`s. */
 .example-picker {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 8px;
+}
+.example-picker button {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 6px 16px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.example-picker button:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+.example-picker button[aria-current="page"],
+.example-picker button[aria-current="page"]:hover {
+  border-color: transparent;
+  background: var(--orange);
+  color: #fff;
 }
 
 .example-group-heading {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--cds-text-secondary, #525252);
+  margin: 6px 0 -8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-muted-2);
 }
 
 .example-meta {
@@ -70,9 +220,9 @@ body {
 .docs-link,
 .open-full-page {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   text-decoration: none;
-  color: var(--primary, #2563eb);
+  color: var(--orange);
 }
 .docs-link:hover,
 .open-full-page:hover {
@@ -93,24 +243,40 @@ body {
      the height the host just granted, so the two would ratchet each other
      upwards instead of settling. */
 }
+/* Embedded, the host page already provides the card; a second shadowed one
+   inside the iframe would read as a box in a box. */
+.layout-embed .runner {
+  padding: 16px;
+  border: 0;
+  box-shadow: none;
+}
 
+/* The runner is the demo's single big white card; the panels inside it are
+   hairline sub-cards rather than shadowed ones, so the nesting stays flat. */
 .runner {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  padding: 32px 32px 26px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
 }
 
 .intro h1 {
-  font-size: 24px;
-  line-height: 1.2;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
+  font-size: clamp(20px, 2.5vw, 28px);
   font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
 }
 .intro p {
   max-width: 78ch;
-  margin: 0 0 14px;
-  line-height: 1.55;
-  opacity: 0.85;
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-muted-2);
 }
 
 .controls {
@@ -121,16 +287,35 @@ body {
   margin-bottom: 8px;
 }
 
+/* Pill buttons throughout, matching the demo's action row. */
+.controls button,
+.brain-kinds button,
+.brain-actions button {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+/* Diagram left, agent activity right — the demo's split. The code and model
+   editors moved out to `.runner-secondary` below, so the left column no
+   longer has to reserve width for them. */
 .grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
 }
 @media (max-width: 1100px) {
   .grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Full-width stack under the grid: the editors and the tool manifest, which
+   the demo has no counterpart for and which are unreadable in a column. */
+.runner-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .col {
@@ -140,20 +325,15 @@ body {
   min-width: 0;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-@media (max-width: 560px) {
-  .row {
-    grid-template-columns: 1fr;
-  }
-}
-
 .panel,
 .grow {
   min-width: 0;
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+  box-shadow: none;
 }
 
 /* Collapsible panel header — the whole header row is the disclosure trigger
@@ -175,7 +355,7 @@ body {
   font: inherit;
 }
 .panel-trigger:focus-visible {
-  outline: 2px solid var(--ring, #3b82f6);
+  outline: 2px solid var(--orange);
   outline-offset: -2px;
   border-radius: 8px;
 }
@@ -186,20 +366,21 @@ body {
   min-width: 0;
 }
 .panel-title {
-  font-weight: 500;
-  font-size: 16px;
+  font-weight: 600;
+  font-size: 15px;
   line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 .panel-desc {
   font-size: 13px;
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
 }
 .panel-chevron {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
   margin-top: 3px;
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
   transition: transform 0.18s ease;
 }
 .panel-trigger[data-state="open"] .panel-chevron {
@@ -219,26 +400,71 @@ body {
 .diagram-fallback {
   display: grid;
   place-items: center;
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
   font-size: 14px;
-  border: 1px dashed var(--border, #e5e7eb);
+  border: 1px dashed var(--line);
   border-radius: 8px;
 }
 
-/* Token + incident markers for BpmnRuntimeView. */
+/* Token + incident markers for BpmnRuntimeView. bpmn-js renders its native
+   light palette (dark strokes on white), which suits the white card — so we
+   keep it and only layer the highlights on top. Its inline styles mean every
+   override needs !important. */
 .diagram .nano-active .djs-visual > :nth-child(1) {
-  stroke: #10b981 !important;
+  stroke: var(--orange) !important;
   stroke-width: 3px !important;
+}
+.diagram .nano-active .djs-visual > rect,
+.diagram .nano-active .djs-visual > circle,
+.diagram .nano-active .djs-visual > polygon {
+  fill: rgba(252, 93, 13, 0.12) !important;
+}
+.diagram .nano-active {
+  animation: tokenPulse 1.3s ease-in-out infinite;
+}
+@keyframes tokenPulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px rgba(252, 93, 13, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 10px rgba(252, 93, 13, 0.85));
+  }
 }
 .diagram .nano-incident .djs-visual > :nth-child(1) {
-  stroke: #ef4444 !important;
+  stroke: var(--red) !important;
   stroke-width: 3px !important;
-  fill: #fee2e2 !important;
+}
+.diagram .nano-incident .djs-visual > rect,
+.diagram .nano-incident .djs-visual > circle,
+.diagram .nano-incident .djs-visual > polygon {
+  fill: rgba(220, 38, 38, 0.12) !important;
 }
 .diagram .nano-token {
-  font-size: 11px;
-  font-weight: 600;
-  color: #047857;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff8a50, var(--orange));
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 2px rgba(252, 93, 13, 0.35),
+    0 0 12px 2px rgba(252, 93, 13, 0.6);
+  pointer-events: none;
+}
+
+/* Connector-template icons (see ui/diagramIcons.ts). Where a template icon is
+   shown, bpmn-js's own task-type marker is hidden so the two don't overlap. */
+.diagram-modeler-icon {
+  pointer-events: none;
+}
+.diagram-service-icon > .djs-visual > circle,
+.diagram-service-icon > .djs-visual > path:not(.diagram-modeler-icon) {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .diagram .nano-active {
+    animation: none;
+  }
 }
 
 .vars {
@@ -248,9 +474,31 @@ body {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ui-mono);
   font-size: 12px;
   line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* The live instance payload, as the activity panel's footer (see the
+   `variables` slot on TraceTimeline). */
+.vars-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.vars-head {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-muted-2);
+}
+.vars-block .vars {
+  min-height: 0;
+  max-height: 180px;
+  font-size: 11.5px;
 }
 
 .log {
@@ -260,43 +508,43 @@ body {
   min-height: 90px;
   max-height: 220px;
   overflow: auto;
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ui-mono);
   font-size: 12px;
   line-height: 1.5;
 }
 .log-empty {
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
 }
 .log-line {
   white-space: pre-wrap;
   word-break: break-word;
 }
 .log-start {
-  color: #6b7280;
+  color: var(--ink-muted-2);
 }
 .log-agent {
-  color: #7c3aed;
+  color: var(--orange);
   font-weight: 600;
 }
 .log-llm {
-  color: #9333ea;
+  color: var(--orange);
 }
 .log-tool {
-  color: #2563eb;
+  color: var(--blue);
 }
 .log-vars {
-  color: #059669;
+  color: var(--green);
 }
 .log-human {
-  color: #b45309;
+  color: var(--amber-ink);
   font-weight: 600;
 }
 .log-done {
-  color: #059669;
+  color: var(--green);
   font-weight: 600;
 }
 .log-error {
-  color: #dc2626;
+  color: var(--red);
   font-weight: 600;
 }
 .log-step {
@@ -317,18 +565,69 @@ body {
   min-height: 90px;
   max-height: 340px;
   overflow: auto;
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ui-mono);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* Top-level trace rows read as the demo's tinted log cards: a coloured left
+   rule, a faint wash of the same hue, and a short fade-in as each lands.
+   Scoped to direct children so the rows nested inside a turn card (which is
+   already a card) stay plain. */
+.timeline > .log-line {
+  padding: 9px 10px;
+  border-radius: 8px;
+  border-left: 2px solid var(--line-strong);
+  background: rgba(16, 24, 40, 0.02);
+  animation: logIn 0.25s ease;
+}
+.timeline > .log-tool {
+  border-left-color: var(--blue);
+  background: var(--blue-tint);
+}
+.timeline > .log-agent,
+.timeline > .log-llm {
+  border-left-color: var(--orange);
+  background: var(--orange-tint-bg);
+}
+.timeline > .log-human,
+.timeline > .log-step {
+  border-left-color: var(--amber);
+  background: var(--amber-tint);
+}
+.timeline > .log-done,
+.timeline > .log-vars {
+  border-left-color: var(--green);
+  background: var(--green-tint);
+}
+.timeline > .log-error {
+  border-left-color: var(--red);
+  background: var(--red-tint);
+}
+@keyframes logIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timeline > .log-line {
+    animation: none;
+  }
 }
 .timeline-turn {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--orange);
   border-radius: 8px;
-  background: var(--muted, #fafafa);
+  background: var(--orange-tint-bg);
 }
 .timeline-turn-head {
   display: flex;
@@ -336,27 +635,27 @@ body {
   gap: 8px;
 }
 .timeline-pending {
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
   font-style: italic;
 }
 .timeline-reply {
   margin: 0;
   padding-left: 10px;
-  border-left: 3px solid #9333ea;
-  color: #6b21a8;
+  border-left: 3px solid var(--orange);
+  color: var(--ink-muted);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .timeline-note {
-  color: #7c3aed;
+  color: var(--orange-hover);
 }
 .timeline-tool {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 6px 8px;
-  border-left: 3px solid #2563eb;
-  background: var(--background, #fff);
+  border-left: 3px solid var(--blue);
+  background: var(--surface);
   border-radius: 4px;
 }
 .timeline-tool-head {
@@ -370,11 +669,11 @@ body {
   align-items: baseline;
 }
 .timeline-kv-label {
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
   font-weight: 600;
 }
 .timeline-error {
-  color: #dc2626;
+  color: var(--red);
   font-weight: 600;
 }
 .timeline-engine-view {
@@ -383,8 +682,58 @@ body {
   gap: 12px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed var(--border, #e5e7eb);
+  border-top: 1px dashed var(--line);
   font-size: 12px;
+}
+
+/* Engine-side counters, folded away under the variables block. A native
+   <details> rather than a nested CollapsibleCard — a card inside a card
+   reads as a box in a box. */
+.engine-view {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.engine-view > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-muted-2);
+}
+.engine-view > summary::-webkit-details-marker {
+  display: none;
+}
+.engine-view > summary::before {
+  content: "▸";
+  font-size: 10px;
+  transition: transform 0.18s ease;
+}
+.engine-view[open] > summary::before {
+  transform: rotate(90deg);
+}
+.engine-view > summary:hover {
+  color: var(--ink);
+}
+.engine-view > summary:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.engine-view .timeline-engine-view {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .engine-view > summary::before {
+    transition: none;
+  }
 }
 .timeline-engine-view ul {
   margin: 4px 0 0;
@@ -402,12 +751,16 @@ body {
 .intro code,
 .field-hint code,
 .tool-list code {
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ui-mono);
   font-size: 0.9em;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
 }
 
 .editor-wrap {
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -431,7 +784,7 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 0.9em;
-  color: var(--muted-foreground, #6b7280);
+  color: var(--ink-muted-2);
 }
 /* The template picker takes the slack so the expand button sits right. */
 .model-editor-template-picker {
@@ -441,15 +794,18 @@ body {
 .model-editor-expand {
   flex: 0 0 auto;
   font: inherit;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  padding: 4px 10px;
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 6px;
-  background: var(--background, #fff);
+  padding: 5px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
   color: inherit;
 }
 .model-editor-expand:hover {
-  border-color: var(--muted-foreground, #6b7280);
+  border-color: var(--orange-tint-border);
+  background: var(--orange-tint-bg);
 }
 
 /* Expanded ("full screen") editing.
@@ -462,7 +818,7 @@ body {
   inset: 0;
   z-index: 50;
   padding: 12px;
-  background: var(--background, #f7f8fa);
+  background: var(--page-bg);
 }
 /* Let the panes take the remaining height instead of the fixed 360px. */
 .model-editor-layout--expanded .model-editor-panes {
@@ -489,7 +845,7 @@ body {
   flex: 0 0 320px;
   height: 360px;
   overflow: auto;
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid var(--line);
   border-radius: 8px;
 }
 
@@ -507,7 +863,7 @@ body {
 .field-hint {
   margin: 0;
   font-size: 12px;
-  opacity: 0.65;
+  color: var(--ink-muted-2);
 }
 .radio-row {
   display: flex;
@@ -527,23 +883,179 @@ body {
   margin: 0 0 6px;
 }
 
-.scenarios {
+/* Example-shipment picker — an uppercase label beside a segmented pill track
+   of the example's preset payloads (ExampleDef.scenarios). */
+.scenario {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin: 4px 0 14px;
+}
+.scenario-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted-2);
+}
+.scenario-hint {
+  font-size: 12px;
+  color: var(--ink-muted-2);
+  font-variant-numeric: tabular-nums;
 }
 
+/* Inline "edit the input" affordance: a text button previewing the starting
+   payload, which discloses the start form below the row. */
+.scenario-input-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 0;
+}
+.scenario-input-button:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.scenario-input-button code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-mono);
+  font-size: 0.9em;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.scenario-edit-icon {
+  opacity: 0.85;
+}
+
+.inline-input-editor {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+  background: var(--surface-3);
+}
+.inline-input-editor[hidden] {
+  display: none;
+}
+.inline-input-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.inline-input-editor-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.inline-input-editor-copy {
+  font-size: 12px;
+  color: var(--ink-muted-2);
+}
+@media (max-width: 700px) {
+  .inline-input-editor-head {
+    flex-direction: column;
+  }
+}
+
+/* The segmented track shared by the scenario picker and the brain-mode
+   picker. Children stay design-system `Button`s; these rules flatten the
+   unselected ones into the track and leave the selected one as the orange
+   primary action the design-system tokens already produce. */
+.scenario-toggle,
+.brain-kinds {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-3);
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.scenario-toggle button,
+.brain-kinds button {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.scenario-toggle button:hover:not(:disabled),
+.brain-kinds button:hover:not(:disabled) {
+  background: rgba(16, 24, 40, 0.05);
+  color: var(--ink);
+}
+.scenario-toggle button[aria-pressed="true"],
+.scenario-toggle button[aria-pressed="true"]:hover,
+.brain-kinds button[aria-pressed="true"],
+.brain-kinds button[aria-pressed="true"]:hover {
+  background: var(--orange);
+  color: #fff;
+}
+
+/* Agent brain — the demo's gently-graded panel, with the mode track, a
+   status chip and the download progress bar. */
+.brain-card {
+  background: linear-gradient(180deg, #fff 0%, var(--surface-3) 100%);
+}
 .brain {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.brain-kinds {
+.brain-modes {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
   align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.brain-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.brain-status-badge {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.brain-status-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+.brain-progress {
+  height: 4px;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(16, 24, 40, 0.08);
+  overflow: hidden;
+}
+.brain-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--orange);
+  transition: width 0.2s ease;
 }
 .brain-config {
   display: flex;
@@ -556,9 +1068,6 @@ body {
 }
 .endpoint-model-select {
   flex: 1;
-}
-.brain-recommended-badge {
-  margin-left: 6px;
 }
 .brain-actions {
   display: flex;
@@ -573,7 +1082,7 @@ body {
 }
 .brain-divider {
   border: none;
-  border-top: 1px solid var(--cds-border, #e0e0e0);
+  border-top: 1px solid var(--line);
   margin: 4px 0;
   width: 100%;
 }
@@ -602,8 +1111,8 @@ body {
   gap: 4px;
   padding: 4px;
   border: 2px solid transparent;
-  border-radius: 6px;
-  background: var(--cds-layer, #f4f4f4);
+  border-radius: 8px;
+  background: var(--surface-3);
   cursor: pointer;
   font-size: 11px;
   max-width: 120px;
@@ -619,19 +1128,19 @@ body {
   border-radius: 4px;
 }
 .image-thumb--selected {
-  border-color: var(--cds-interactive, #0f62fe);
+  border-color: var(--orange);
 }
 .image-drop {
-  border: 1px dashed var(--cds-border-strong, #8d8d8d);
-  border-radius: 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
   padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .image-drop--over {
-  border-color: var(--cds-interactive, #0f62fe);
-  background: var(--cds-layer-hover, #e8e8e8);
+  border-color: var(--orange);
+  background: var(--orange-tint-bg);
 }
 .image-preview {
   display: flex;
@@ -646,12 +1155,13 @@ body {
   border-radius: 4px;
 }
 .image-clear-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--cds-border-strong, #8d8d8d);
-  border-radius: 4px;
-  background: var(--cds-layer, #f4f4f4);
+  padding: 5px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
   cursor: pointer;
   font-size: 12px;
+  font-weight: 600;
 }
 
 .tool-list {

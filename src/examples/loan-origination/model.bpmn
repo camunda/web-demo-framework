@@ -43,7 +43,7 @@
           </zeebe:ioMapping>
         </bpmn:extensionElements>
       </bpmn:serviceTask>
-      <bpmn:serviceTask id="CreditBureauLookup" name="Credit bureau lookup">
+      <bpmn:serviceTask id="CreditBureauLookup" name="Credit bureau lookup" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
         <bpmn:documentation>Pulls a credit bureau report (bureau score, risk band, derogatory marks) for the applicant, standing in for a call to a credit reference agency.</bpmn:documentation>
         <bpmn:extensionElements>
           <zeebe:taskDefinition type="loan.creditBureau" retries="2" />
@@ -58,7 +58,7 @@
           <zeebe:script expression="=recommendation" resultVariable="recommendation" />
         </bpmn:extensionElements>
       </bpmn:scriptTask>
-      <bpmn:serviceTask id="UpdateApplicationStatus" name="Update application status">
+      <bpmn:serviceTask id="UpdateApplicationStatus" name="Update application status" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
         <bpmn:documentation>Writes the current application status back to the loan origination system, so downstream systems and the applicant portal reflect where the case stands.</bpmn:documentation>
         <bpmn:extensionElements>
           <zeebe:taskDefinition type="loan.updateStatus" retries="2" />
@@ -87,7 +87,7 @@
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=decision = "approved"</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="Flow_declined" name="declined" sourceRef="Gateway_Approved" targetRef="SendDeclineNotice" />
-    <bpmn:serviceTask id="IssueLoanOffer" name="Issue loan offer">
+    <bpmn:serviceTask id="IssueLoanOffer" name="Issue loan offer" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
       <bpmn:documentation>Issues the approved loan offer (rate, term, monthly repayment) and records it against the application.</bpmn:documentation>
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="loan.issueOffer" retries="2" />
@@ -99,7 +99,7 @@
     <bpmn:endEvent id="LoanOfferIssued" name="Loan offer issued">
       <bpmn:incoming>Flow_offer_end</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:serviceTask id="SendDeclineNotice" name="Send decline notice">
+    <bpmn:serviceTask id="SendDeclineNotice" name="Send decline notice" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
       <bpmn:documentation>Sends the applicant a decline notice with the recorded reason, standing in for a real notification channel.</bpmn:documentation>
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="loan.sendDecline" retries="2" />

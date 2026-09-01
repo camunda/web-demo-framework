@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Viewer from "bpmn-js/lib/Viewer";
+import { diagramIconsFor, installDiagramIcons } from "./diagramIcons";
 
 /**
  * The live diagram: token and incident markers on a model the reader watches
@@ -63,6 +64,11 @@ export function RuntimeDiagram({
   // mid-import would otherwise leave the diagram unmarked until the next change.
   const idsRef = useRef({ activeIds, incidentIds });
   idsRef.current = { activeIds, incidentIds };
+
+  // Connector-template icons for this model (see `diagramIcons.ts`).
+  const icons = useMemo(() => diagramIconsFor(xml), [xml]);
+  const iconsRef = useRef(icons);
+  iconsRef.current = icons;
 
   const applyMarkers = () => {
     const viewer = viewerRef.current;
@@ -134,6 +140,8 @@ export function RuntimeDiagram({
         viewer.get<CanvasLike>("canvas").zoom("fit-viewport");
         importedRef.current = true;
         applyMarkers();
+        if (containerRef.current)
+          installDiagramIcons(containerRef.current, iconsRef.current);
       })
       .catch(() => {
         /* malformed XML — leave blank, the runner's diagnostics say why */
@@ -174,6 +182,19 @@ export function RuntimeDiagram({
     applyMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
   }, [activeIds, incidentIds]);
+
+  // bpmn-js re-renders an element's visual whenever its markers change, which
+  // drops any child we appended — so re-install on every mutation rather than
+  // only after import. `installDiagramIcons` is idempotent.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const apply = () => installDiagramIcons(container, iconsRef.current);
+    const observer = new MutationObserver(apply);
+    observer.observe(container, { childList: true, subtree: true });
+    apply();
+    return () => observer.disconnect();
+  }, [icons]);
 
   // No inline sizing: an inline `height` beats every class selector, and
   // `height: 100%` against an auto-height parent resolves back to auto, leaving

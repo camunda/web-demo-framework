@@ -4,14 +4,12 @@ import {
   DEFAULT_BROWSER_MODEL,
   isDeviceLostError,
   isModelCached,
-  webgpuAvailable,
   webgpuUnavailableReason,
 } from "./brains/browser";
 import {
   DEFAULT_ENDPOINT,
   EndpointBrain,
   localEndpointBlockedReason,
-  pageIsLocal,
 } from "./brains/endpoint";
 import { BrowserVisionBrain, DEFAULT_VISION_MODEL } from "./brains/vision";
 import type { BrainKind, ChatFn, VisionBrainKind, VisionFn } from "./brains/types";
@@ -25,11 +23,10 @@ import type { BrainKind, ChatFn, VisionBrainKind, VisionFn } from "./brains/type
  * - `endpoint` — any OpenAI-compatible server, Ollama by default (local only:
  *   an https page can't reach `http://localhost`).
  *
- * The initial `kind` is chosen by context rather than always defaulting to
- * "scripted": WebGPU present -> offer the in-browser brain (the only live
- * option that survives hosting); no WebGPU but the page is local -> surface
- * the endpoint brain (the best local experience); neither -> scripted, so a
- * reader never lands on a brain that can't possibly connect.
+ * `scripted` is always the starting kind: it's deterministic, offline, and
+ * needs no download, so the example runs the moment the page does. Picking a
+ * live brain is an explicit choice — `browser` costs a model download and
+ * `endpoint` needs a server — so neither is selected on a reader's behalf.
  */
 
 export type BrainStatus = "idle" | "connecting" | "ready" | "error";
@@ -99,19 +96,8 @@ export interface BrainControls {
   vision: VisionFn | null;
 }
 
-/** Pick a sensible starting brain for this environment — see module doc. */
-async function chooseDefaultKind(): Promise<BrainKind> {
-  if (await webgpuAvailable()) return "browser";
-  if (pageIsLocal()) return "endpoint";
-  return "scripted";
-}
-
 export function useBrain(): BrainControls {
-  // "scripted" until the environment probe resolves, then swapped to the
-  // context-appropriate default — see chooseDefaultKind(). A reader who
-  // clicks a brain before that resolves just gets what they clicked.
   const [kind, setKindState] = useState<BrainKind>("scripted");
-  const pickedDefault = useRef(false);
   const [status, setStatus] = useState<BrainStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [modelInUse, setModelInUse] = useState<string | null>(null);
@@ -220,10 +206,6 @@ export function useBrain(): BrainControls {
     void webgpuUnavailableReason().then((reason) => {
       setWebgpuReason(reason);
       setWebgpu(reason === null);
-      if (!pickedDefault.current) {
-        pickedDefault.current = true;
-        void chooseDefaultKind().then(setKindState);
-      }
     });
     // The vision seam has no Endpoint alternative, so its reason names the
     // scripted-vision fallback; probed the same way, and used to pick the

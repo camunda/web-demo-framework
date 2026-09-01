@@ -148,6 +148,19 @@ export interface SeedImage {
 }
 
 /**
+ * The hero an example puts at the top of the page. Plain data rather than JSX
+ * so example manifests stay `.ts`, not `.tsx`.
+ */
+export interface ExampleHero {
+  /** Words wrapped in *asterisks* render in the accent colour. */
+  headline: string;
+  /** Standfirst paragraph under the headline. */
+  lede?: string;
+  /** Small uppercase label shown beside the app name in the top bar. */
+  tagline?: string;
+}
+
+/**
  * An example, as a manifest: model + code + optional LLM wiring. Everything
  * else — the tool manifest, the prompts, the job types, the forms — the runner
  * derives from the model.
@@ -156,6 +169,12 @@ export interface ExampleDef {
   id: string;
   title: string;
   blurb: string;
+  /**
+   * The page-level headline shown above the gallery for this example. Optional:
+   * without it the shell falls back to a generic framework hero, so existing
+   * examples need no changes.
+   */
+  hero?: ExampleHero;
   /**
    * The camunda.com docs page this example illustrates, rendered as a visible
    * link so a reader landing on `/examples/<id>` (see routing.ts) can get back
@@ -181,6 +200,11 @@ export interface ExampleDef {
   seed: Record<string, unknown>;
   /** Optional preset scenarios offered above the start form. */
   scenarios?: Scenario[];
+  /**
+   * Heading for the scenario picker, e.g. "Example shipment". Defaults to
+   * "Example input".
+   */
+  scenariosLabel?: string;
   /** Editable handlers, keyed by element id. */
   handlers: HandlerDef[];
   /**
