@@ -19,7 +19,7 @@ export type ChatFn = (
 ) => Promise<string>;
 
 /** Which brain drives the agent. */
-export type BrainKind = "scripted" | "browser" | "endpoint";
+export type BrainKind = "scripted" | "browser" | "chrome" | "endpoint";
 
 /**
  * The vision seam. A brain that reads an **image** and returns text — the
