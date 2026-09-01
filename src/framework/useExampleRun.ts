@@ -82,7 +82,7 @@ export interface ExampleRunControls {
     correlationKey: string,
     variablesJson: string,
   ): Snapshot | null;
-  reset(): void;
+  reset(): Promise<void>;
   /**
    * Hold this run's picked/uploaded image (contract B) in run-scoped context,
    * keyed to its process instance — the actual pixels live here, never in a
@@ -101,7 +101,7 @@ export interface ExampleRunControls {
    * explicitly (e.g. on Run), not by re-passing a changed `bpmn` prop on
    * every keystroke — see the `bpmn` param below for why.
    */
-  redeploy(xml: string): string[] | null;
+  redeploy(xml: string): Promise<string[] | null>;
 }
 
 /**
@@ -134,6 +134,23 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
    * comparing it after closes that window.
    */
   const runGenRef = useRef(0);
+
+  /**
+   * The dispatch round currently in flight, if any.
+   *
+   * The generation token above keeps a stale round from writing *React* state
+   * after a reset, but `session.reset()` mutates the *engine* — and a round is
+   * still open for as long as its slowest handler runs. With a live brain that
+   * is one whole model turn: Reset during a Gemini Nano turn wiped the
+   * instance, then the turn resolved and asked the engine to activate an
+   * element on it, and the round threw. What the reader saw was the *next*
+   * run stopping with "no dispatch round was returned" and the abandoned run's
+   * trace entries landing in its log.
+   *
+   * So reset/redeploy wait for the round to settle rather than pulling the
+   * state out from under it.
+   */
+  const inFlightRef = useRef<Promise<unknown> | null>(null);
 
   /**
    * This run's images, keyed by process instance (contract B). Holds the actual
@@ -282,8 +299,10 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
       const session = sessionRef.current;
       if (!session) return null;
       const gen = runGenRef.current;
+      const pending = dispatchRound(session, workers, opts);
+      inFlightRef.current = pending;
       try {
-        const round = await dispatchRound(session, workers, opts);
+        const round = await pending;
         // Bail if the session was replaced/freed, or reset/redeployed in
         // place, while we awaited the round.
         if (sessionRef.current !== session || runGenRef.current !== gen)
@@ -297,12 +316,20 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
         setSnapshot(session.snapshot());
         setError(String(e));
         return null;
+      } finally {
+        if (inFlightRef.current === pending) inFlightRef.current = null;
       }
     },
     [],
   );
 
-  const reset = useCallback(() => {
+  /** Wait for any in-flight round to finish. Never rejects — a round that threw is settled too. */
+  const settle = useCallback(async () => {
+    await inFlightRef.current?.catch(() => {});
+  }, []);
+
+  const reset = useCallback(async () => {
+    await settle();
     const session = sessionRef.current;
     if (!session) return;
     runGenRef.current++;
@@ -312,10 +339,11 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     } catch (e) {
       setError(String(e));
     }
-  }, [deployInto]);
+  }, [deployInto, settle]);
 
   const redeploy = useCallback(
-    (xml: string) => {
+    async (xml: string) => {
+      await settle();
       const session = sessionRef.current;
       if (!session) return null;
       runGenRef.current++;
@@ -327,7 +355,7 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
         return null;
       }
     },
-    [deployInto],
+    [deployInto, settle],
   );
 
   return {

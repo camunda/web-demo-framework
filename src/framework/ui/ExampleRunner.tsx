@@ -761,7 +761,7 @@ export function ExampleRunner({
     // `useExampleRun`'s `bpmn` param) — so Run/Step always execute exactly
     // what's in the editor. `draft.hasErrors` already gated both buttons
     // above, so this redeploy is against XML the model parser accepted.
-    const ids = run.redeploy(bpmn);
+    const ids = await run.redeploy(bpmn);
     const pid = ids?.[0] ?? model.processId;
     trace({
       kind: "start",
@@ -933,7 +933,7 @@ export function ExampleRunner({
     manualControls,
   ]);
 
-  const stop = useCallback(() => {
+  const stop = useCallback(async () => {
     runningRef.current = false;
     // Bump the generation token so any `driveLoop` round already in flight
     // (dispatched before Reset was clicked) is dropped even if a new
@@ -942,7 +942,17 @@ export function ExampleRunner({
     runSeqRef.current++;
     setRunning(false);
     setStepping(false);
-    run.reset();
+    // `run.reset()` waits for an in-flight round to settle before touching the
+    // engine (see `inFlightRef` in useExampleRun) — with a live brain that can
+    // be a whole model turn. Hold the run "busy" across the wait so pressing
+    // Start in that window can't race the reset, and clear the log afterwards
+    // so the settling round's own trace entries go with it.
+    runningRef.current = true;
+    try {
+      await run.reset();
+    } finally {
+      runningRef.current = false;
+    }
     setLog([]);
     setDisplayVars({});
   }, [run]);
@@ -1156,7 +1166,7 @@ export function ExampleRunner({
         </Button>
         <Button
           variant="secondary"
-          onClick={stop}
+          onClick={() => void stop()}
           disabled={run.phase !== "ready" || stepping}
         >
           ↺ Reset
