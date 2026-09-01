@@ -126,10 +126,7 @@ export class ChromeBrain {
         signal: controller.signal,
         monitor: (m) => {
           m.addEventListener("downloadprogress", (e) => {
-            onProgress?.({
-              progress: e.loaded,
-              text: `Downloading Gemini Nano — ${Math.round(e.loaded * 100)}%`,
-            });
+            onProgress?.({ progress: e.loaded, text: "Downloading Gemini Nano" });
           });
         },
       });
@@ -190,6 +187,10 @@ export class ChromeBrain {
   };
 
   dispose(): void {
+    // Also abort a connect still in flight: `useBrain` disposes on unmount, and
+    // Chrome would otherwise keep downloading the model for a page that's gone.
+    this.connecting?.abort();
+    this.connecting = null;
     this.warm?.destroy();
     this.warm = null;
     this.model = null;

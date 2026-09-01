@@ -143,4 +143,29 @@ describe("ChromeBrain", () => {
       new ChromeBrain().chat([{ role: "user", content: "Hi" }]),
     ).rejects.toThrow(/before connect/);
   });
+
+  it("aborts a connect still in flight when disposed", async () => {
+    // `useBrain` disposes on unmount; without this Chrome keeps downloading
+    // the model for a page that is gone.
+    let signal: AbortSignal | undefined;
+    stubLanguageModel({
+      availability: () => Promise.resolve("downloadable"),
+      create: (options: { signal?: AbortSignal }) => {
+        signal = options.signal;
+        return new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        });
+      },
+    });
+    const brain = new ChromeBrain();
+    const connecting = brain.connect();
+    await new Promise((r) => setTimeout(r, 0));
+
+    brain.dispose();
+
+    await expect(connecting).rejects.toThrow("cancelled");
+    expect(signal?.aborted).toBe(true);
+  });
 });
