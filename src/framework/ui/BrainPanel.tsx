@@ -19,7 +19,7 @@ import {
   insufficientVramReason,
   loadBrowserModelRequirements,
 } from "../brains/browser";
-import { localEndpointBlockedReason, pageIsLocal } from "../brains/endpoint";
+import { localEndpointBlockedReason } from "../brains/endpoint";
 import { VISION_MODELS } from "../brains/vision";
 import type { BrainControls } from "../useBrain";
 import type { BrainKind, VisionBrainKind } from "../brains/types";
@@ -79,8 +79,6 @@ function TextBrain({ brain }: { brain: BrainControls }) {
   const active = KINDS.find((k) => k.kind === brain.kind)!;
   // Warn before the user clicks Connect, not after it fails.
   const localBlocked = localEndpointBlockedReason(brain.endpointUrl);
-  const local = pageIsLocal();
-
   const [models, setModels] = useState(BROWSER_MODELS);
   useEffect(() => {
     void loadBrowserModelRequirements().then(setModels);
@@ -98,37 +96,39 @@ function TextBrain({ brain }: { brain: BrainControls }) {
     ? insufficientVramReason(selectedModel, estimateAvailableVramMB())
     : null;
 
-  // The recommended brain for this environment, so a reader can see *why*
-  // it's the default rather than guessing: WebGPU present -> browser is the
-  // one live option that survives hosting; local page, no WebGPU -> endpoint.
-  const recommended: BrainKind | null =
-    brain.webgpu === true ? "browser" : local && brain.webgpu === false ? "endpoint" : null;
-
   return (
     <div className="brain-section">
-      <div className="brain-kinds">
-        {KINDS.map((k) => (
-          <Button
-            key={k.kind}
-            size="sm"
-            variant={brain.kind === k.kind ? "default" : "secondary"}
-            onClick={() => brain.setKind(k.kind)}
-          >
-            {k.label}
-            {k.kind === recommended && (
-              <Badge variant="info" className="brain-recommended-badge">
-                recommended
-              </Badge>
-            )}
-          </Button>
-        ))}
-        {brain.status === "ready" && brain.kind !== "scripted" && (
-          <Badge variant="success">{brain.modelInUse ?? "connected"}</Badge>
-        )}
-        {brain.status === "connecting" && (
-          <Badge variant="info">connecting…</Badge>
-        )}
-        {brain.status === "error" && <Badge variant="danger">not connected</Badge>}
+      <div className="brain-modes">
+        <div className="brain-kinds" role="group" aria-label="Agent brain">
+          {KINDS.map((k) => (
+            <Button
+              key={k.kind}
+              size="sm"
+              variant={brain.kind === k.kind ? "default" : "secondary"}
+              aria-pressed={brain.kind === k.kind}
+              onClick={() => brain.setKind(k.kind)}
+            >
+              {k.label}
+            </Button>
+          ))}
+        </div>
+        <div className="brain-status">
+          {brain.status === "ready" && brain.kind !== "scripted" && (
+            <Badge variant="success" className="brain-status-badge">
+              {brain.modelInUse ?? "connected"}
+            </Badge>
+          )}
+          {brain.status === "connecting" && (
+            <Badge variant="info" className="brain-status-badge">
+              connecting…
+            </Badge>
+          )}
+          {brain.status === "error" && (
+            <Badge variant="danger" className="brain-status-badge">
+              not connected
+            </Badge>
+          )}
+        </div>
       </div>
 
       <p className="field-hint">{active.hint}</p>
@@ -314,6 +314,21 @@ function TextBrain({ brain }: { brain: BrainControls }) {
         </div>
       )}
 
+      {brain.progress && (
+        <div
+          className="brain-progress"
+          role="progressbar"
+          aria-valuenow={Math.round(brain.progress.progress * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className="brain-progress-bar"
+            style={{ width: `${Math.round(brain.progress.progress * 100)}%` }}
+          />
+        </div>
+      )}
+
       {brain.error && (
         <Alert variant="destructive">
           <AlertTitle>Couldn't connect</AlertTitle>
@@ -333,40 +348,42 @@ function TextBrain({ brain }: { brain: BrainControls }) {
  */
 function VisionBrain({ brain }: { brain: BrainControls }) {
   const active = VISION_KINDS.find((k) => k.kind === brain.visionKind)!;
-  const recommended: VisionBrainKind | null =
-    brain.webgpu === true ? "browser-vision" : null;
 
   return (
     <div className="brain-section brain-vision">
       <Label>Vision (reads the image)</Label>
-      <div className="brain-kinds">
-        {VISION_KINDS.map((k) => (
-          <Button
-            key={k.kind}
-            size="sm"
-            variant={brain.visionKind === k.kind ? "default" : "secondary"}
-            onClick={() => brain.setVisionKind(k.kind)}
-          >
-            {k.label}
-            {k.kind === recommended && (
-              <Badge variant="info" className="brain-recommended-badge">
-                recommended
+      <div className="brain-modes">
+        <div className="brain-kinds" role="group" aria-label="Vision brain">
+          {VISION_KINDS.map((k) => (
+            <Button
+              key={k.kind}
+              size="sm"
+              variant={brain.visionKind === k.kind ? "default" : "secondary"}
+              aria-pressed={brain.visionKind === k.kind}
+              onClick={() => brain.setVisionKind(k.kind)}
+            >
+              {k.label}
+            </Button>
+          ))}
+        </div>
+        <div className="brain-status">
+          {brain.visionStatus === "ready" &&
+            brain.visionKind === "browser-vision" && (
+              <Badge variant="success" className="brain-status-badge">
+                {brain.visionModelInUse ?? "connected"}
               </Badge>
             )}
-          </Button>
-        ))}
-        {brain.visionStatus === "ready" &&
-          brain.visionKind === "browser-vision" && (
-            <Badge variant="success">
-              {brain.visionModelInUse ?? "connected"}
+          {brain.visionStatus === "connecting" && (
+            <Badge variant="info" className="brain-status-badge">
+              connecting…
             </Badge>
           )}
-        {brain.visionStatus === "connecting" && (
-          <Badge variant="info">connecting…</Badge>
-        )}
-        {brain.visionStatus === "error" && (
-          <Badge variant="danger">not connected</Badge>
-        )}
+          {brain.visionStatus === "error" && (
+            <Badge variant="danger" className="brain-status-badge">
+              not connected
+            </Badge>
+          )}
+        </div>
       </div>
 
       <p className="field-hint">{active.hint}</p>

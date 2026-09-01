@@ -5,8 +5,15 @@ import { useCallback, useEffect, useState } from "react";
  * reader's layout choices survive a page reload. State is namespaced per
  * `sectionId` — collapsing one panel never touches another — under a single
  * key prefix, the one canonical place this feature writes.
+ *
+ * The prefix carries a version. Bump it whenever the runner's panels are
+ * rearranged enough that stored choices no longer describe the current layout,
+ * otherwise a returning reader keeps a preference for a panel that has moved,
+ * changed meaning, or gone — and never sees the new defaults. `v2` retires the
+ * pre-restructure keys: `variables` no longer names a panel of its own, `start`
+ * became the inline input editor, and `code`/`tools` now default to collapsed.
  */
-const STORAGE_PREFIX = "wdf:section:";
+const STORAGE_PREFIX = "wdf:section:v2:";
 
 export function storageKeyFor(sectionId: string): string {
   return STORAGE_PREFIX + sectionId;

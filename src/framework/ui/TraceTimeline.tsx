@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   Badge,
   Button,
 } from "@camunda/design-system";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import type { TraceEntry } from "../types";
 
 /**
@@ -196,6 +198,7 @@ export function TraceTimeline({
   elementStats = [],
   incidents = [],
   labelFor = (id) => id,
+  variables,
 }: {
   log: TraceLogLine[];
   /** `snapshot.elementStats` — per-element completion counts, engine-side. */
@@ -204,9 +207,15 @@ export function TraceTimeline({
   incidents?: IncidentLike[];
   /** BPMN element id → human label, for both the timeline and the panels below. */
   labelFor?: (elementId: string) => string;
+  /** Live instance payload, rendered as this panel's footer. */
+  variables?: ReactNode;
 }) {
   const rows = useMemo(() => buildRows(log), [log]);
   const [copied, setCopied] = useState(false);
+  const [engineViewOpen, setEngineViewOpen] = usePersistentDisclosure(
+    "engine-view",
+    false,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Keep the newest step in view as the run grows, same as the flat log
@@ -242,8 +251,8 @@ export function TraceTimeline({
   return (
     <CollapsibleCard
       sectionId="activity"
-      className="grow"
-      title="Activity"
+      className="grow activity-card"
+      title="Agent activity"
       description="Agent turns, model replies, and tool calls — read top to bottom as a story."
     >
       <div className="timeline-toolbar">
@@ -269,38 +278,51 @@ export function TraceTimeline({
           )}
         </div>
 
+        {variables}
+
         {(elementStats.length > 0 || incidents.length > 0) && (
-          <div className="timeline-engine-view">
-            {elementStats.length > 0 && (
-              <div className="timeline-stats">
-                <span className="timeline-kv-label">Element completion</span>
-                <ul>
-                  {elementStats
-                    .filter((s) => s.completed > 0 || (s.active ?? 0) > 0)
-                    .map((s) => (
-                      <li key={s.elementId}>
-                        <code>{labelFor(s.elementId) || s.elementId}</code>{" "}
-                        completed {s.completed}
-                        {s.active ? `, ${s.active} active` : ""}
+          <details
+            className="engine-view"
+            open={engineViewOpen}
+            onToggle={(e) => setEngineViewOpen(e.currentTarget.open)}
+          >
+            <summary>
+              Element completion
+              {incidents.length > 0 &&
+                ` · ${incidents.length} incident${incidents.length === 1 ? "" : "s"}`}
+            </summary>
+            <div className="timeline-engine-view">
+              {elementStats.length > 0 && (
+                <div className="timeline-stats">
+                  <span className="timeline-kv-label">Element completion</span>
+                  <ul>
+                    {elementStats
+                      .filter((s) => s.completed > 0 || (s.active ?? 0) > 0)
+                      .map((s) => (
+                        <li key={s.elementId}>
+                          <code>{labelFor(s.elementId) || s.elementId}</code>{" "}
+                          completed {s.completed}
+                          {s.active ? `, ${s.active} active` : ""}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+              {incidents.length > 0 && (
+                <div className="timeline-incidents">
+                  <span className="timeline-kv-label">Incidents</span>
+                  <ul>
+                    {incidents.map((inc, i) => (
+                      <li key={`${inc.elementId}-${i}`}>
+                        <code>{labelFor(inc.elementId) || inc.elementId}</code> —{" "}
+                        {inc.reason}
                       </li>
                     ))}
-                </ul>
-              </div>
-            )}
-            {incidents.length > 0 && (
-              <div className="timeline-incidents">
-                <span className="timeline-kv-label">Incidents</span>
-                <ul>
-                  {incidents.map((inc, i) => (
-                    <li key={`${inc.elementId}-${i}`}>
-                      <code>{labelFor(inc.elementId) || inc.elementId}</code> —{" "}
-                      {inc.reason}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+                  </ul>
+                </div>
+              )}
+            </div>
+          </details>
         )}
       </CollapsibleCard>
   );

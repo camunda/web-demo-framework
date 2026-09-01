@@ -36,6 +36,7 @@ import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
@@ -100,6 +101,12 @@ function safeStringify(value: unknown, space?: number): string {
   } catch {
     return "[unserializable value]";
   }
+}
+
+/** One-line preview of the starting payload, for the inline “edit input” button. */
+function summarizeStart(values: Record<string, unknown>): string {
+  const text = safeStringify(values).replace(/\s+/g, " ");
+  return text.length > 78 ? `${text.slice(0, 78)}…` : text;
 }
 
 interface LogLine extends TraceEntry {
@@ -226,6 +233,22 @@ export function ExampleRunner({
   const [activeTab, setActiveTab] = useState<string>(
     model.agent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
   );
+  // Which preset the segmented picker shows as chosen. Derived from the live
+  // payload rather than held as state, so editing the start form deselects a
+  // preset the input no longer matches instead of leaving a stale pill lit.
+  // Matched against `startValues`, not `example.seed`: the two differ whenever
+  // a start form contributes defaults.
+  const selectedScenario = useMemo(() => {
+    const i = (example.scenarios ?? []).findIndex((s) =>
+      Object.entries(s.variables).every(
+        ([k, v]) => JSON.stringify(startValues[k]) === JSON.stringify(v),
+      ),
+    );
+    return i === -1 ? null : i;
+  }, [example.scenarios, startValues]);
+  // An example with a real start form opens it on a first visit — its fields
+  // may be required, and Run stays disabled until they're filled.
+  const [startOpen, setStartOpen] = usePersistentDisclosure("start", !!startSchema);
   const [running, setRunning] = useState(false);
   // True only while a single `⏭ Step` round is in flight — distinct from
   // `running` (a continuous `driveLoop`), so the status badge and button
@@ -234,6 +257,17 @@ export function ExampleRunner({
   const [compileError, setCompileError] = useState<string | null>(null);
   const [log, setLog] = useState<LogLine[]>([]);
   const [displayVars, setDisplayVars] = useState<Record<string, unknown>>({});
+  // The payload the next instance will start with. Doubles as what the
+  // variables panel shows before a run (and after Reset), so it previews the
+  // input instead of an empty object.
+  const pendingSeed = useMemo(
+    () => ({
+      ...example.seed,
+      ...startValues,
+      ...imageRefVariables(example.imageInput ? imageSelection : null),
+    }),
+    [example.seed, example.imageInput, startValues, imageSelection],
+  );
   // The start form's live validity — Run stays disabled while a required
   // start-form field is missing, same as the review form below.
   const [startFormValid, setStartFormValid] = useState(false);
@@ -718,11 +752,7 @@ export function ExampleRunner({
     // Only the *reference* to the image (imageId/imageName) rides in the
     // process variables — never the pixels (see `imageInput.ts`). The bytes are
     // put into run-scoped context below, keyed to the instance just created.
-    const seed = {
-      ...example.seed,
-      ...startValues,
-      ...imageRefVariables(example.imageInput ? imageSelection : null),
-    };
+    const seed = pendingSeed;
     setDisplayVars(seed);
     workersRef.current = workers;
     agentsRef.current = agents;
@@ -758,6 +788,7 @@ export function ExampleRunner({
     agentSource,
     startValues,
     imageSelection,
+    pendingSeed,
     model,
     brain,
     trace,
@@ -975,93 +1006,213 @@ export function ExampleRunner({
         {blurbParagraphs.map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
         ))}
-        <div className="controls">
-          <Button
-            data-tour={TOUR_ANCHOR.runButton}
-            onClick={() => void start()}
-            disabled={
-              run.phase !== "ready" ||
-              running ||
-              stepping ||
-              draft.hasErrors ||
-              needsStartForm
-            }
+      </section>
+
+      {example.imageInput && (
+        <ImageInputPanel
+          imageInput={example.imageInput}
+          value={imageSelection}
+          onSelect={setImageSelection}
+          disabled={running}
+        />
+      )}
+
+      <div className="scenario">
+        <span className="scenario-label" id="scenario-label">
+          {example.scenariosLabel ?? "Example input"}
+        </span>
+        {example.scenarios && (
+          <div
+            className="scenario-toggle"
+            role="group"
+            aria-labelledby="scenario-label"
           >
-            ▶ Run
-          </Button>
+            {example.scenarios.map((s, i) => (
+              <Button
+                key={s.label}
+                size="sm"
+                variant={i === selectedScenario ? "default" : "secondary"}
+                aria-pressed={i === selectedScenario}
+                disabled={running}
+                onClick={() =>
+                  setStartValues((prev) => ({ ...prev, ...s.variables }))
+                }
+              >
+                {s.label}
+              </Button>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          className="scenario-input-button"
+          onClick={() => setStartOpen(!startOpen)}
+          aria-expanded={startOpen}
+          aria-controls="start-input-editor"
+          title="Edit the starting payload"
+        >
+          <span className="scenario-edit-icon" aria-hidden>
+            ✎
+          </span>{" "}
+          input: <code>{summarizeStart(startValues)}</code>
+        </button>
+        {needsStartForm && (
+          <span className="scenario-hint">
+            Fill in the input to enable Run
+          </span>
+        )}
+      </div>
+
+      {/* Hidden rather than unmounted while collapsed: the start form reports
+          its validity through `onValidityChange`, and Run is gated on it — an
+          unmounted form never reports, so Run would stay disabled forever. */}
+      <div
+        className="inline-input-editor"
+        id="start-input-editor"
+        hidden={!startOpen}
+      >
+        <div className="inline-input-editor-head">
+          <div>
+            <div className="inline-input-editor-title">
+              {model.startFormId ? "Start form" : "Start payload"}
+            </div>
+            <div className="inline-input-editor-copy">
+              {model.startFormId
+                ? `Rendered from the model's start form "${model.startFormId}".`
+                : "The variables the instance starts with."}
+            </div>
+          </div>
           <Button
+            size="sm"
             variant="secondary"
-            onClick={() => void step()}
-            disabled={
-              run.phase !== "ready" ||
-              running ||
-              stepping ||
-              draft.hasErrors ||
-              needsStartForm ||
-              (run.snapshot?.completedInstances ?? 0) >= 1
-            }
+            onClick={() => setStartOpen(false)}
           >
-            ⏭ Step
+            Done
           </Button>
-          <Button
-            variant="secondary"
-            onClick={stop}
-            disabled={run.phase !== "ready" || stepping}
-          >
-            ↺ Reset
-          </Button>
-          {example.tour && (
-            <Button
-              variant="secondary"
-              onClick={tour.start}
-              disabled={tour.active}
-            >
-              {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
-            </Button>
-          )}
-          {statusBadge}
         </div>
-        {run.phase === "error" && (
-          <Alert variant="destructive">
-            <AlertTitle>Engine error</AlertTitle>
-            <AlertDescription>{run.error}</AlertDescription>
-          </Alert>
+        {startSchema ? (
+          <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+            <FormRenderer
+              ref={startFormRef}
+              schema={startSchema}
+              values={startValues}
+              onChange={(k, v) => setStartValues((prev) => ({ ...prev, [k]: v }))}
+              disabled={running}
+              onValidityChange={setStartFormValid}
+            />
+          </Suspense>
+        ) : (
+          <pre className="vars">{safeStringify(startValues, 2)}</pre>
         )}
-        {compileError && (
-          <Alert variant="destructive">
-            <AlertTitle>Code didn't compile</AlertTitle>
-            <AlertDescription>{compileError}</AlertDescription>
-          </Alert>
+      </div>
+
+      {(model.agent || example.imageInput) && (
+        <CollapsibleCard
+          sectionId="brain"
+          className="brain-card"
+          data-tour={TOUR_ANCHOR.brainPanel}
+          title="Agent brain"
+          description={
+            model.agent
+              ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
+              : "What reads the image. The model recommends; the process governs."
+          }
+        >
+          <BrainPanel
+            brain={brain}
+            showText={!!model.agent}
+            showVision={!!example.imageInput}
+          />
+        </CollapsibleCard>
+      )}
+
+      <div className="controls">
+        <Button
+          data-tour={TOUR_ANCHOR.runButton}
+          onClick={() => void start()}
+          disabled={
+            run.phase !== "ready" ||
+            running ||
+            stepping ||
+            draft.hasErrors ||
+            needsStartForm
+          }
+        >
+          ▶ Run
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => void step()}
+          disabled={
+            run.phase !== "ready" ||
+            running ||
+            stepping ||
+            draft.hasErrors ||
+            needsStartForm ||
+            (run.snapshot?.completedInstances ?? 0) >= 1
+          }
+        >
+          ⏭ Step
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={stop}
+          disabled={run.phase !== "ready" || stepping}
+        >
+          ↺ Reset
+        </Button>
+        {example.tour && (
+          <Button
+            variant="secondary"
+            onClick={tour.start}
+            disabled={tour.active}
+          >
+            {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
+          </Button>
         )}
-        {draft.hasErrors && (
-          <Alert variant="destructive">
-            <AlertTitle>
-              Run is disabled — the diagram has unresolved references
-            </AlertTitle>
-            <AlertDescription>
-              <ul className="diagnostics">
-                {draft.diagnostics
-                  .filter((d) => d.severity === "error")
-                  .map((d, i) => (
-                    <li key={i}>{d.message}</li>
-                  ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )}
-        {!draft.hasErrors && draft.diagnostics.length > 0 && (
-          <Alert>
-            <AlertTitle>Heads up</AlertTitle>
-            <AlertDescription>
-              <ul className="diagnostics">
-                {draft.diagnostics.map((d, i) => (
+        {statusBadge}
+      </div>
+
+      {run.phase === "error" && (
+        <Alert variant="destructive">
+          <AlertTitle>Engine error</AlertTitle>
+          <AlertDescription>{run.error}</AlertDescription>
+        </Alert>
+      )}
+      {compileError && (
+        <Alert variant="destructive">
+          <AlertTitle>Code didn't compile</AlertTitle>
+          <AlertDescription>{compileError}</AlertDescription>
+        </Alert>
+      )}
+      {draft.hasErrors && (
+        <Alert variant="destructive">
+          <AlertTitle>
+            Run is disabled — the diagram has unresolved references
+          </AlertTitle>
+          <AlertDescription>
+            <ul className="diagnostics">
+              {draft.diagnostics
+                .filter((d) => d.severity === "error")
+                .map((d, i) => (
                   <li key={i}>{d.message}</li>
                 ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )}
-      </section>
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+      {!draft.hasErrors && draft.diagnostics.length > 0 && (
+        <Alert>
+          <AlertTitle>Heads up</AlertTitle>
+          <AlertDescription>
+            <ul className="diagnostics">
+              {draft.diagnostics.map((d, i) => (
+                <li key={i}>{d.message}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid">
         <div className="col">
@@ -1162,112 +1313,43 @@ export function ExampleRunner({
             </CollapsibleCard>
           )}
 
-          <div className="row">
-            <CollapsibleCard
-              sectionId="variables"
-              className="grow"
-              data-tour={TOUR_ANCHOR.variablesPanel}
-              title="Variables"
-              description="The instance payload, live."
-            >
-              <pre className="vars">{safeStringify(displayVars, 2)}</pre>
-            </CollapsibleCard>
-
-            <TraceTimeline
-              log={log}
-              elementStats={run.snapshot?.elementStats}
-              incidents={run.snapshot?.incidents}
-              labelFor={elementLabels}
-            />
-          </div>
         </div>
 
         <div className="col">
-          {(model.agent || example.imageInput) && (
-            <CollapsibleCard
-              sectionId="brain"
-              data-tour={TOUR_ANCHOR.brainPanel}
-              title="Brain"
-              description={
-                model.agent
-                  ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
-                  : "What reads the image. The model recommends; the process governs."
-              }
-            >
-              <BrainPanel
-                brain={brain}
-                showText={!!model.agent}
-                showVision={!!example.imageInput}
-              />
-            </CollapsibleCard>
-          )}
+          <TraceTimeline
+            log={log}
+            elementStats={run.snapshot?.elementStats}
+            incidents={run.snapshot?.incidents}
+            labelFor={elementLabels}
+            variables={
+              <div className="vars-block" data-tour={TOUR_ANCHOR.variablesPanel}>
+                <div className="vars-head">Instance variables</div>
+                <pre className="vars">
+                  {safeStringify(
+                    Object.keys(displayVars).length > 0 ? displayVars : pendingSeed,
+                    2,
+                  )}
+                </pre>
+              </div>
+            }
+          />
+        </div>
+      </div>
 
-          <CollapsibleCard
-            sectionId="start"
-            title="Start"
-            description={
-              model.startFormId
-                ? `The model's start form "${model.startFormId}".`
-                : example.imageInput
-                  ? "Pick a seed photo or upload your own to read."
-                  : "The starting payload."
+      <div className="runner-secondary">
+        <CollapsibleCard
+          sectionId="code"
+          className="editors"
+          data-tour={TOUR_ANCHOR.codePanel}
+          defaultOpen={false}
+          title="Code"
+          description="One handler per BPMN element, plus a model tab holding the editable diagram — select an element there to edit its properties. Return variables to merge, or throw to fail the job."
+        >
+          <Suspense
+            fallback={
+              <div className="editor-fallback">Loading editor…</div>
             }
           >
-            {example.imageInput && (
-              <ImageInputPanel
-                imageInput={example.imageInput}
-                value={imageSelection}
-                onSelect={setImageSelection}
-                disabled={running}
-              />
-            )}
-            {example.scenarios && (
-              <div className="scenarios">
-                {example.scenarios.map((s) => (
-                  <Button
-                    key={s.label}
-                    size="sm"
-                    variant="secondary"
-                    disabled={running}
-                    onClick={() =>
-                      setStartValues((prev) => ({ ...prev, ...s.variables }))
-                    }
-                  >
-                    {s.label}
-                  </Button>
-                ))}
-              </div>
-            )}
-            {startSchema ? (
-              <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
-                <FormRenderer
-                  ref={startFormRef}
-                  schema={startSchema}
-                  values={startValues}
-                  onChange={(k, v) =>
-                    setStartValues((prev) => ({ ...prev, [k]: v }))
-                  }
-                  disabled={running}
-                  onValidityChange={setStartFormValid}
-                />
-              </Suspense>
-            ) : (
-              <pre className="vars">{safeStringify(startValues, 2)}</pre>
-            )}
-          </CollapsibleCard>
-
-          <CollapsibleCard
-            sectionId="code"
-            className="editors"
-            data-tour={TOUR_ANCHOR.codePanel}
-            title="Code"
-            description="One handler per BPMN element, plus a model tab holding the editable diagram — select an element there to edit its properties. Return variables to merge, or throw to fail the job."
-          >
-            <Suspense
-              fallback={
-                <div className="editor-fallback">Loading editor…</div>
-              }
-            >
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
                   <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
@@ -1394,6 +1476,7 @@ export function ExampleRunner({
           {model.agent && (
             <CollapsibleCard
               sectionId="tools"
+              defaultOpen={false}
               title="Tools, as the model sees them"
               description={
                 <>
@@ -1424,7 +1507,6 @@ export function ExampleRunner({
               </ul>
             </CollapsibleCard>
           )}
-        </div>
       </div>
     </div>
   );
