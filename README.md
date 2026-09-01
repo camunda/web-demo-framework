@@ -66,20 +66,22 @@ deterministic stand-in for the LLM.
 
 ## The brains
 
-The three text brains satisfy one `ChatFn`, so the agent loop can't tell them
+The four text brains satisfy one `ChatFn`, so the agent loop can't tell them
 apart; the vision brain adds an image→text seam beside them.
 
 | Brain | What it is | Where it works |
 | --- | --- | --- |
 | **Scripted** | No model. The example's editable stand-in decides. | Always, offline |
 | **In-browser** | A quantised model on WebGPU via WebLLM, lazily imported so its bundle only loads on opt-in. | Chrome/Edge/Safari 17+ with WebGPU — **including from a hosted page** |
+| **Chrome built-in** | Gemini Nano through Chrome's Prompt API (`LanguageModel`). Chrome owns the weights, so this page downloads nothing and holds no API key. The panel only offers it when the API is present, and explains it when the device can't run it. | Chrome 138+ on desktop, hosted or local. Very small model — weaker at the tool-calling format than an endpoint model |
 | **Endpoint** | Any OpenAI-compatible server; a local Ollama by default. | **Only when the page itself is served from localhost.** Ollama's CORS allowlist covers localhost origins only, so a tunnelled or deployed page is refused. The app detects this and says so instead of blaming the server |
 | **In-browser vision** | Florence-2 (an image→text model) on WebGPU via `@huggingface/transformers`, lazily imported like the WebLLM brain so its multi-hundred-MB weights only download on opt-in (the panel shows the size label first). | Chrome/Edge/Safari 17+ with WebGPU — **including from a hosted page**. WebGPU absent → falls back to a deterministic **scripted-vision** reading with a clear reason, so a reader never lands on a brain that can't connect |
 
 That last-but-one row decides what a public page defaults to for text: **in-browser
-is the only live brain that survives being hosted.** The in-browser vision brain
-has the same property — a hosted https page reads a photo with no server and no
-API key — and, WebGPU absent, degrades to the scripted reading rather than
+is the only live brain that survives being hosted** in every browser (the Chrome
+built-in brain also survives hosting, but only in Chrome). The in-browser vision
+brain has the same property — a hosted https page reads a photo with no server
+and no API key — and, WebGPU absent, degrades to the scripted reading rather than
 failing. See [`docs/vision-brain.md`](docs/vision-brain.md) for the vision seam,
 the image-into-a-run plumbing, and the falsifiability probe/eval.
 

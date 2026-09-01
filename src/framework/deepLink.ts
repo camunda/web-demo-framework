@@ -15,7 +15,7 @@ import type { BrainKind } from "./brains/types";
  * not implemented yet.
  */
 export interface DeepLinkState {
-  /** Which brain (`scripted` | `browser` | `endpoint`) to pre-select. */
+  /** Which brain (`scripted` | `browser` | `chrome` | `endpoint`) to pre-select. */
   brain?: BrainKind;
 }
 
@@ -23,7 +23,12 @@ const HASH_PREFIX = "#s=";
 
 // Keep in sync with `BrainKind` in ./brains/types — used to sanitize
 // hash-supplied values before they reach `useBrain.setKind(...)`.
-const VALID_BRAIN_KINDS: readonly BrainKind[] = ["scripted", "browser", "endpoint"];
+const VALID_BRAIN_KINDS: readonly BrainKind[] = [
+  "scripted",
+  "browser",
+  "chrome",
+  "endpoint",
+];
 
 function isBrainKind(value: unknown): value is BrainKind {
   return (

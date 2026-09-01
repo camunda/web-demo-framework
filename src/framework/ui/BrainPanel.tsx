@@ -20,6 +20,7 @@ import {
   loadBrowserModelRequirements,
 } from "../brains/browser";
 import { localEndpointBlockedReason } from "../brains/endpoint";
+import { chromeAiSupported } from "../brains/chrome";
 import { VISION_MODELS } from "../brains/vision";
 import type { BrainControls } from "../useBrain";
 import type { BrainKind, VisionBrainKind } from "../brains/types";
@@ -34,6 +35,11 @@ const KINDS: { kind: BrainKind; label: string; hint: string }[] = [
     kind: "browser",
     label: "In-browser (WebGPU)",
     hint: "A small quantised model on your GPU. First run downloads weights.",
+  },
+  {
+    kind: "chrome",
+    label: "Chrome built-in",
+    hint: "Gemini Nano, built into Chrome. Chrome owns the weights — no download from this page, no API key.",
   },
   {
     kind: "endpoint",
@@ -77,6 +83,9 @@ export function BrainPanel({
 
 function TextBrain({ brain }: { brain: BrainControls }) {
   const active = KINDS.find((k) => k.kind === brain.kind)!;
+  // The Chrome built-in model exists in exactly one browser, so offering it
+  // elsewhere would only ever be a dead button.
+  const kinds = KINDS.filter((k) => k.kind !== "chrome" || chromeAiSupported());
   // Warn before the user clicks Connect, not after it fails.
   const localBlocked = localEndpointBlockedReason(brain.endpointUrl);
   const [models, setModels] = useState(BROWSER_MODELS);
@@ -100,7 +109,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
     <div className="brain-section">
       <div className="brain-modes">
         <div className="brain-kinds" role="group" aria-label="Agent brain">
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <Button
               key={k.kind}
               size="sm"
@@ -177,6 +186,24 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             <Alert variant="destructive">
               <AlertTitle>This model may not fit in GPU memory</AlertTitle>
               <AlertDescription>{vramReason}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      )}
+
+      {brain.kind === "chrome" && (
+        <div className="brain-config">
+          <p className="field-hint">
+            Nothing to configure: Chrome downloads and manages Gemini Nano
+            itself, so the first Connect may fetch it once and later visits
+            reuse it. Prompts never leave your machine. It's a very small model
+            — expect it to follow the tool-calling format less reliably than an
+            endpoint model.
+          </p>
+          {brain.chromeAiReason && (
+            <Alert variant="destructive">
+              <AlertTitle>Chrome's built-in model isn't available here</AlertTitle>
+              <AlertDescription>{brain.chromeAiReason}</AlertDescription>
             </Alert>
           )}
         </div>
@@ -292,6 +319,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             onClick={() => void brain.connect()}
             disabled={
               brain.status === "connecting" ||
+              (brain.kind === "chrome" && brain.chromeAiReason !== null) ||
               (brain.kind === "endpoint" &&
                 (brain.endpointModel === "" ||
                   brain.endpointModelsStatus === "loading" ||
@@ -300,11 +328,12 @@ function TextBrain({ brain }: { brain: BrainControls }) {
           >
             {brain.status === "ready" ? "Reconnect" : "Connect"}
           </Button>
-          {brain.status === "connecting" && brain.kind === "browser" && (
-            <Button size="sm" variant="secondary" onClick={brain.cancelConnect}>
-              Cancel
-            </Button>
-          )}
+          {brain.status === "connecting" &&
+            (brain.kind === "browser" || brain.kind === "chrome") && (
+              <Button size="sm" variant="secondary" onClick={brain.cancelConnect}>
+                Cancel
+              </Button>
+            )}
           {brain.progress && (
             <span className="field-hint">
               {Math.round(brain.progress.progress * 100)}% —{" "}

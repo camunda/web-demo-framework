@@ -11,15 +11,18 @@ import {
   EndpointBrain,
   localEndpointBlockedReason,
 } from "./brains/endpoint";
+import { ChromeBrain, chromeAiUnavailableReason } from "./brains/chrome";
 import { BrowserVisionBrain, DEFAULT_VISION_MODEL } from "./brains/vision";
 import type { BrainKind, ChatFn, VisionBrainKind, VisionFn } from "./brains/types";
 
 /**
  * Owns which brain drives the agent and its connection lifecycle.
  *
- * Three kinds, one `ChatFn` seam:
+ * Four kinds, one `ChatFn` seam:
  * - `scripted` — no model at all; the example's editable stand-in runs.
  * - `browser` — a quantised model on WebGPU (works from a hosted https page).
+ * - `chrome` — Gemini Nano built into Chrome, downloaded and owned by the
+ *   browser rather than by this app (Chrome only).
  * - `endpoint` — any OpenAI-compatible server, Ollama by default (local only:
  *   an https page can't reach `http://localhost`).
  *
@@ -46,6 +49,11 @@ export interface BrainControls {
   webgpuReason: string | null;
   /** Whether the selected browser model's weights are already cached (null until probed). */
   browserModelCached: boolean | null;
+  /**
+   * Why Chrome's built-in Gemini Nano isn't usable here, if it isn't (null
+   * until probed, or when it is).
+   */
+  chromeAiReason: string | null;
   /** Cancel an in-flight browser-brain connect (best-effort — see BrowserBrain.cancelConnect). */
   cancelConnect(): void;
 
@@ -110,6 +118,7 @@ export function useBrain(): BrainControls {
   const [browserModelCached, setBrowserModelCached] = useState<boolean | null>(
     null,
   );
+  const [chromeAiReason, setChromeAiReason] = useState<string | null>(null);
 
   const [browserModel, setBrowserModel] = useState(DEFAULT_BROWSER_MODEL);
   const [endpointUrl, setEndpointUrl] = useState(DEFAULT_ENDPOINT);
@@ -124,7 +133,7 @@ export function useBrain(): BrainControls {
   const [apiKey, setApiKey] = useState("");
 
   const [chat, setChat] = useState<ChatFn | null>(null);
-  const brainRef = useRef<BrowserBrain | EndpointBrain | null>(null);
+  const brainRef = useRef<BrowserBrain | EndpointBrain | ChromeBrain | null>(null);
 
   // Vision brain — an independent selection/lifecycle beside the text brain
   // above. WebGPU present -> default to the in-browser vision brain; absent ->
@@ -160,24 +169,27 @@ export function useBrain(): BrainControls {
    * outcome — "the agent flagged this shipment for manual review", with no
    * findings, because there was never a model behind it.
    */
-  const watchChat = useCallback((brain: BrowserBrain | EndpointBrain): ChatFn => {
-    return async (...args) => {
-      try {
-        return await brain.chat(...args);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        if (brain instanceof BrowserBrain && isDeviceLostError(message)) {
-          // `BrowserBrain.chat` has already torn its engine down; reflect that
-          // rather than leaving a Connect button that early-returns "fine".
-          setChat(null);
-          setModelInUse(null);
-          setStatus("error");
-          setError(message);
+  const watchChat = useCallback(
+    (brain: BrowserBrain | EndpointBrain | ChromeBrain): ChatFn => {
+      return async (...args) => {
+        try {
+          return await brain.chat(...args);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (brain instanceof BrowserBrain && isDeviceLostError(message)) {
+            // `BrowserBrain.chat` has already torn its engine down; reflect that
+            // rather than leaving a Connect button that early-returns "fine".
+            setChat(null);
+            setModelInUse(null);
+            setStatus("error");
+            setError(message);
+          }
+          throw e;
         }
-        throw e;
-      }
-    };
-  }, []);
+      };
+    },
+    [],
+  );
 
   /**
    * Wraps a browser-vision brain's `read` so a fatal failure mid-run is
@@ -207,6 +219,7 @@ export function useBrain(): BrainControls {
       setWebgpuReason(reason);
       setWebgpu(reason === null);
     });
+    void chromeAiUnavailableReason().then(setChromeAiReason);
     // The vision seam has no Endpoint alternative, so its reason names the
     // scripted-vision fallback; probed the same way, and used to pick the
     // starting vision brain (WebGPU -> browser-vision, else scripted-vision).
@@ -277,7 +290,9 @@ export function useBrain(): BrainControls {
   }, []);
 
   const cancelConnect = useCallback(() => {
-    if (brainRef.current instanceof BrowserBrain) brainRef.current.cancelConnect();
+    const brain = brainRef.current;
+    if (brain instanceof BrowserBrain || brain instanceof ChromeBrain)
+      brain.cancelConnect();
     disconnect();
     setStatus("idle");
     setProgress(null);
@@ -360,6 +375,16 @@ export function useBrain(): BrainControls {
         setModelInUse(id);
         setChat(() => watchChat(brain));
         setBrowserModelCached(true);
+      } else if (kind === "chrome") {
+        // Chrome owns the weights, so there's no model id to pick and nothing
+        // for this app to cache — connect just makes the built-in model ready.
+        brainRef.current?.dispose();
+        const brain = new ChromeBrain();
+        brainRef.current = brain;
+        const id = await brain.connect(setProgress);
+        setChromeAiReason(null);
+        setModelInUse(id);
+        setChat(() => watchChat(brain));
       } else {
         brainRef.current?.dispose();
         const brain = new EndpointBrain(endpointUrl, apiKey, endpointModel);
@@ -460,6 +485,7 @@ export function useBrain(): BrainControls {
     webgpu,
     webgpuReason,
     browserModelCached,
+    chromeAiReason,
     cancelConnect,
     browserModel,
     setBrowserModel,
