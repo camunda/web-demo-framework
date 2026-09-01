@@ -185,15 +185,27 @@ export function RuntimeDiagram({
 
   // bpmn-js re-renders an element's visual whenever its markers change, which
   // drops any child we appended — so re-install on every mutation rather than
-  // only after import. `installDiagramIcons` is idempotent.
+  // only after import. Coalesced to one pass per frame: a run mutates this
+  // subtree constantly (markers, token overlays), and appending an icon is
+  // itself a mutation that would otherwise re-trigger the observer.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const apply = () => installDiagramIcons(container, iconsRef.current);
-    const observer = new MutationObserver(apply);
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        installDiagramIcons(container, iconsRef.current);
+      });
+    };
+    const observer = new MutationObserver(schedule);
     observer.observe(container, { childList: true, subtree: true });
-    apply();
-    return () => observer.disconnect();
+    installDiagramIcons(container, iconsRef.current);
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [icons]);
 
   // No inline sizing: an inline `height` beats every class selector, and
