@@ -41,6 +41,35 @@ insurance:
   that to `/web-demo-framework/` only if this repo is ever made public and
   served as a project site, otherwise every asset URL 404s.
 
+### If this repo is made public
+
+Under discussion, because a public repo removes the token the website build
+otherwise needs to fetch the embed bundle (see
+`.github/workflows/release-embed-bundle.yml` and the website's
+`scripts/fetch-demo-app.mjs`): public release assets download unauthenticated.
+
+Two things break on the flip if they are not done in the same change, both of
+them the inverse of the reasoning above:
+
+1. **Set the `PAGES_BASE_PATH` repo variable to `/web-demo-framework/`.** A
+   public repo is served as a *project site* at
+   `https://camunda.github.io/web-demo-framework/`, not from the root of a
+   generated host. Leave it at `/` and every asset 404s — and Pages answers each
+   404 with HTML, so the browser then refuses the stylesheets on MIME grounds.
+   Skip this only if a root-served custom domain lands in the same change.
+2. **Update `PAGES_BASE_URL`** (used by `preview.yml` for the comment it posts),
+   which currently defaults to the generated host. That hostname is committed in
+   this repo; it is obscurity rather than a secret, and it stops meaning anything
+   once the repo is public, but it should not be left pointing at a host that no
+   longer serves the previews.
+
+Checked before proposing the flip, and worth re-checking if it stalls: no secret
+has ever been committed (GitHub secret scanning reports one alert, resolved — a
+false positive in the vendored `transformers` bundle, see
+`.github/secret_scanning.yml`), no credential-shaped file appears anywhere in
+history, the licence is Apache 2.0, and every `@nanobpm/*` dependency is public
+on npm, so `npm ci` works for someone outside Camunda.
+
 This coordinated with, but did not block on, #18: the CSP and sandbox design
 there applies regardless of which origin serves the bundle. #18 has since
 landed — `src/framework/compile.ts` now runs reader/agent-supplied code
