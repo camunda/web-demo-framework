@@ -18,6 +18,12 @@ import "@fontsource/inter/latin-400.css";
 import "@fontsource/inter/latin-500.css";
 import "@fontsource/inter/latin-600.css";
 import "@fontsource/inter/latin-700.css";
+// camunda.com's UI face, used by `?view=compact` so an embed on that site reads
+// as part of the page rather than a frame borrowed from elsewhere. Same weights
+// the site loads (400/600/700 — see its `next/font` setup in `app/layout.tsx`).
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-sans/latin-700.css";
 import "@fontsource/ibm-plex-mono/latin-400.css";
 import "@fontsource/ibm-plex-mono/latin-600.css";
 // bpmn-js's own CSS moved to the lazy diagram boundary in ExampleRunner.tsx

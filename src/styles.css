@@ -255,6 +255,41 @@ body {
    editors, model editor and brain picker are not rendered at all (see
    ExampleRunner's `compact` prop); what is left is tightened up so the whole
    thing reads as one block of page rather than an application window. */
+
+/* Re-point the palette at camunda.com's own values, on the same element as
+   `.c4-ui` and after it, so the design-system components inherit these too.
+   The base palette above was already matched to that site, so this is the
+   remaining delta: its slightly blacker ink, near-invisible hairlines, and a
+   12px radius against our 16px.
+
+   The typeface is the visible one. The site sets IBM Plex Sans ahead of Inter
+   (`--font-sans` in its globals.css); an iframe is a separate document and
+   cannot inherit that, so the same face is self-hosted here and selected only
+   in compact — the standalone app keeps Inter. */
+.app-compact {
+  --ui-sans:
+    "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --ink: #0a0a0a;
+  --ink-muted: rgba(0, 0, 0, 0.72);
+  --ink-muted-2: rgba(0, 0, 0, 0.58);
+  --line: rgba(0, 0, 0, 0.07);
+  --line-strong: rgba(0, 0, 0, 0.14);
+  --surface-3: #f7f7f7;
+  --card-radius: 12px;
+  --panel-radius: 12px;
+
+  /* Re-declared, not just re-tokenised: `body` already resolved `--ui-sans` to
+     Inter and children inherit that *computed* value, so overriding the token
+     alone would change nothing. Same reason the size is set here rather than
+     left to `body`'s 16px, which reads as a frame that missed the memo next to
+     the host card's 14px. */
+  font-family: var(--ui-sans);
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
 .layout-compact .runner {
   padding: 0;
   gap: 16px;
