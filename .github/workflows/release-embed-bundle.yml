@@ -1,0 +1,57 @@
+name: Release embed bundle
+
+# Publishes the build that camunda.com serves from /demo-app, as a release
+# asset the website fetches at build time (see scripts/fetch-demo-app.mjs in
+# camunda/camunda.com-website). The website gitignores the extracted output, so
+# this release is the only place that ~53 MB of build artifact lives.
+#
+# Separate from deploy.yml on purpose. That one publishes to Pages on every push
+# to main; this one is cut deliberately by pushing a tag, so the website pins a
+# version rather than tracking whatever main happened to be.
+#
+# Tag it: git tag demo-app-v1 && git push origin demo-app-v1
+
+on:
+  push:
+    tags: ['demo-app-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach the bundle to (e.g. demo-app-v1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Must match where the website mounts it. Unlike deploy.yml's Pages
+          # build this is not configurable per-deployment: the base path is
+          # baked into every asset URL at build time, so a bundle built for "/"
+          # 404s everything when served under /demo-app/.
+          VITE_BASE_PATH: /demo-app/
+      - name: Pack the bundle
+        run: |
+          tar -czf demo-app.tgz -C dist .
+          sha256sum demo-app.tgz > demo-app.tgz.sha256
+          ls -lh demo-app.tgz
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --notes "Embed bundle for camunda.com /demo-app (VITE_BASE_PATH=/demo-app/)."
+          gh release upload "$TAG" demo-app.tgz demo-app.tgz.sha256 --clobber
