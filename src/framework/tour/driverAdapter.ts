@@ -20,6 +20,16 @@ export interface TourHandle {
   moveNext(): void;
   /** The index of the currently active step, or -1 once the tour has ended. */
   activeIndex(): number;
+  /**
+   * Whether driver.js still has a tour running.
+   *
+   * The end of a tour is observed by asking, not by being told. driver.js
+   * declares an `onDestroyed` config hook and does not call it — verified
+   * against 1.8.0 for every exit: overlay click, Escape, the close button, and
+   * stepping past the last step. Anything that trusts that hook to fire leaves
+   * the caller believing a torn-down tour is still running.
+   */
+  isActive(): boolean;
   /** Tears the tour down (removes the overlay/popover and its listeners). */
   destroy(): void;
 }
@@ -27,8 +37,6 @@ export interface TourHandle {
 export interface StartTourOptions {
   /** Called whenever the active step changes (including on start, with index 0). */
   onIndexChange?: (index: number) => void;
-  /** Called once the tour is torn down, for any reason (finished, closed, escaped). */
-  onDestroyed?: () => void;
 }
 
 /**
@@ -103,9 +111,6 @@ export async function startTour(
     onHighlighted: (_element, _step, { index }) => {
       if (index !== undefined) options.onIndexChange?.(index);
     },
-    onDestroyed: () => {
-      options.onDestroyed?.();
-    },
   });
 
   driverObj.drive();
@@ -114,6 +119,7 @@ export async function startTour(
   return {
     moveNext: () => driverObj.moveNext(),
     activeIndex: () => driverObj.getActiveIndex() ?? -1,
+    isActive: () => driverObj.isActive(),
     destroy: () => driverObj.destroy(),
   };
 }

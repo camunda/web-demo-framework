@@ -79,24 +79,39 @@ export function useTour(
   const start = useCallback(() => {
     if (!tour || tour.steps.length === 0 || handleRef.current) return;
     const token = (startTokenRef.current += 1);
+    // Per-tour, not per-hook: both survive the tour they belong to, and a
+    // second run starting with them left at the previous run's values would
+    // treat its own first step as already advanced.
+    indexRef.current = 0;
+    lastAdvancedIndexRef.current = -1;
 
     void startTour(tour.steps, {
       onIndexChange: (index) => {
         indexRef.current = index;
       },
-      onDestroyed: () => {
-        stopPolling();
-        handleRef.current = null;
-        setActive(false);
-      },
     }).then((handle) => {
-      if (token !== startTokenRef.current) {
+      // A tour can end before this resolves — `drive()` runs inside
+      // `startTour`, so a step list whose targets are all missing tears itself
+      // down while the promise is still pending. Adopting the handle then
+      // would leave `active` true with nothing on screen.
+      if (token !== startTokenRef.current || !handle.isActive()) {
         handle.destroy();
         return;
       }
       handleRef.current = handle;
       setActive(true);
       pollRef.current = setInterval(() => {
+        // Also how the tour's end is noticed: driver.js declares an
+        // `onDestroyed` hook and never calls it (1.8.0 — checked against
+        // overlay click, Escape, the close button, and stepping past the last
+        // step), so being told is not an option. Without this the button stays
+        // "Touring…" and disabled for the rest of the page's life.
+        if (!handle.isActive()) {
+          stopPolling();
+          handleRef.current = null;
+          setActive(false);
+          return;
+        }
         const index = indexRef.current;
         if (index === lastAdvancedIndexRef.current) return;
         const step = tour.steps[index];
