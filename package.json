@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "description": "Runnable, editable versions of Camunda's documentation examples: a BPMN model, the code behind each element, and an optional LLM connection, executed in the browser on the nano wasm engine.",
   "scripts": {
     "dev": "vite",
