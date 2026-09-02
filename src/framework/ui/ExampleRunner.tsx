@@ -842,6 +842,13 @@ export function ExampleRunner({
   // the "Done" button and a persisted closed preference.
   const startEditorOpen = startOpen || (compact && startFormBlocking);
 
+  // Latch the forced-open panel open. Without this it closes itself the instant
+  // the last required field is filled — pulling focus out from under the reader
+  // mid-form, and taking the optional fields with it.
+  useEffect(() => {
+    if (compact && startFormBlocking) setStartOpen(true);
+  }, [compact, startFormBlocking, setStartOpen]);
+
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
     // but re-check here too: `draft.hasErrors` is the single source of truth

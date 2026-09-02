@@ -98,17 +98,31 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          # Publish through a draft so the two uploads are recoverable without
+          # making a *published* release mutable.
+          #
+          # `gh release upload` is not atomic across files: if the bundle lands
+          # and the checksum does not, the release is left half-populated, and
+          # without --clobber every retry then fails the duplicate-name check.
+          # A draft has been consumed by nobody, so clobbering within it is
+          # safe, and the release only becomes visible once both assets are up.
+          #
           # --verify-tag: `gh release create` would otherwise invent the tag from
           # the default branch, so a workflow_dispatch input naming a branch or a
           # SHA would publish a release whose tag points somewhere other than the
           # ref this bundle was built from.
-          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$REPO" --verify-tag \
-                 --title "$TAG" \
-                 --notes "Embed bundle for camunda.com /demo-app (VITE_BASE_PATH=/demo-app/)."
-          # Deliberately no --clobber. The website pins a tag and checks the
-          # published checksum, which is worth nothing if the bytes under that
-          # tag can be swapped later. Re-running after a *failed* upload still
-          # works, because the asset will not be there; replacing an already
-          # published bundle means cutting a new tag.
-          gh release upload "$TAG" --repo "$REPO" demo-app.tgz demo-app.tgz.sha256
+          STATE=$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft' 2>/dev/null || echo absent)
+
+          if [ "$STATE" = "false" ]; then
+            echo "::error::$TAG is already published. The website pins this tag and verifies the published checksum, so its bytes must not change — cut a new tag instead."
+            exit 1
+          fi
+
+          if [ "$STATE" = "absent" ]; then
+            gh release create "$TAG" --repo "$REPO" --verify-tag --draft \
+              --title "$TAG" \
+              --notes "Embed bundle for camunda.com /demo-app (VITE_BASE_PATH=/demo-app/)."
+          fi
+
+          gh release upload "$TAG" --repo "$REPO" --clobber demo-app.tgz demo-app.tgz.sha256
+          gh release edit "$TAG" --repo "$REPO" --draft=false
