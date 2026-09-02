@@ -39,6 +39,9 @@ function Headline({ text }: { text: string }) {
  * - `?embed=1` — no gallery nav, no app header, sized for an iframe, with an
  *   "open full page" link back to the un-embedded URL. Meant for a docs page
  *   to inline via `<iframe>` rather than sending the reader away.
+ * - `?embed=1&view=compact` — the same, minus the editors and brain picker.
+ *   A marketing page wants a process that visibly runs, not an IDE; the
+ *   "Open full page" link is where the editable version lives.
  *
  * Which brain is selected is deep-linked too, compressed into the URL hash
  * (see `framework/deepLink.ts`) — there's no server to hold state for us.
@@ -47,7 +50,8 @@ function Headline({ text }: { text: string }) {
  * the sandboxing work lands.
  */
 export function App() {
-  const { route, embed } = useRoute();
+  const { route, embed, view } = useRoute();
+  const compact = embed && view === "compact";
   const initialBrainKind = readDeepLinkState().brain;
   const initialTourId = readTourParam();
   // Embedded, the host sizes the iframe from these messages, so the runner
@@ -125,13 +129,15 @@ export function App() {
           </a>
         )}
         {embed && (
+          // No query string on purpose: the full page is the un-restricted one,
+          // so `view=compact` must not follow the reader through this link.
           <a
             className="open-full-page"
             href={examplePath(example.id) + (location.hash || "")}
             target="_top"
             rel="noreferrer"
           >
-            Open full page ↗
+            {compact ? "Open the editable version ↗" : "Open full page ↗"}
           </a>
         )}
       </div>
@@ -139,6 +145,7 @@ export function App() {
       <ExampleRunner
         key={example.id}
         example={example}
+        compact={compact}
         initialBrainKind={initialBrainKind}
         initialTourId={initialTourId}
       />
@@ -147,8 +154,11 @@ export function App() {
 
   if (embed) {
     return (
-      <div className="c4-ui app-shell app-embed">
-        <main id="main" className="layout layout-embed">
+      <div className={`c4-ui app-shell app-embed${compact ? " app-compact" : ""}`}>
+        <main
+          id="main"
+          className={`layout layout-embed${compact ? " layout-compact" : ""}`}
+        >
           {body}
         </main>
       </div>

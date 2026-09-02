@@ -123,10 +123,22 @@ interface LogLine extends TraceEntry {
  */
 export function ExampleRunner({
   example,
+  compact = false,
   initialBrainKind,
   initialTourId,
 }: {
   example: ExampleDef;
+  /**
+   * Read-only presentation: no handler editors, no model editor, no brain
+   * picker — see `EmbedView` in `src/framework/routing.ts`. The scenario
+   * selector and input editor stay: "edit the input and re-run" is the point
+   * of the demo, and it is those, not the code editors, that deliver it.
+   *
+   * Not rendering the editors is also what keeps Monaco and the bpmn-js
+   * Modeler off the wire — both sit behind `React.lazy()` below, so an
+   * unrendered tab is an unfetched chunk.
+   */
+  compact?: boolean;
   /**
    * Pre-selects a brain from a deep link (see `src/framework/deepLink.ts`)
    * instead of the default "scripted". Applied once, right after mount —
@@ -247,8 +259,16 @@ export function ExampleRunner({
     return i === -1 ? null : i;
   }, [example.scenarios, startValues]);
   // An example with a real start form opens it on a first visit — its fields
-  // may be required, and Run stays disabled until they're filled.
-  const [startOpen, setStartOpen] = usePersistentDisclosure("start", !!startSchema);
+  // may be required, and Run stays disabled until they're filled. Compact is
+  // the exception: an embed on a marketing page should read as "press play",
+  // so it starts collapsed and only opens when the form actually blocks Run
+  // (see `startEditorOpen`). Its own storage key, because the compact embed is
+  // same-origin with the full runner and would otherwise inherit a preference
+  // set over there.
+  const [startOpen, setStartOpen] = usePersistentDisclosure(
+    compact ? "start-compact" : "start",
+    compact ? false : !!startSchema,
+  );
   const [running, setRunning] = useState(false);
   // True only while a single `⏭ Step` round is in flight — distinct from
   // `running` (a continuous `driveLoop`), so the status badge and button
@@ -807,6 +827,8 @@ export function ExampleRunner({
   const canResume = !!run.snapshot && run.snapshot.completedInstances < 1;
   /** The start form (if any) still has a required field unfilled. */
   const needsStartForm = !canResume && !!startSchema && !startFormValid;
+  // Never leave Run disabled by a form the reader can't see.
+  const startEditorOpen = startOpen || needsStartForm;
 
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
@@ -1011,12 +1033,16 @@ export function ExampleRunner({
 
   return (
     <div className="runner">
-      <section className="intro">
-        <h1>{example.title}</h1>
-        {blurbParagraphs.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
-      </section>
+      {/* The host page introduces the demo in its own words and supplies its own
+          heading, so a second <h1> here would duplicate it in the outline. */}
+      {!compact && (
+        <section className="intro">
+          <h1>{example.title}</h1>
+          {blurbParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </section>
+      )}
 
       {example.imageInput && (
         <ImageInputPanel
@@ -1056,8 +1082,8 @@ export function ExampleRunner({
         <button
           type="button"
           className="scenario-input-button"
-          onClick={() => setStartOpen(!startOpen)}
-          aria-expanded={startOpen}
+          onClick={() => setStartOpen(!startEditorOpen)}
+          aria-expanded={startEditorOpen}
           aria-controls="start-input-editor"
           title="Edit the starting payload"
         >
@@ -1079,7 +1105,7 @@ export function ExampleRunner({
       <div
         className="inline-input-editor"
         id="start-input-editor"
-        hidden={!startOpen}
+        hidden={!startEditorOpen}
       >
         <div className="inline-input-editor-head">
           <div>
@@ -1116,7 +1142,7 @@ export function ExampleRunner({
         )}
       </div>
 
-      {(model.agent || example.imageInput) && (
+      {!compact && (model.agent || example.imageInput) && (
         <CollapsibleCard
           sectionId="brain"
           className="brain-card"
@@ -1346,6 +1372,7 @@ export function ExampleRunner({
         </div>
       </div>
 
+      {!compact && (
       <div className="runner-secondary">
         <CollapsibleCard
           sectionId="code"
@@ -1518,6 +1545,7 @@ export function ExampleRunner({
             </CollapsibleCard>
           )}
       </div>
+      )}
     </div>
   );
 }
