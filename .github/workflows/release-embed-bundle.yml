@@ -48,7 +48,14 @@ jobs:
           esac
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          # Qualified as a tag ref, not a bare name. `actions/checkout` resolves
+          # an ambiguous name to the branch, while `gh release --verify-tag`
+          # below resolves the tag — so a branch and tag sharing a name would
+          # publish a bundle built from one commit under a release pointing at
+          # another. This also makes a missing tag fail here, before any
+          # repository code is built. The push trigger already supplies a fully
+          # qualified `refs/tags/...` in `github.ref`.
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
