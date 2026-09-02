@@ -123,10 +123,22 @@ interface LogLine extends TraceEntry {
  */
 export function ExampleRunner({
   example,
+  compact = false,
   initialBrainKind,
   initialTourId,
 }: {
   example: ExampleDef;
+  /**
+   * Read-only presentation: no handler editors, no model editor, no brain
+   * picker — see `EmbedView` in `src/framework/routing.ts`. The scenario
+   * selector and input editor stay: "edit the input and re-run" is the point
+   * of the demo, and it is those, not the code editors, that deliver it.
+   *
+   * Not rendering the editors is also what keeps Monaco and the bpmn-js
+   * Modeler off the wire — both sit behind `React.lazy()` below, so an
+   * unrendered tab is an unfetched chunk.
+   */
+  compact?: boolean;
   /**
    * Pre-selects a brain from a deep link (see `src/framework/deepLink.ts`)
    * instead of the default "scripted". Applied once, right after mount —
@@ -247,8 +259,22 @@ export function ExampleRunner({
     return i === -1 ? null : i;
   }, [example.scenarios, startValues]);
   // An example with a real start form opens it on a first visit — its fields
-  // may be required, and Run stays disabled until they're filled.
-  const [startOpen, setStartOpen] = usePersistentDisclosure("start", !!startSchema);
+  // may be required, and Run stays disabled until they're filled. Compact is
+  // the exception: an embed on a marketing page should read as "press play",
+  // so it starts collapsed and only opens when the form actually blocks Run
+  // (see `startEditorOpen`). Its own storage key, because the compact embed is
+  // same-origin with the full runner and would otherwise inherit a preference
+  // set over there.
+  const [startOpen, setStartOpen] = usePersistentDisclosure(
+    compact ? "start-compact" : "start",
+    compact ? false : !!startSchema,
+  );
+  // Set when an invalid start form forces the editor open. Kept out of
+  // `usePersistentDisclosure` on purpose: that setter writes to localStorage,
+  // and this is not a disclosure preference — persisting it would leave every
+  // later compact load rehydrating as open, including ones whose seeded form is
+  // perfectly valid, which is exactly what compact mode is trying to avoid.
+  const [forcedStartOpen, setForcedStartOpen] = useState(false);
   const [running, setRunning] = useState(false);
   // True only while a single `⏭ Step` round is in flight — distinct from
   // `running` (a continuous `driveLoop`), so the status badge and button
@@ -270,7 +296,10 @@ export function ExampleRunner({
   );
   // The start form's live validity — Run stays disabled while a required
   // start-form field is missing, same as the review form below.
-  const [startFormValid, setStartFormValid] = useState(false);
+  // `null` until the lazy `FormRenderer` reports — which is not the same as
+  // invalid. Run stays disabled either way, but only a reported `false` is
+  // allowed to force the input editor open (see `startFormBlocking`).
+  const [startFormValid, setStartFormValid] = useState<boolean | null>(null);
   const startFormRef = useRef<FormRendererHandle>(null);
   const [reviewValues, setReviewValues] = useState<Record<string, unknown>>({});
   // The rendered review form's live validity (required fields filled, etc.) —
@@ -805,8 +834,32 @@ export function ExampleRunner({
    * Reset return the page to its pre-run state.
    */
   const canResume = !!run.snapshot && run.snapshot.completedInstances < 1;
-  /** The start form (if any) still has a required field unfilled. */
-  const needsStartForm = !canResume && !!startSchema && !startFormValid;
+  /** The start form (if any) is not yet known to be complete. */
+  const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
+  /**
+   * Reported invalid, as opposed to not yet reported. Never leave Run disabled
+   * by a form the reader cannot see — but do not flash the editor open during
+   * the moment before the lazy form first validates, which for a seeded example
+   * ends in "valid" anyway.
+   */
+  const startFormBlocking = !canResume && !!startSchema && startFormValid === false;
+  // Compact only: the full runner already opens the editor on a first visit
+  // when the example has a start form, and forcing it there would override both
+  // the "Done" button and a persisted closed preference.
+  const startEditorOpen = startOpen || forcedStartOpen;
+
+  // Latch the forced-open panel open. Without this it closes itself the instant
+  // the last required field is filled — pulling focus out from under the reader
+  // mid-form, and taking the optional fields with it.
+  useEffect(() => {
+    if (compact && startFormBlocking) setForcedStartOpen(true);
+  }, [compact, startFormBlocking]);
+
+  /** Closing has to drop the latch too, or the panel springs straight back open. */
+  const setStartEditorOpen = (open: boolean) => {
+    setStartOpen(open);
+    if (!open) setForcedStartOpen(false);
+  };
 
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
@@ -1011,12 +1064,19 @@ export function ExampleRunner({
 
   return (
     <div className="runner">
-      <section className="intro">
-        <h1>{example.title}</h1>
-        {blurbParagraphs.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
-      </section>
+      {/* An iframe is its own document with its own heading outline, so the
+          host page's heading does not cover this one. Compact keeps the
+          example's identity for heading navigation and drops only the copy. */}
+      {compact ? (
+        <h1 className="visually-hidden">{example.title}</h1>
+      ) : (
+        <section className="intro">
+          <h1>{example.title}</h1>
+          {blurbParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </section>
+      )}
 
       {example.imageInput && (
         <ImageInputPanel
@@ -1056,8 +1116,8 @@ export function ExampleRunner({
         <button
           type="button"
           className="scenario-input-button"
-          onClick={() => setStartOpen(!startOpen)}
-          aria-expanded={startOpen}
+          onClick={() => setStartEditorOpen(!startEditorOpen)}
+          aria-expanded={startEditorOpen}
           aria-controls="start-input-editor"
           title="Edit the starting payload"
         >
@@ -1079,7 +1139,7 @@ export function ExampleRunner({
       <div
         className="inline-input-editor"
         id="start-input-editor"
-        hidden={!startOpen}
+        hidden={!startEditorOpen}
       >
         <div className="inline-input-editor-head">
           <div>
@@ -1095,7 +1155,7 @@ export function ExampleRunner({
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setStartOpen(false)}
+            onClick={() => setStartEditorOpen(false)}
           >
             Done
           </Button>
@@ -1116,7 +1176,7 @@ export function ExampleRunner({
         )}
       </div>
 
-      {(model.agent || example.imageInput) && (
+      {!compact && (model.agent || example.imageInput) && (
         <CollapsibleCard
           sectionId="brain"
           className="brain-card"
@@ -1346,6 +1406,7 @@ export function ExampleRunner({
         </div>
       </div>
 
+      {!compact && (
       <div className="runner-secondary">
         <CollapsibleCard
           sectionId="code"
@@ -1518,6 +1579,7 @@ export function ExampleRunner({
             </CollapsibleCard>
           )}
       </div>
+      )}
     </div>
   );
 }

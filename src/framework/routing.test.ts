@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  embedView,
   examplePath,
   galleryPath,
   isEmbed,
@@ -46,6 +47,18 @@ describe("routing", () => {
     expect(isEmbed("?embed=1")).toBe(true);
     expect(isEmbed("?embed=0")).toBe(false);
     expect(isEmbed("")).toBe(false);
+  });
+
+  it("reads ?view=compact", () => {
+    expect(embedView("?embed=1&view=compact")).toBe("compact");
+    expect(embedView("?view=compact")).toBe("compact");
+  });
+
+  it("defaults to the full view for anything else", () => {
+    expect(embedView("?embed=1")).toBe("full");
+    expect(embedView("?view=full")).toBe("full");
+    expect(embedView("?view=COMPACT")).toBe("full");
+    expect(embedView("")).toBe("full");
   });
 
   it("builds paths under the base path", () => {

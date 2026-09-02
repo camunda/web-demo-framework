@@ -44,6 +44,24 @@ export function isEmbed(search: string = location.search): boolean {
   return new URLSearchParams(search).get("embed") === "1";
 }
 
+/**
+ * How much of the runner an embed shows.
+ *
+ * - `full` — everything, as a docs page wants it.
+ * - `compact` — read-only: diagram, trace, run controls, and the scenario/input
+ *   editor. No handler editors, no model editor, no brain picker; the "Open full
+ *   page" link carries those. Meant for a marketing page, where the job is to
+ *   make the process concrete in seconds rather than invite a reading session.
+ */
+export type EmbedView = "full" | "compact";
+
+/** Reads `?view=compact`. Only meaningful alongside `?embed=1`. */
+export function embedView(search: string = location.search): EmbedView {
+  return new URLSearchParams(search).get("view") === "compact"
+    ? "compact"
+    : "full";
+}
+
 /** Builds the absolute path (including base path) for the gallery. */
 export function galleryPath(): string {
   return basePath();

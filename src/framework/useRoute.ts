@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
-import { isEmbed, parseRoute, type Route } from "./routing";
+import {
+  embedView,
+  isEmbed,
+  parseRoute,
+  type EmbedView,
+  type Route,
+} from "./routing";
 
 export interface RouteState {
   route: Route;
   embed: boolean;
+  /** Only meaningful when `embed` is true. */
+  view: EmbedView;
 }
 
 function readState(): RouteState {
-  return { route: parseRoute(), embed: isEmbed() };
+  return { route: parseRoute(), embed: isEmbed(), view: embedView() };
 }
 
 /**

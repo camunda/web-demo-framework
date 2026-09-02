@@ -1,0 +1,138 @@
+name: Release embed bundle
+
+# Publishes the build that camunda.com serves from /demo-app, as a release
+# asset the website fetches at build time (see scripts/fetch-demo-app.mjs in
+# camunda/camunda.com-website). The website gitignores the extracted output, so
+# this release is the only place that ~53 MB of build artifact lives.
+#
+# Separate from deploy.yml on purpose. That one publishes to Pages on every push
+# to main; this one is cut deliberately by pushing a tag, so the website pins a
+# version rather than tracking whatever main happened to be.
+#
+# Tag it: git tag demo-app-v1 && git push origin demo-app-v1
+
+on:
+  push:
+    tags: ['demo-app-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach the bundle to (e.g. demo-app-v1)'
+        required: true
+
+permissions:
+  contents: read
+
+# Serialize per tag. `publish` reads the release state and then uploads, and the
+# two are not atomic: a tag push and a manual dispatch for the same tag could
+# both observe a draft, and one could publish it while the other was still
+# replacing assets — pairing one run's tarball with the other's checksum. A
+# queued rerun now starts only after the first finishes, sees a published
+# release, and fails before uploading anything.
+concurrency:
+  group: release-embed-bundle-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # The only job that runs repository code, and it is read-only. `npm ci`
+    # executes dependency lifecycle scripts, so a compromised one must not be
+    # able to reach a token that can write releases or repository contents.
+    # Same split, for the same reason, as preview.yml.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # The push trigger is filtered to demo-app-v*, but workflow_dispatch takes
+      # a free-text ref. Without this, dispatching an unrelated tag — a product
+      # release, say — would attach demo-app.tgz to that release. `--verify-tag`
+      # later proves the tag exists, not that it is one of ours. Guarded here so
+      # a typo fails before a pointless build, and `publish` needs this job.
+      - name: Require an embed-bundle tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in
+            demo-app-v*) echo "tag: $TAG" ;;
+            *) echo "::error::'$TAG' is not an embed-bundle tag (expected demo-app-v*)"; exit 1 ;;
+          esac
+      - uses: actions/checkout@v4
+        with:
+          # Qualified as a tag ref, not a bare name. `actions/checkout` resolves
+          # an ambiguous name to the branch, while `gh release --verify-tag`
+          # below resolves the tag — so a branch and tag sharing a name would
+          # publish a bundle built from one commit under a release pointing at
+          # another. This also makes a missing tag fail here, before any
+          # repository code is built. The push trigger already supplies a fully
+          # qualified `refs/tags/...` in `github.ref`.
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Must match where the website mounts it. Unlike deploy.yml's Pages
+          # build this is not configurable per-deployment: the base path is
+          # baked into every asset URL at build time, so a bundle built for "/"
+          # 404s everything when served under /demo-app/.
+          VITE_BASE_PATH: /demo-app/
+      - name: Pack the bundle
+        run: |
+          tar -czf demo-app.tgz -C dist .
+          sha256sum demo-app.tgz > demo-app.tgz.sha256
+          ls -lh demo-app.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-app-bundle
+          path: |
+            demo-app.tgz
+            demo-app.tgz.sha256
+
+  publish:
+    # Holds the write-scoped token and executes no repository code — it does not
+    # even check the repo out. It only downloads what the build job produced and
+    # hands it to `gh release`.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: demo-app-bundle
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          # Publish through a draft so the two uploads are recoverable without
+          # making a *published* release mutable.
+          #
+          # `gh release upload` is not atomic across files: if the bundle lands
+          # and the checksum does not, the release is left half-populated, and
+          # without --clobber every retry then fails the duplicate-name check.
+          # A draft has been consumed by nobody, so clobbering within it is
+          # safe, and the release only becomes visible once both assets are up.
+          #
+          # --verify-tag: `gh release create` would otherwise invent the tag from
+          # the default branch, so a workflow_dispatch input naming a branch or a
+          # SHA would publish a release whose tag points somewhere other than the
+          # ref this bundle was built from.
+          STATE=$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft' 2>/dev/null || echo absent)
+
+          if [ "$STATE" = "false" ]; then
+            echo "::error::$TAG is already published. The website pins this tag and verifies the published checksum, so its bytes must not change — cut a new tag instead."
+            exit 1
+          fi
+
+          if [ "$STATE" = "absent" ]; then
+            gh release create "$TAG" --repo "$REPO" --verify-tag --draft \
+              --title "$TAG" \
+              --notes "Embed bundle for camunda.com /demo-app (VITE_BASE_PATH=/demo-app/)."
+          fi
+
+          gh release upload "$TAG" --repo "$REPO" --clobber demo-app.tgz demo-app.tgz.sha256
+          gh release edit "$TAG" --repo "$REPO" --draft=false
