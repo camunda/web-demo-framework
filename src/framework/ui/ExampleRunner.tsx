@@ -837,7 +837,10 @@ export function ExampleRunner({
    * ends in "valid" anyway.
    */
   const startFormBlocking = !canResume && !!startSchema && startFormValid === false;
-  const startEditorOpen = startOpen || startFormBlocking;
+  // Compact only: the full runner already opens the editor on a first visit
+  // when the example has a start form, and forcing it there would override both
+  // the "Done" button and a persisted closed preference.
+  const startEditorOpen = startOpen || (compact && startFormBlocking);
 
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),

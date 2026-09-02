@@ -33,6 +33,19 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The push trigger is filtered to demo-app-v*, but workflow_dispatch takes
+      # a free-text ref. Without this, dispatching an unrelated tag — a product
+      # release, say — would attach demo-app.tgz to that release. `--verify-tag`
+      # later proves the tag exists, not that it is one of ours. Guarded here so
+      # a typo fails before a pointless build, and `publish` needs this job.
+      - name: Require an embed-bundle tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in
+            demo-app-v*) echo "tag: $TAG" ;;
+            *) echo "::error::'$TAG' is not an embed-bundle tag (expected demo-app-v*)"; exit 1 ;;
+          esac
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}

@@ -48,6 +48,24 @@ export function buildEmbedHeightMessage(height: number): EmbedHeightMessage {
 const AUTO_HEIGHT_CLASS = "embed-height-auto";
 
 /**
+ * The height to report for `doc`.
+ *
+ * Deliberately NOT `documentElement.scrollHeight`: on the root element that is
+ * floored at the viewport — which, inside an iframe, is the height the host just
+ * granted us — so it ratchets. Growth gets reported, shrinkage never does, and
+ * collapsing a panel leaves the frame stuck at its tallest with dead space under
+ * the content.
+ *
+ * `offsetHeight` is the root's own border box, which {@link AUTO_HEIGHT_CLASS}
+ * makes exactly the content. `body.scrollHeight` covers anything overflowing
+ * that box — a fullscreen model editor, a tour popover — which is why the root
+ * alone is not enough.
+ */
+export function measureDocumentHeight(doc: Document = document): number {
+  return Math.max(doc.documentElement.offsetHeight, doc.body.scrollHeight);
+}
+
+/**
  * Posts the document height to the parent while `enabled`: on mount, whenever a
  * ResizeObserver sees the document change, and whenever the host asks with
  * {@link EMBED_HEIGHT_REQUEST}.
@@ -65,18 +83,7 @@ export function useEmbedHeightReporter(enabled: boolean): void {
 
     let lastSent = -1;
     const send = (force = false) => {
-      // NOT `documentElement.scrollHeight`: on the root element that is floored
-      // at the viewport — which is the height the host just granted us — so it
-      // ratchets. Growth is reported, shrinkage never is, and collapsing a
-      // panel leaves the iframe stuck at its tallest.
-      //
-      // `offsetHeight` is the root's own border box, which the auto-height class
-      // above makes exactly the content. `body.scrollHeight` covers anything
-      // that overflows that box, which is why the root alone isn't enough.
-      const height = Math.max(
-        document.documentElement.offsetHeight,
-        document.body.scrollHeight,
-      );
+      const height = measureDocumentHeight();
       // Ignore sub-pixel churn. Each message makes the host resize the iframe,
       // which resizes this document, which measures again — without a
       // threshold that loop can oscillate forever over a rounding error.
