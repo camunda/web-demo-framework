@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "description": "Runnable, editable versions of Camunda's documentation examples: a BPMN model, the code behind each element, and an optional LLM connection, executed in the browser on the nano wasm engine.",
   "scripts": {
     "dev": "vite",
@@ -39,6 +42,10 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zeebe-bpmn-moddle": "^1.17.0"
+  },
+  "overrides": {
+    "sharp": "^0.35.0",
+    "adm-zip": "^0.6.0"
   },
   "devDependencies": {
     "@nanobpm/engine-testkit": "^0.1.0",
