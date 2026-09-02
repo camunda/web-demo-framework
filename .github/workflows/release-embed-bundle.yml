@@ -23,6 +23,16 @@ on:
 permissions:
   contents: read
 
+# Serialize per tag. `publish` reads the release state and then uploads, and the
+# two are not atomic: a tag push and a manual dispatch for the same tag could
+# both observe a draft, and one could publish it while the other was still
+# replacing assets — pairing one run's tarball with the other's checksum. A
+# queued rerun now starts only after the first finishes, sees a published
+# release, and fails before uploading anything.
+concurrency:
+  group: release-embed-bundle-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build:
     # The only job that runs repository code, and it is read-only. `npm ci`

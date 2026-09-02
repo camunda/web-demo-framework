@@ -269,6 +269,12 @@ export function ExampleRunner({
     compact ? "start-compact" : "start",
     compact ? false : !!startSchema,
   );
+  // Set when an invalid start form forces the editor open. Kept out of
+  // `usePersistentDisclosure` on purpose: that setter writes to localStorage,
+  // and this is not a disclosure preference — persisting it would leave every
+  // later compact load rehydrating as open, including ones whose seeded form is
+  // perfectly valid, which is exactly what compact mode is trying to avoid.
+  const [forcedStartOpen, setForcedStartOpen] = useState(false);
   const [running, setRunning] = useState(false);
   // True only while a single `⏭ Step` round is in flight — distinct from
   // `running` (a continuous `driveLoop`), so the status badge and button
@@ -840,14 +846,20 @@ export function ExampleRunner({
   // Compact only: the full runner already opens the editor on a first visit
   // when the example has a start form, and forcing it there would override both
   // the "Done" button and a persisted closed preference.
-  const startEditorOpen = startOpen || (compact && startFormBlocking);
+  const startEditorOpen = startOpen || forcedStartOpen;
 
   // Latch the forced-open panel open. Without this it closes itself the instant
   // the last required field is filled — pulling focus out from under the reader
   // mid-form, and taking the optional fields with it.
   useEffect(() => {
-    if (compact && startFormBlocking) setStartOpen(true);
-  }, [compact, startFormBlocking, setStartOpen]);
+    if (compact && startFormBlocking) setForcedStartOpen(true);
+  }, [compact, startFormBlocking]);
+
+  /** Closing has to drop the latch too, or the panel springs straight back open. */
+  const setStartEditorOpen = (open: boolean) => {
+    setStartOpen(open);
+    if (!open) setForcedStartOpen(false);
+  };
 
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
@@ -1104,7 +1116,7 @@ export function ExampleRunner({
         <button
           type="button"
           className="scenario-input-button"
-          onClick={() => setStartOpen(!startEditorOpen)}
+          onClick={() => setStartEditorOpen(!startEditorOpen)}
           aria-expanded={startEditorOpen}
           aria-controls="start-input-editor"
           title="Edit the starting payload"
@@ -1143,7 +1155,7 @@ export function ExampleRunner({
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setStartOpen(false)}
+            onClick={() => setStartEditorOpen(false)}
           >
             Done
           </Button>
