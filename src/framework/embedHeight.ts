@@ -65,9 +65,18 @@ export function useEmbedHeightReporter(enabled: boolean): void {
 
     let lastSent = -1;
     const send = (force = false) => {
-      // `scrollHeight` on the root element, not `body`: the body's own box
-      // stops at its margin edge and misses anything positioned beyond it.
-      const height = document.documentElement.scrollHeight;
+      // NOT `documentElement.scrollHeight`: on the root element that is floored
+      // at the viewport — which is the height the host just granted us — so it
+      // ratchets. Growth is reported, shrinkage never is, and collapsing a
+      // panel leaves the iframe stuck at its tallest.
+      //
+      // `offsetHeight` is the root's own border box, which the auto-height class
+      // above makes exactly the content. `body.scrollHeight` covers anything
+      // that overflows that box, which is why the root alone isn't enough.
+      const height = Math.max(
+        document.documentElement.offsetHeight,
+        document.body.scrollHeight,
+      );
       // Ignore sub-pixel churn. Each message makes the host resize the iframe,
       // which resizes this document, which measures again — without a
       // threshold that loop can oscillate forever over a rounding error.
