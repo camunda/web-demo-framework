@@ -21,11 +21,17 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
+    # The only job that runs repository code, and it is read-only. `npm ci`
+    # executes dependency lifecycle scripts, so a compromised one must not be
+    # able to reach a token that can write releases or repository contents.
+    # Same split, for the same reason, as preview.yml.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,11 +53,42 @@ jobs:
           tar -czf demo-app.tgz -C dist .
           sha256sum demo-app.tgz > demo-app.tgz.sha256
           ls -lh demo-app.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-app-bundle
+          path: |
+            demo-app.tgz
+            demo-app.tgz.sha256
+
+  publish:
+    # Holds the write-scoped token and executes no repository code — it does not
+    # even check the repo out. It only downloads what the build job produced and
+    # hands it to `gh release`.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: demo-app-bundle
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 \
-            || gh release create "$TAG" --title "$TAG" --notes "Embed bundle for camunda.com /demo-app (VITE_BASE_PATH=/demo-app/)."
-          gh release upload "$TAG" demo-app.tgz demo-app.tgz.sha256 --clobber
+          # --verify-tag: `gh release create` would otherwise invent the tag from
+          # the default branch, so a workflow_dispatch input naming a branch or a
+          # SHA would publish a release whose tag points somewhere other than the
+          # ref this bundle was built from.
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$REPO" --verify-tag \
+                 --title "$TAG" \
+                 --notes "Embed bundle for camunda.com /demo-app (VITE_BASE_PATH=/demo-app/)."
+          # Deliberately no --clobber. The website pins a tag and checks the
+          # published checksum, which is worth nothing if the bytes under that
+          # tag can be swapped later. Re-running after a *failed* upload still
+          # works, because the asset will not be there; replacing an already
+          # published bundle means cutting a new tag.
+          gh release upload "$TAG" --repo "$REPO" demo-app.tgz demo-app.tgz.sha256

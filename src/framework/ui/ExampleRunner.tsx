@@ -290,7 +290,10 @@ export function ExampleRunner({
   );
   // The start form's live validity — Run stays disabled while a required
   // start-form field is missing, same as the review form below.
-  const [startFormValid, setStartFormValid] = useState(false);
+  // `null` until the lazy `FormRenderer` reports — which is not the same as
+  // invalid. Run stays disabled either way, but only a reported `false` is
+  // allowed to force the input editor open (see `startFormBlocking`).
+  const [startFormValid, setStartFormValid] = useState<boolean | null>(null);
   const startFormRef = useRef<FormRendererHandle>(null);
   const [reviewValues, setReviewValues] = useState<Record<string, unknown>>({});
   // The rendered review form's live validity (required fields filled, etc.) —
@@ -825,10 +828,16 @@ export function ExampleRunner({
    * Reset return the page to its pre-run state.
    */
   const canResume = !!run.snapshot && run.snapshot.completedInstances < 1;
-  /** The start form (if any) still has a required field unfilled. */
-  const needsStartForm = !canResume && !!startSchema && !startFormValid;
-  // Never leave Run disabled by a form the reader can't see.
-  const startEditorOpen = startOpen || needsStartForm;
+  /** The start form (if any) is not yet known to be complete. */
+  const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
+  /**
+   * Reported invalid, as opposed to not yet reported. Never leave Run disabled
+   * by a form the reader cannot see — but do not flash the editor open during
+   * the moment before the lazy form first validates, which for a seeded example
+   * ends in "valid" anyway.
+   */
+  const startFormBlocking = !canResume && !!startSchema && startFormValid === false;
+  const startEditorOpen = startOpen || startFormBlocking;
 
   const start = useCallback(async () => {
     // The draft already gates this in the UI (the Run button is disabled),
@@ -1033,9 +1042,12 @@ export function ExampleRunner({
 
   return (
     <div className="runner">
-      {/* The host page introduces the demo in its own words and supplies its own
-          heading, so a second <h1> here would duplicate it in the outline. */}
-      {!compact && (
+      {/* An iframe is its own document with its own heading outline, so the
+          host page's heading does not cover this one. Compact keeps the
+          example's identity for heading navigation and drops only the copy. */}
+      {compact ? (
+        <h1 className="visually-hidden">{example.title}</h1>
+      ) : (
         <section className="intro">
           <h1>{example.title}</h1>
           {blurbParagraphs.map((paragraph) => (
