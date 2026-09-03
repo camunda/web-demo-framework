@@ -63,10 +63,13 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # Preview is published under pr-preview/pr-<number>/ on gh-pages,
-          # so asset URLs must be rooted at that subpath or the preview
-          # renders without JS/CSS.
-          VITE_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}/
+          # Preview is published under pr-preview/pr-<number>/ on gh-pages, so
+          # asset URLs must be rooted there or the preview renders without
+          # JS/CSS. That subpath hangs off wherever Pages serves this repo, so
+          # it has to carry PAGES_BASE_PATH too: on a project site the preview
+          # lives at /web-demo-framework/pr-preview/pr-N/, and rooting it at
+          # /pr-preview/pr-N/ 404s every asset.
+          VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH || '/' }}pr-preview/pr-${{ github.event.pull_request.number }}/
       - uses: actions/upload-artifact@v4
         with:
           name: preview-dist
