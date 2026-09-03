@@ -42,6 +42,8 @@ function Headline({ text }: { text: string }) {
  * - `?embed=1&view=compact` — the same, minus the editors and brain picker.
  *   A marketing page wants a process that visibly runs, not an IDE; the
  *   "Open full page" link is where the editable version lives.
+ * - `?autostart=1` — press Run once the example scrolls into view, so the
+ *   embed shows a process running rather than one waiting to be clicked.
  *
  * Which brain is selected is deep-linked too, compressed into the URL hash
  * (see `framework/deepLink.ts`) — there's no server to hold state for us.
@@ -50,7 +52,7 @@ function Headline({ text }: { text: string }) {
  * the sandboxing work lands.
  */
 export function App() {
-  const { route, embed, view } = useRoute();
+  const { route, embed, view, autostart } = useRoute();
   const compact = embed && view === "compact";
   const initialBrainKind = readDeepLinkState().brain;
   const initialTourId = readTourParam();
@@ -146,6 +148,7 @@ export function App() {
         key={example.id}
         example={example}
         compact={compact}
+        autostart={autostart}
         initialBrainKind={initialBrainKind}
         initialTourId={initialTourId}
       />

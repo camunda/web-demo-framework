@@ -62,6 +62,18 @@ export function embedView(search: string = location.search): EmbedView {
     : "full";
 }
 
+/**
+ * Reads `?autostart=1` — press Run on the reader's behalf once the example is
+ * on screen and able to run.
+ *
+ * Opt-in rather than implied by `?embed=1`: a docs page inlining an example to
+ * be read alongside prose does not necessarily want it moving, and a host that
+ * does want it can say so.
+ */
+export function isAutostart(search: string = location.search): boolean {
+  return new URLSearchParams(search).get("autostart") === "1";
+}
+
 /** Builds the absolute path (including base path) for the gallery. */
 export function galleryPath(): string {
   return basePath();
