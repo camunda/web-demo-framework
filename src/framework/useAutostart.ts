@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 /**
- * Presses Run once, on behalf of a reader who has not asked to.
+ * Presses Run once, because the embedding page asked for it rather than the
+ * person looking at it.
  *
- * The epic wants an embed on a marketing page to show a process *running*
- * rather than a diagram waiting to be clicked, so `?autostart=1` opts into
- * that. It is deliberately narrow: one run, only when the example could have
- * been run by hand anyway, and never when the reader has said they do not want
- * motion.
+ * That split is the whole reason this is careful. `?autostart=1` is set by
+ * whoever embedded the example — the epic wants a marketing page to show a
+ * process *running* rather than a diagram waiting to be clicked — while the
+ * motion lands on a reader who never clicked anything. So it stays narrow: one
+ * run, only when the example could have been run by hand anyway, and never when
+ * that reader has said they do not want motion.
  */
 export interface UseAutostartOptions {
   /** `?autostart=1` was asked for. */
@@ -47,7 +49,7 @@ export function useAutostart({
   useEffect(() => {
     if (!enabled || firedRef.current) return;
     const el = targetRef.current;
-    // No element yet, or a environment without the observer (jsdom): fall back
+    // No element yet, or an environment without the observer (jsdom): fall back
     // to "on screen", so the readiness gate below is the only thing left. A
     // missing observer should not mean a demo that never runs.
     if (!el || typeof IntersectionObserver === "undefined") {
