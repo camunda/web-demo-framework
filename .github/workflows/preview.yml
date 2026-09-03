@@ -63,10 +63,13 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # Preview is published under pr-preview/pr-<number>/ on gh-pages,
-          # so asset URLs must be rooted at that subpath or the preview
-          # renders without JS/CSS.
-          VITE_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}/
+          # Preview is published under pr-preview/pr-<number>/ on gh-pages, so
+          # asset URLs must be rooted there or the preview renders without
+          # JS/CSS. That subpath hangs off wherever Pages serves this repo, so
+          # it has to carry PAGES_BASE_PATH too: on a project site the preview
+          # lives at /web-demo-framework/pr-preview/pr-N/, and rooting it at
+          # /pr-preview/pr-N/ 404s every asset.
+          VITE_BASE_PATH: ${{ vars.PAGES_BASE_PATH || '/' }}pr-preview/pr-${{ github.event.pull_request.number }}/
       - uses: actions/upload-artifact@v4
         with:
           name: preview-dist
@@ -97,14 +100,14 @@ jobs:
       - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1
         with:
           source-dir: dist/
-          # Host serving this repo's Pages site. Must be a bare hostname with
-          # no scheme and no trailing slash — the action prepends https://
-          # itself, so a value like https://example.com yields
-          # https://https://example.com/pr-preview/pr-N/. Overridable via the
-          # PAGES_BASE_URL repo variable, which is what to set if the
-          # generated hostname ever changes (it is regenerated if Pages is
-          # disabled and re-enabled) or once a custom domain lands.
-          pages-base-url: ${{ vars.PAGES_BASE_URL || 'fluffy-succotash-1vv1kjr.pages.github.io' }}
+          # Host serving this repo's Pages site. Left empty on purpose: the
+          # action derives "<org>.github.io/<repo>" from the repository, which
+          # is correct for a public project site. It previously had to be
+          # pinned to the generated host an access-controlled Pages site was
+          # served from; that hostname stopped serving when the repo was made
+          # public, and a hardcoded fallback would have quietly outlived it.
+          # Set the PAGES_BASE_URL repo variable only for a custom domain.
+          pages-base-url: ${{ vars.PAGES_BASE_URL }}
           # Holds the comment back until the preview is actually reachable.
           # Off until the Pages source is switched to the gh-pages branch:
           # /pages/builds is empty while Pages is workflow-sourced, so the
