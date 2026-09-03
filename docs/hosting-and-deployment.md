@@ -28,42 +28,44 @@ insurance:
   domain config) — see blockers below.
 - Until that lands, `.github/workflows/deploy.yml` publishes to this repo's
   default Pages URL, which is already a distinct origin from `camunda.com`
-  and fully automatic. Because the repo is **internal**, that is an
-  access-controlled generated host
-  (`https://<random>.pages.github.io/`), served from the **root** — not
-  `https://camunda.github.io/web-demo-framework/`; the `/<repo>/` project-path
-  convention applies only to a *public* repo. The custom domain can be layered
-  on later (one line — see the commented `CNAME` step in the workflow) without
-  touching the pipeline, and a custom domain is likewise root-served, so the
-  Vite build `base` stays correct across that change: `vite.config.ts` reads
-  it from the `VITE_BASE_PATH` env var (defaulting to `/`), and `deploy.yml`
-  sets it to `/` unless the `PAGES_BASE_PATH` repo variable overrides — set
-  that to `/web-demo-framework/` only if this repo is ever made public and
-  served as a project site, otherwise every asset URL 404s.
+  and fully automatic. The repo is **public**, so that is the project site
+  `https://camunda.github.io/web-demo-framework/`, served from the
+  `/web-demo-framework/` path rather than a host root. The custom domain can be
+  layered on later (one line — see the commented `CNAME` step in the workflow)
+  without touching the pipeline, but note it *is* root-served, so it would need
+  `PAGES_BASE_PATH` set back to `/` in the same change. `vite.config.ts` reads
+  the root from the `VITE_BASE_PATH` env var (defaulting to `/`), and
+  `deploy.yml` sets it from the `PAGES_BASE_PATH` repo variable — currently
+  `/web-demo-framework/`. Get this wrong in either direction and every asset
+  URL 404s.
 
-### If this repo is made public
+### Made public — what the flip actually changed
 
-Under discussion, because a public repo removes the token the website build
-otherwise needs to fetch the embed bundle (see
-`.github/workflows/release-embed-bundle.yml` and the website's
-`scripts/fetch-demo-app.mjs`): public release assets download unauthenticated.
+The repo was made public on 2026-09-04. GitHub moved the Pages site to
+`https://camunda.github.io/web-demo-framework/` by itself; the two things that
+did *not* move automatically, both the inverse of the reasoning above:
 
-Two things break on the flip if they are not done in the same change, both of
-them the inverse of the reasoning above:
+1. **`PAGES_BASE_PATH` is now `/web-demo-framework/`.** A public repo is served
+   as a *project site* under that path, not from the root of a generated host.
+   Between the flip and this change the site was live but blank: the HTML
+   returned 200 while every asset 404'd, and Pages answers each 404 with HTML,
+   so the browser then refused the stylesheets on MIME grounds. Set back to `/`
+   if a root-served custom domain lands.
+2. **`PAGES_BASE_URL` was deleted, not updated.** It pinned the generated host
+   the access-controlled site used to be served from, which stopped serving on
+   the flip. The action derives `<org>.github.io/<repo>` from the repository on
+   its own, so the correct value is no value — a hardcoded fallback is exactly
+   what let a dead hostname outlive the thing it pointed at. Set it only for a
+   custom domain.
 
-1. **Set the `PAGES_BASE_PATH` repo variable to `/web-demo-framework/`.** A
-   public repo is served as a *project site* at
-   `https://camunda.github.io/web-demo-framework/`, not from the root of a
-   generated host. Leave it at `/` and every asset 404s — and Pages answers each
-   404 with HTML, so the browser then refuses the stylesheets on MIME grounds.
-   Skip this only if a root-served custom domain lands in the same change.
-2. **Update `PAGES_BASE_URL`** (used by `preview.yml` for the comment it posts),
-   which currently defaults to the generated host. That hostname is committed in
-   this repo; it is obscurity rather than a secret, and it stops meaning anything
-   once the repo is public, but it should not be left pointing at a host that no
-   longer serves the previews.
+The other consequence is downstream: the website build no longer needs a token
+to fetch the embed bundle, since public release assets download unauthenticated
+(verified against the pinned digest). `scripts/fetch-demo-app.mjs` in the
+website repo still requires one and should make it optional — a token is still
+worth using when present, because unauthenticated GitHub API calls are
+rate-limited by IP and shared CI runners can exhaust that.
 
-Checked before proposing the flip, and worth re-checking if it stalls: no secret
+Checked before proposing the flip: no secret
 has ever been committed (GitHub secret scanning reports one alert, resolved — a
 false positive in the vendored `transformers` bundle, see
 `.github/secret_scanning.yml`), no credential-shaped file appears anywhere in
