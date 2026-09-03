@@ -3,6 +3,7 @@ import {
   embedView,
   examplePath,
   galleryPath,
+  isAutostart,
   isEmbed,
   parseRoute,
   restoreHandoffRoute,
@@ -59,6 +60,21 @@ describe("routing", () => {
     expect(embedView("?view=full")).toBe("full");
     expect(embedView("?view=COMPACT")).toBe("full");
     expect(embedView("")).toBe("full");
+  });
+
+  it("reads ?autostart=1", () => {
+    expect(isAutostart("?autostart=1")).toBe(true);
+    expect(isAutostart("?embed=1&view=compact&autostart=1")).toBe(true);
+  });
+
+  it("treats anything else as no autostart", () => {
+    // Opt-in, and only to exactly "1" — `?autostart=0` and `?autostart` are
+    // both far likelier to be a mistake than a request to run unprompted.
+    expect(isAutostart("?autostart=0")).toBe(false);
+    expect(isAutostart("?autostart")).toBe(false);
+    expect(isAutostart("?autostart=true")).toBe(false);
+    expect(isAutostart("?embed=1")).toBe(false);
+    expect(isAutostart("")).toBe(false);
   });
 
   it("builds paths under the base path", () => {

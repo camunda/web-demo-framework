@@ -40,6 +40,7 @@ import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
+import { useAutostart } from "../useAutostart";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
@@ -124,6 +125,7 @@ interface LogLine extends TraceEntry {
 export function ExampleRunner({
   example,
   compact = false,
+  autostart = false,
   initialBrainKind,
   initialTourId,
 }: {
@@ -139,6 +141,13 @@ export function ExampleRunner({
    * unrendered tab is an unfetched chunk.
    */
   compact?: boolean;
+  /**
+   * Press Run once, unprompted, when the example scrolls into view — see
+   * `?autostart=1` in `src/framework/routing.ts`. Gated on the same conditions
+   * as the Run button, so it is never a laxer route into a run the UI would
+   * have refused, and skipped entirely under `prefers-reduced-motion`.
+   */
+  autostart?: boolean;
   /**
    * Pre-selects a brain from a deep link (see `src/framework/deepLink.ts`)
    * instead of the default "scripted". Applied once, right after mount —
@@ -163,6 +172,8 @@ export function ExampleRunner({
   // would tear down and redeploy the whole session on every character typed,
   // repeatedly wiping the previous run's state mid-edit.
   const [bpmn, setBpmn] = useState(example.bpmn);
+  // Observed by `useAutostart` to decide the example has been scrolled to.
+  const runnerRef = useRef<HTMLDivElement>(null);
   const brain = useBrain();
   // The image picked/uploaded for the next run (contract B), or null. Only ever
   // set for an `imageInput` example; the small reference goes into process
@@ -907,6 +918,22 @@ export function ExampleRunner({
     }
   }, [run, stepping, draft.hasErrors, canResume, beginRun, driveLoop]);
 
+  // Same conditions as the Run button's `disabled`, deliberately duplicated
+  // from one place rather than inverted by hand at each call site.
+  const canRun =
+    run.phase === "ready" &&
+    !running &&
+    !stepping &&
+    !draft.hasErrors &&
+    !needsStartForm;
+
+  useAutostart({
+    enabled: autostart,
+    ready: canRun,
+    targetRef: runnerRef,
+    start: () => void start(),
+  });
+
   /**
    * Advance the *same* run by exactly one dispatch round (see
    * `useExampleRun.stepWorkers`) instead of driving it to quiescence — the
@@ -1063,7 +1090,7 @@ export function ExampleRunner({
   );
 
   return (
-    <div className="runner">
+    <div className="runner" ref={runnerRef}>
       {/* An iframe is its own document with its own heading outline, so the
           host page's heading does not cover this one. Compact keeps the
           example's identity for heading navigation and drops only the copy. */}
@@ -1200,13 +1227,7 @@ export function ExampleRunner({
         <Button
           data-tour={TOUR_ANCHOR.runButton}
           onClick={() => void start()}
-          disabled={
-            run.phase !== "ready" ||
-            running ||
-            stepping ||
-            draft.hasErrors ||
-            needsStartForm
-          }
+          disabled={!canRun}
         >
           ▶ Run
         </Button>
