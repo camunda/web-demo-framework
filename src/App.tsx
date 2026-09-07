@@ -120,7 +120,10 @@ export function App() {
         </>
       )}
       <div className="example-meta">
-        {example.docsUrl && (
+        {/* Only in the standalone app: this is its way back to camunda.com. In an
+            embed the runner is already *on* camunda.com, so the link is
+            redundant (and points at a loosely-related docs page), so it's hidden. */}
+        {!embed && example.docsUrl && (
           <a
             className="docs-link"
             href={example.docsUrl}
