@@ -13,10 +13,32 @@
  * `iframe.contentWindow` — rather than trust an origin, since that is the check
  * which actually establishes a message came from this frame.
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /** The message this frame posts; the host matches on this `type`. */
 export const EMBED_HEIGHT_MESSAGE = "web-demo-framework:height";
+
+/**
+ * The one-time "the runner is actually usable now" signal.
+ *
+ * Separate from the height message on purpose. Height is posted the moment the
+ * app shell mounts (see {@link useEmbedHeightReporter}), long before the
+ * WebAssembly engine has loaded — so a host that revealed the runner on the
+ * first height would uncover it while it might still be loading, or fail to keep
+ * its fallback up when the engine never initializes at all. This fires once, and
+ * only after the engine is confirmed ready (see {@link useEmbedReadyReporter}),
+ * so the host can hold its fallback until then and drop it exactly when there is
+ * a working runner underneath.
+ */
+export const EMBED_READY_MESSAGE = "web-demo-framework:ready";
+
+export interface EmbedReadyMessage {
+  type: typeof EMBED_READY_MESSAGE;
+}
+
+export function buildEmbedReadyMessage(): EmbedReadyMessage {
+  return { type: EMBED_READY_MESSAGE };
+}
 
 /**
  * Sent by the host to ask for the current height. Needed because the first
@@ -115,4 +137,27 @@ export function useEmbedHeightReporter(enabled: boolean): void {
       root.classList.remove(AUTO_HEIGHT_CLASS);
     };
   }, [enabled]);
+}
+
+/**
+ * Posts {@link EMBED_READY_MESSAGE} to the host exactly once, the first time
+ * `ready` is true — the signal a host uses to reveal an embedded runner.
+ *
+ * `ready` must mean the engine has actually initialized (in this app, the run
+ * phase reaching `"ready"`), not merely that the shell mounted. A failed load
+ * never makes `ready` true, so the message never fires and the host's fallback
+ * stays up — which is the whole point of preferring this over the height
+ * message, which fires regardless.
+ *
+ * A no-op when not embedded (`window.parent === window`), so it is safe to call
+ * unconditionally.
+ */
+export function useEmbedReadyReporter(ready: boolean): void {
+  const sent = useRef(false);
+  useEffect(() => {
+    if (!ready || sent.current) return;
+    if (typeof window === "undefined" || window.parent === window) return;
+    sent.current = true;
+    window.parent.postMessage(buildEmbedReadyMessage(), "*");
+  }, [ready]);
 }
