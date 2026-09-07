@@ -1,17 +1,20 @@
 /**
- * Height reporting for `?embed=1`, so an embedding page can size its iframe to
- * this document instead of guessing.
+ * The messages an `?embed=1` runner posts to its host: a **height** (so the
+ * page can size its iframe to this document instead of guessing) and a one-time
+ * **readiness** signal (so the page can reveal the runner only once it is
+ * usable — see {@link useEmbedReadyReporter}).
  *
  * Any guessed height is wrong: too short and the runner gets its own scrollbar
  * inside the page's scrollbar (scrolling within scrolling, and the diagram half
  * visible), too tall and the embed ends in dead space.
  *
- * Only the height travels, and only to `window.parent` — no page content, no
- * reader input. `targetOrigin` is `"*"` because the framework has no way to know
- * which origin embedded it, and a viewport height is not a secret. The host is
- * expected to verify the *source* of a message — `event.source` against its own
- * `iframe.contentWindow` — rather than trust an origin, since that is the check
- * which actually establishes a message came from this frame.
+ * Only these two non-sensitive signals travel, and only to `window.parent` — no
+ * page content, no reader input. `targetOrigin` is `"*"` because the framework
+ * has no way to know which origin embedded it, and neither a viewport height nor
+ * a readiness flag is a secret. The host is expected to verify the *source* of a
+ * message — `event.source` against its own `iframe.contentWindow` — rather than
+ * trust an origin, since that is the check which actually establishes a message
+ * came from this frame.
  */
 import { useEffect, useRef } from "react";
 
@@ -25,10 +28,12 @@ export const EMBED_HEIGHT_MESSAGE = "web-demo-framework:height";
  * app shell mounts (see {@link useEmbedHeightReporter}), long before the
  * WebAssembly engine has loaded — so a host that revealed the runner on the
  * first height would uncover it while it might still be loading, or fail to keep
- * its fallback up when the engine never initializes at all. This fires once, and
- * only after the engine is confirmed ready (see {@link useEmbedReadyReporter}),
- * so the host can hold its fallback until then and drop it exactly when there is
- * a working runner underneath.
+ * its fallback up when the engine never initializes at all. This is posted only
+ * after the engine is confirmed ready (see {@link useEmbedReadyReporter}), so
+ * the host can hold its fallback until then and drop it exactly when there is a
+ * working runner underneath. It arrives once per mounted runner, so a host that
+ * swaps examples in place is told each new one is ready — idempotent for a host
+ * that simply reveals the frame and leaves it revealed.
  */
 export const EMBED_READY_MESSAGE = "web-demo-framework:ready";
 
@@ -140,8 +145,16 @@ export function useEmbedHeightReporter(enabled: boolean): void {
 }
 
 /**
- * Posts {@link EMBED_READY_MESSAGE} to the host exactly once, the first time
- * `ready` is true — the signal a host uses to reveal an embedded runner.
+ * Posts {@link EMBED_READY_MESSAGE} to the host the first time `ready` is true —
+ * the signal a host uses to reveal an embedded runner.
+ *
+ * Once per mount, not once per page: `sent` is a per-instance ref, so a runner
+ * that is remounted (in this app `ExampleRunner` is keyed by example id, so
+ * switching examples remounts it) posts again for the newly-ready runner. That
+ * is intended — each mounted runner reports its own readiness — and idempotent
+ * for a host that reveals the frame and leaves it revealed. Within one mount it
+ * fires only once, so a re-deploy that dips back through `"loading"` does not
+ * re-cover an already-revealed frame.
  *
  * `ready` must mean the engine has actually initialized (in this app, the run
  * phase reaching `"ready"`), not merely that the shell mounted. A failed load
