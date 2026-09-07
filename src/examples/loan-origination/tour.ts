@@ -1,15 +1,15 @@
 import { TOUR_ANCHOR, type TourDef } from "../../framework/tour";
 
 /**
- * A five-step tour of the default "strong applicant" run: press Run, watch the
- * agent pick its tools, watch the underwriting policy run, then see the point
- * of the whole example — the senior-officer review that every application must
+ * A five-step walkthrough of the "strong applicant" run: press Run, watch the
+ * agent pick its tools, look at the underwriting policy, then see the point of
+ * the whole example — the senior-officer review that every application must
  * pass through before an outcome — and finally what the run recorded.
  *
- * The instance never completes on its own here (it parks at the human review
- * task waiting for a decision), so the tour's `successEvent` is the
- * underwriting assessment completing — reachable by pressing Run once, since
- * the agent drives its tools automatically up to the human gate.
+ * A plain click-through — it spotlights each part in turn and advances on the
+ * reader's Next, independent of what the run is doing (see `useTour`). The
+ * instance never completes on its own here (it parks at the human review task),
+ * which is exactly the point the fourth step is making.
  */
 export const loanTour: TourDef = {
   id: "loan-origination-walkthrough",
@@ -32,14 +32,12 @@ export const loanTour: TourDef = {
       description:
         "The assessment computes the debt-to-income ratio, a risk band and a recommendation from the verified figures — the deterministic policy the senior officer's review leans on.",
       target: { elementId: "AssessApplication" },
-      waitFor: { kind: "elementCompleted", elementId: "AssessApplication" },
     },
     {
       title: "Every application meets a human",
       description:
         "Whatever the agent recommended, the token now waits here: no offer and no decline is reachable without a senior officer first signing off. Open the task to record the decision — the gateway routes on it.",
       target: { elementId: "SeniorOfficerReview" },
-      waitFor: { kind: "activeElement", elementId: "SeniorOfficerReview" },
     },
     {
       title: "Everything the run recorded",
@@ -48,5 +46,4 @@ export const loanTour: TourDef = {
       target: { anchor: TOUR_ANCHOR.variablesPanel },
     },
   ],
-  successEvent: { kind: "elementCompleted", elementId: "AssessApplication" },
 };

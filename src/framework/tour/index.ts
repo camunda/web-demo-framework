@@ -6,12 +6,5 @@
  */
 export { TOUR_ANCHOR, type TourAnchorName } from "./anchors";
 export { readTourParam, tourParam } from "./deepLink";
-export { isTourSuccessful, isWaitForSatisfied } from "./evaluate";
 export { useTour, type UseTourResult } from "./useTour";
-export type {
-  TourDef,
-  TourStep,
-  TourSuccessEvent,
-  TourTarget,
-  TourWaitFor,
-} from "./types";
+export type { TourDef, TourStep, TourTarget } from "./types";

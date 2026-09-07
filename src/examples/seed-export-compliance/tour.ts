@@ -1,14 +1,16 @@
 import { TOUR_ANCHOR, type TourDef } from "../../framework/tour";
 
 /**
- * A five-step guided tour of the default "likely cleared" run: press Run,
- * see the agent pick its first tool, watch the token actually reach it,
- * watch the export notification fire once the agent clears the shipment,
- * then look at what ended up in the variables panel. Uses the example's
- * default seed/scenario (`SCENARIO_CLEARED`, see `./index.ts`), which
- * reaches `EndEvent_ComplianceDecisionSent` without a human task — so this
- * tour's `successEvent` (the instance completing) is reachable without the
- * reader doing anything beyond pressing Run once.
+ * A five-step guided walkthrough of the "likely cleared" run: press Run, see
+ * the agent pick its first tool, look at where the token reaches it, see the
+ * export notification a cleared shipment fires, then look at what ended up in
+ * the variables panel. Uses the example's default seed/scenario
+ * (`SCENARIO_CLEARED`, see `./index.ts`).
+ *
+ * A plain click-through — it spotlights each part in turn and advances on the
+ * reader's Next, independent of what the run is doing (see `useTour`). Under
+ * the embed's `?autostart=1` the run has usually finished by the time the tour
+ * is opened, so these steps read as "here is what happened, and where".
  */
 export const complianceTour: TourDef = {
   id: "compliance-walkthrough",
@@ -31,14 +33,12 @@ export const complianceTour: TourDef = {
       description:
         "The agent's first move is to look up the genetic marker mentioned in the notes.",
       target: { elementId: "VerifyGeneticMarker" },
-      waitFor: { kind: "activeElement", elementId: "VerifyGeneticMarker" },
     },
     {
       title: "A cleared shipment notifies the export team",
       description:
         "Once the compliance score comes back clean, the process notifies the export team automatically — no human review needed for this scenario.",
       target: { elementId: "NotifyExportTeam" },
-      waitFor: { kind: "elementCompleted", elementId: "NotifyExportTeam" },
     },
     {
       title: "Everything the run recorded",
@@ -47,5 +47,4 @@ export const complianceTour: TourDef = {
       target: { anchor: TOUR_ANCHOR.variablesPanel },
     },
   ],
-  successEvent: { kind: "instanceCompleted" },
 };
