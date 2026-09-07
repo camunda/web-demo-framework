@@ -228,10 +228,9 @@ export function ExampleRunner({
 
   // The example's optional guided tour (see `src/framework/tour/**`) — a
   // no-op `start`/`stop` when `example.tour` is undefined, so nothing below
-  // needs its own conditional. `getSnapshot` reads live via a ref-like
-  // closure over `run.snapshot` at poll time rather than being recreated
-  // every render, since `useTour` only calls it from its own interval.
-  const tour = useTour(example.tour, () => run.snapshot);
+  // needs its own conditional. The tour is a plain click-through, detached
+  // from run state, so it takes no snapshot getter.
+  const tour = useTour(example.tour);
   useEffect(() => {
     if (initialTourId && example.tour?.id === initialTourId) {
       tour.start();
