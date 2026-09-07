@@ -76,13 +76,25 @@ export function useTour(tour: TourDef | undefined): UseTourResult {
       // close button, and stepping past the last step), so being told is not an
       // option. Without this poll the button stays "Touring…" and disabled for
       // the rest of the page's life.
-      pollRef.current = setInterval(() => {
+      //
+      // Capture this interval's own id and act only while this handle is still
+      // the current one: a callback belonging to a superseded tour (a rapid
+      // stop-then-start swapped the handle underneath it) clears just itself and
+      // touches nothing a newer tour owns — never its poll id, handle, or
+      // `active`.
+      const pollId = setInterval(() => {
+        if (handleRef.current !== handle) {
+          clearInterval(pollId);
+          return;
+        }
         if (!handle.isActive()) {
-          stopPolling();
+          clearInterval(pollId);
+          if (pollRef.current === pollId) pollRef.current = null;
           handleRef.current = null;
           setActive(false);
         }
       }, POLL_MS);
+      pollRef.current = pollId;
     });
   }, [tour, stopPolling]);
 
