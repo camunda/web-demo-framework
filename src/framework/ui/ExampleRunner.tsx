@@ -24,6 +24,7 @@ import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
 import { useExampleRun } from "../useExampleRun";
+import { useEmbedReadyReporter } from "../embedHeight";
 import { describeRound, newSequenceFlows } from "../stepSummary";
 import { useBrain } from "../useBrain";
 import type { BrainKind, VisionFn } from "../brains/types";
@@ -225,6 +226,13 @@ export function ExampleRunner({
   // not `example.bpmn` directly — so what runs and what's shown is exactly
   // what the diagnostics above are about.
   const run = useExampleRun({ bpmn: draft.resolvedBpmn });
+
+  // Tell an embedding host the runner is actually usable — the engine has
+  // loaded and the model deployed (phase "ready"), not merely that the shell
+  // mounted. The host reveals the runner on this, and keeps its fallback up if
+  // it never arrives (a WASM load failure lands in "error", never "ready").
+  // A no-op outside an iframe.
+  useEmbedReadyReporter(run.phase === "ready");
 
   // The example's optional guided tour (see `src/framework/tour/**`) — a
   // no-op `start`/`stop` when `example.tour` is undefined, so nothing below

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEmbedHeightMessage,
+  buildEmbedReadyMessage,
   measureDocumentHeight,
   EMBED_HEIGHT_MESSAGE,
+  EMBED_READY_MESSAGE,
 } from "./embedHeight";
 
 /**
@@ -24,6 +26,15 @@ describe("buildEmbedHeightMessage", () => {
     // Rounding down would leave a sliver of overflow — enough for the host's
     // iframe to show a scrollbar, which is the whole thing this avoids.
     expect(buildEmbedHeightMessage(719.2).height).toBe(720);
+  });
+});
+
+describe("buildEmbedReadyMessage", () => {
+  it("carries only the type the host matches on", () => {
+    // A distinct type from the height message: the host reveals an embedded
+    // runner on this one, and it fires only once the engine is actually ready.
+    expect(buildEmbedReadyMessage()).toEqual({ type: EMBED_READY_MESSAGE });
+    expect(EMBED_READY_MESSAGE).not.toBe(EMBED_HEIGHT_MESSAGE);
   });
 });
 
