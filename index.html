@@ -6,8 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
       Baseline CSP for a hosted deployment. See docs/security.md for the full
-      threat model and the connect-src reasoning (why the Endpoint/Ollama
-      brain's arbitrary local URL isn't, and shouldn't be, allowlisted here).
+      threat model and the connect-src reasoning (why a local Ollama isn't, and
+      shouldn't be, allowlisted here, and why the remote-provider mode costs a
+      bare `https:`).
       A <meta> CSP can't set `frame-ancestors` or report-only mode — whoever
       owns hosting (issue #19) should set the equivalent as a real response
       header, not rely on this tag alone.
@@ -19,10 +20,17 @@
       dependent. CSP is enforced on the redirect target, so an allowlist that
       names only the URL WebLLM asks for blocks every model download with an
       unhelpful `Failed to fetch`.
+
+      The bare `https:` source is for the Endpoint brain's remote-provider mode:
+      the reader types the base URL of an OpenAI-compatible provider, and no
+      static allowlist can enumerate those (a self-hosted vLLM is as valid as
+      api.openai.com). `http:` is deliberately absent — a plaintext endpoint is
+      blocked as mixed content anyway, and the local-Ollama mode only exists on
+      a page already served from http://localhost, which `'self'` covers.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'"
     />
     <title>Runnable Camunda examples</title>
     <meta

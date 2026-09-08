@@ -70,9 +70,15 @@ describe("index.html connect-src", () => {
     }
   });
 
-  it("does not widen to a bare wildcard", () => {
+  it("allows an arbitrary https provider, but never plaintext or a bare wildcard", () => {
+    // The Endpoint brain's remote-provider mode dials a URL the reader types,
+    // so `https:` is deliberate. The named Hugging Face sources stay: they
+    // document what the in-browser brain needs and survive a later tightening
+    // of `https:` back to an allowlist.
+    expect(sources).toContain("https:");
     expect(sources).not.toContain("*");
-    expect(sources).not.toContain("https:");
+    expect(sources).not.toContain("http:");
+    expect(sources).not.toContain("data:");
   });
 
   it("matches subdomains but not the apex, so the apex is listed in its own right", () => {

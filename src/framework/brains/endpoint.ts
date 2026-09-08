@@ -7,18 +7,33 @@ import type { ChatMessage, TokenListener } from "./types";
  * agent-demo` (`src/llm/endpoint-llm.ts`).
  *
  * Note for hosted pages: a page served over https cannot reach
- * `http://localhost:11434` (mixed content / private-network access), so this
- * brain is a local-development affordance. The browser brain is the one that
- * works from a public URL.
+ * `http://localhost:11434` (mixed content / private-network access), so the
+ * local-Ollama half of this brain is a local-development affordance. From a
+ * hosted page the same client still works against a remote https provider the
+ * reader supplies a URL and key for.
  */
 
 /** A local Ollama's OpenAI-compatible API. */
 export const DEFAULT_ENDPOINT = "http://localhost:11434/v1";
 
+const isLoopbackHost = (h: string) =>
+  h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+
 /** True when the page itself is served from localhost. */
 export function pageIsLocal(): boolean {
-  const h = globalThis.location?.hostname ?? "";
-  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+  return isLoopbackHost(globalThis.location?.hostname ?? "");
+}
+
+/**
+ * True when an endpoint URL points at the reader's own machine — i.e. it's a
+ * local model server (Ollama, LM Studio, vLLM) rather than a hosted provider.
+ */
+export function isLocalEndpointUrl(endpoint: string): boolean {
+  try {
+    return isLoopbackHost(new URL(normaliseEndpoint(endpoint)).hostname);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -42,9 +57,7 @@ export function localEndpointBlockedReason(
   } catch {
     return null;
   }
-  const isLocalHost = (h: string) =>
-    h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
-  if (!isLocalHost(host) || isLocalHost(page.hostname)) return null;
+  if (!isLoopbackHost(host) || isLoopbackHost(page.hostname)) return null;
   return (
     `This page is served from ${page.origin || "a non-local origin"}, so it can't reach ` +
     `${endpoint}. A local model server only accepts requests from a page on localhost. ` +

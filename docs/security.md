@@ -93,24 +93,36 @@ window.__runSandboxSelfTest()`.
 
 The hosted page should ship a CSP restricting `connect-src` to what it
 actually needs — but one brain's whole purpose is to reach an **arbitrary,
-user-supplied local model server** (the Endpoint/Ollama brain, whose base URL
-is a text field the reader types in). A static `connect-src` allowlist
-cannot enumerate every port a reader might run Ollama, LM Studio, or vLLM on.
+user-supplied model server** (the Endpoint brain, whose base URL is a text
+field the reader types in). A static `connect-src` allowlist cannot enumerate
+every port a reader might run Ollama, LM Studio, or vLLM on, nor every hosted
+provider they might hold a key for.
 
-**Decision:** don't try to allowlist the user's local endpoint at all.
-`localEndpointBlockedReason` (`src/framework/brains/endpoint.ts`) already
-establishes that the Endpoint brain only works when *the page itself* is
-served from `localhost` — a hosted page can't reach `http://localhost:11434`
-regardless of CSP, because Ollama's own CORS allowlist covers localhost
-origins only. So:
+**Decision:** the two halves of that brain are treated differently, because
+only one of them is reachable from a hosted page at all.
+`localEndpointBlockedReason` (`src/framework/brains/endpoint.ts`) establishes
+that a **local** endpoint only works when *the page itself* is served from
+`localhost` — a hosted page can't reach `http://localhost:11434` regardless of
+CSP, because Ollama's own CORS allowlist covers localhost origins only. The
+UI therefore offers the Ollama option only on a localhost page (`pageIsLocal`),
+and offers a **remote provider URL + API key** everywhere else. So:
 
-- On a **hosted** deployment, `connect-src` is a fixed, narrow allowlist: the
-  page's own origin, plus what WebLLM needs to fetch model weights and the
-  compiled wasm engine from —
+- On a **hosted** deployment, `connect-src` is the page's own origin, a bare
+  `https:` for the reader's chosen provider, plus what WebLLM needs to fetch
+  model weights and the compiled wasm engine from —
 
   ```
-  https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com
+  'self' https: https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com
   ```
+
+  `https:` is the cost of the remote-provider mode: the reader supplies the
+  host, so nothing static can name it, and a self-hosted vLLM is as legitimate
+  a target as `api.openai.com`. It is scoped as tightly as that feature allows
+  — no `http:` (a plaintext endpoint is blocked as mixed content anyway), no
+  bare `*`, and no widening of `script-src`, so this permits data *requests*,
+  not code execution. The named Hugging Face sources are kept even though
+  `https:` subsumes them: they document what the in-browser brain needs, and
+  keep the allowlist ready if `https:` is ever tightened again.
 
   The two wildcards are deliberate, and were not optional. `@mlc-ai/web-llm`'s
   prebuilt config only ever names `huggingface.co`, but a weight request there
@@ -122,8 +134,8 @@ origins only. So:
   the reader just sees `Failed to fetch`. Enumerating individual CDN hosts
   would break again the next time Hugging Face moves storage or adds a region.
   `http://localhost:*`
-  is **not** in a hosted CSP — the endpoint brain is already unusable there,
-  documented as such in the UI, and adding it would only be a needless CSP
+  is **not** in a hosted CSP — the local endpoint is already unusable there,
+  isn't offered by the UI there, and adding it would only be a needless CSP
   hole. `font-src` additionally allows `data:`, since bpmn-js's own icon font
   ships as an inlined base64 `@font-face` in its stylesheet.
 - In **local development** (`npm run dev`, page served from `localhost`), the
