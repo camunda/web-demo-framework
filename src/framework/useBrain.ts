@@ -317,8 +317,12 @@ export function useBrain(): BrainControls {
   const listEndpointModels = useCallback(async () => {
     const seq = ++endpointModelsSeq.current;
     const isStale = () => seq !== endpointModelsSeq.current;
+    // Both early returns clear the selection too: leaving the last endpoint's
+    // model behind would show a stale id in the picker and hand `connect` a
+    // model this endpoint never offered.
     if (!endpointUrl.trim()) {
       setEndpointModels([]);
+      setEndpointModel("");
       setEndpointModelsStatus("idle");
       setEndpointModelsError(null);
       return;
@@ -326,6 +330,7 @@ export function useBrain(): BrainControls {
     const blocked = localEndpointBlockedReason(endpointUrl);
     if (blocked) {
       setEndpointModels([]);
+      setEndpointModel("");
       setEndpointModelsStatus("error");
       setEndpointModelsError(blocked);
       return;

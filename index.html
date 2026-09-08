@@ -25,8 +25,13 @@
       the reader types the base URL of an OpenAI-compatible provider, and no
       static allowlist can enumerate those (a self-hosted vLLM is as valid as
       api.openai.com). `http:` is deliberately absent — a plaintext endpoint is
-      blocked as mixed content anyway, and the local-Ollama mode only exists on
-      a page already served from http://localhost, which `'self'` covers.
+      blocked as mixed content from an https page anyway, and the local-Ollama
+      mode is never reached under this policy: it is offered only on a localhost
+      page, and the localhost page is `npm run dev`, where the `strip-dev-csp`
+      plugin (vite.config.ts) removes this tag entirely. `'self'` would *not*
+      stand in for it — a page on `http://localhost:5174` and a server on
+      `:11434` are different origins — so a built page previewed from localhost
+      needs a real response header allowing that port if it wants Ollama.
     -->
     <meta
       http-equiv="Content-Security-Policy"
