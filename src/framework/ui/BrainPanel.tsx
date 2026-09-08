@@ -113,8 +113,12 @@ function TextBrain({ brain }: { brain: BrainControls }) {
     ? "ollama"
     : "remote";
   const setEndpointMode = (mode: EndpointMode) => {
-    if (mode !== endpointMode)
-      brain.setEndpointUrl(mode === "ollama" ? DEFAULT_ENDPOINT : "");
+    if (mode === endpointMode) return;
+    brain.setEndpointUrl(mode === "ollama" ? DEFAULT_ENDPOINT : "");
+    // The key belongs to the host it was issued for: leaving it in place would
+    // send a provider's bearer token to whatever is listening on localhost the
+    // next time Connect is pressed (and vice versa).
+    brain.setApiKey("");
   };
   const [models, setModels] = useState(BROWSER_MODELS);
   useEffect(() => {
@@ -381,7 +385,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             <p className="field-hint">
               {endpointMode === "ollama"
                 ? "A local Ollama ignores this — leave it blank."
-                : "Sent as a bearer token to the endpoint above, from this browser only. It's held in memory for this tab and never stored or logged."}
+                : "Sent as a bearer token to the endpoint above, from this browser only. It's held in memory for this tab, never stored or logged, and cleared if you switch endpoint mode."}
             </p>
           </div>
         </div>
