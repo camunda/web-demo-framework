@@ -108,17 +108,25 @@ function TextBrain({ brain }: { brain: BrainControls }) {
   const localBlocked = localEndpointBlockedReason(brain.endpointUrl);
   // Derived, not stored: the URL *is* the mode, so typing a localhost address
   // by hand can't leave the toggle disagreeing with what will be dialled.
+  // Derived, not stored: the URL *is* the mode, so a hand-typed address can't
+  // leave the toggle disagreeing with what will be dialled. A hosted page has
+  // no Ollama mode to fall into — a loopback URL typed there is blocked, not a
+  // second mode — so it stays on "remote" and keeps one set of hints.
   const localPage = pageIsLocal();
-  const endpointMode: EndpointMode = isLocalEndpointUrl(brain.endpointUrl)
-    ? "ollama"
-    : "remote";
+  const endpointMode: EndpointMode =
+    localPage && isLocalEndpointUrl(brain.endpointUrl) ? "ollama" : "remote";
+  // A key is issued for one host, so it must never follow the URL to a host of
+  // a different kind: EndpointBrain sends it as a bearer token to whatever is
+  // in the box. Typing the key *after* the URL is untouched, so a local vLLM
+  // behind --api-key still works.
+  const changeEndpointUrl = (next: string) => {
+    if (isLocalEndpointUrl(next) !== isLocalEndpointUrl(brain.endpointUrl))
+      brain.setApiKey("");
+    brain.setEndpointUrl(next);
+  };
   const setEndpointMode = (mode: EndpointMode) => {
-    if (mode === endpointMode) return;
-    brain.setEndpointUrl(mode === "ollama" ? DEFAULT_ENDPOINT : "");
-    // The key belongs to the host it was issued for: leaving it in place would
-    // send a provider's bearer token to whatever is listening on localhost the
-    // next time Connect is pressed (and vice versa).
-    brain.setApiKey("");
+    if (mode !== endpointMode)
+      changeEndpointUrl(mode === "ollama" ? DEFAULT_ENDPOINT : "");
   };
   const [models, setModels] = useState(BROWSER_MODELS);
   useEffect(() => {
@@ -279,7 +287,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
               id="endpoint-url"
               value={brain.endpointUrl}
               placeholder="https://api.openai.com/v1"
-              onChange={(e) => brain.setEndpointUrl(e.target.value)}
+              onChange={(e) => changeEndpointUrl(e.target.value)}
               disabled={brain.status === "connecting"}
             />
             {endpointMode === "ollama" ? (
@@ -385,7 +393,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             <p className="field-hint">
               {endpointMode === "ollama"
                 ? "A local Ollama ignores this — leave it blank."
-                : "Sent as a bearer token to the endpoint above, from this browser only. It's held in memory for this tab, never stored or logged, and cleared if you switch endpoint mode."}
+                : "Sent as a bearer token to the endpoint above, from this browser only. It's held in memory for this tab, never stored or logged, and cleared if the endpoint moves between a local and a remote host."}
             </p>
           </div>
         </div>
