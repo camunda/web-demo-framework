@@ -19,7 +19,12 @@ import {
   insufficientVramReason,
   loadBrowserModelRequirements,
 } from "../brains/browser";
-import { localEndpointBlockedReason } from "../brains/endpoint";
+import {
+  DEFAULT_ENDPOINT,
+  isLocalEndpointUrl,
+  localEndpointBlockedReason,
+  pageIsLocal,
+} from "../brains/endpoint";
 import { chromeAiSupported } from "../brains/chrome";
 import { VISION_MODELS } from "../brains/vision";
 import type { BrainControls } from "../useBrain";
@@ -44,8 +49,21 @@ const KINDS: { kind: BrainKind; label: string; hint: string }[] = [
   {
     kind: "endpoint",
     label: "API endpoint",
-    hint: "Any OpenAI-compatible server. Ollama by default. Local pages only.",
+    hint: "Any OpenAI-compatible server: a local Ollama, or a remote provider with an API key.",
   },
+];
+
+/**
+ * Which kind of OpenAI-compatible server the endpoint brain talks to. A local
+ * Ollama is only reachable when the page itself is served from localhost — its
+ * CORS allowlist covers localhost origins only — so a hosted page is offered
+ * the remote-provider path alone rather than a button that can only fail.
+ */
+type EndpointMode = "ollama" | "remote";
+
+const ENDPOINT_MODES: { mode: EndpointMode; label: string }[] = [
+  { mode: "ollama", label: "Ollama (local)" },
+  { mode: "remote", label: "Provider URL + key" },
 ];
 
 const VISION_KINDS: { kind: VisionBrainKind; label: string; hint: string }[] = [
@@ -88,12 +106,37 @@ function TextBrain({ brain }: { brain: BrainControls }) {
   const kinds = KINDS.filter((k) => k.kind !== "chrome" || chromeAiSupported());
   // Warn before the user clicks Connect, not after it fails.
   const localBlocked = localEndpointBlockedReason(brain.endpointUrl);
+  // Derived, not stored: the URL *is* the mode, so typing a localhost address
+  // by hand can't leave the toggle disagreeing with what will be dialled.
+  // Derived, not stored: the URL *is* the mode, so a hand-typed address can't
+  // leave the toggle disagreeing with what will be dialled. A hosted page has
+  // no Ollama mode to fall into — a loopback URL typed there is blocked, not a
+  // second mode — so it stays on "remote" and keeps one set of hints.
+  const localPage = pageIsLocal();
+  const endpointMode: EndpointMode =
+    localPage && isLocalEndpointUrl(brain.endpointUrl) ? "ollama" : "remote";
+  // A key is issued for one host, so it must never follow the URL to a host of
+  // a different kind: EndpointBrain sends it as a bearer token to whatever is
+  // in the box. Typing the key *after* the URL is untouched, so a local vLLM
+  // behind --api-key still works.
+  const changeEndpointUrl = (next: string) => {
+    if (isLocalEndpointUrl(next) !== isLocalEndpointUrl(brain.endpointUrl))
+      brain.setApiKey("");
+    brain.setEndpointUrl(next);
+  };
+  const setEndpointMode = (mode: EndpointMode) => {
+    if (mode !== endpointMode)
+      changeEndpointUrl(mode === "ollama" ? DEFAULT_ENDPOINT : "");
+  };
   const [models, setModels] = useState(BROWSER_MODELS);
   useEffect(() => {
     void loadBrowserModelRequirements().then(setModels);
   }, []);
   // Auto-populate the endpoint model picker from the server's /models whenever
   // the endpoint or key changes, debounced so typing a URL doesn't spam it.
+  // A blank URL runs too rather than being skipped: clearing the box (or
+  // switching mode) has to reset the picker, and listEndpointModels does that
+  // without fetching.
   const { kind: brainKind, endpointUrl, apiKey, listEndpointModels } = brain;
   useEffect(() => {
     if (brainKind !== "endpoint" || localBlocked) return;
@@ -211,20 +254,56 @@ function TextBrain({ brain }: { brain: BrainControls }) {
 
       {brain.kind === "endpoint" && (
         <div className="brain-config">
+          {localPage ? (
+            <div
+              className="brain-kinds"
+              role="group"
+              aria-label="Endpoint provider"
+            >
+              {ENDPOINT_MODES.map((m) => (
+                <Button
+                  key={m.mode}
+                  size="sm"
+                  variant={endpointMode === m.mode ? "default" : "secondary"}
+                  aria-pressed={endpointMode === m.mode}
+                  disabled={brain.status === "connecting"}
+                  onClick={() => setEndpointMode(m.mode)}
+                >
+                  {m.label}
+                </Button>
+              ))}
+            </div>
+          ) : (
+            <p className="field-hint">
+              This page isn't served from <code>localhost</code>, so a local
+              Ollama isn't offered — it only accepts requests from a page on
+              localhost. Point this at a remote OpenAI-compatible provider, or
+              open this page at <code>http://localhost</code> to use Ollama.
+            </p>
+          )}
           <div className="field">
             <Label htmlFor="endpoint-url">Endpoint</Label>
             <Input
               id="endpoint-url"
               value={brain.endpointUrl}
-              onChange={(e) => brain.setEndpointUrl(e.target.value)}
+              placeholder="https://api.openai.com/v1"
+              onChange={(e) => changeEndpointUrl(e.target.value)}
               disabled={brain.status === "connecting"}
             />
-            <p className="field-hint">
-              Ollama allows <code>localhost</code> origins out of the box; set{" "}
-              <code>OLLAMA_ORIGINS</code> only when serving this page from
-              another host. Best for local development — a hosted copy of
-              this page can't reach a server on your machine at all.
-            </p>
+            {endpointMode === "ollama" ? (
+              <p className="field-hint">
+                Ollama allows <code>localhost</code> origins out of the box; set{" "}
+                <code>OLLAMA_ORIGINS</code> only when serving this page from
+                another host. Best for local development — a hosted copy of
+                this page can't reach a server on your machine at all.
+              </p>
+            ) : (
+              <p className="field-hint">
+                The base URL of any OpenAI-compatible provider — it must serve{" "}
+                <code>/models</code> and <code>/chat/completions</code>. Calls
+                go straight from this browser to that host.
+              </p>
+            )}
             {localBlocked && (
               <Alert variant="destructive">
                 <AlertTitle>A local server won't work from this URL</AlertTitle>
@@ -277,6 +356,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
                 disabled={
                   brain.status === "connecting" ||
                   brain.endpointModelsStatus === "loading" ||
+                  brain.endpointUrl.trim() === "" ||
                   localBlocked !== null
                 }
               >
@@ -300,7 +380,9 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             )}
           </div>
           <div className="field">
-            <Label htmlFor="endpoint-key">API key (optional)</Label>
+            <Label htmlFor="endpoint-key">
+              {endpointMode === "ollama" ? "API key (optional)" : "API key"}
+            </Label>
             <Input
               id="endpoint-key"
               type="password"
@@ -308,6 +390,11 @@ function TextBrain({ brain }: { brain: BrainControls }) {
               onChange={(e) => brain.setApiKey(e.target.value)}
               disabled={brain.status === "connecting"}
             />
+            <p className="field-hint">
+              {endpointMode === "ollama"
+                ? "A local Ollama ignores this — leave it blank."
+                : "Sent as a bearer token to the endpoint above, from this browser only. It's held in memory for this tab, never stored or logged, and cleared if the endpoint moves between a local and a remote host."}
+            </p>
           </div>
         </div>
       )}
@@ -321,7 +408,8 @@ function TextBrain({ brain }: { brain: BrainControls }) {
               brain.status === "connecting" ||
               (brain.kind === "chrome" && brain.chromeAiReason !== null) ||
               (brain.kind === "endpoint" &&
-                (brain.endpointModel === "" ||
+                (brain.endpointUrl.trim() === "" ||
+                  brain.endpointModel === "" ||
                   brain.endpointModelsStatus === "loading" ||
                   localBlocked !== null))
             }

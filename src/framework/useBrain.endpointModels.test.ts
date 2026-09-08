@@ -91,4 +91,30 @@ describe("useBrain — endpoint model list", () => {
     expect(result.current.endpointModel).toBe("");
     expect(result.current.endpointModelsError).toBeTruthy();
   });
+
+  it("goes back to idle and drops the selection when the endpoint is cleared", async () => {
+    // A hosted page starts with a blank endpoint, and clearing the box is how a
+    // reader switches provider: neither should leave the previous endpoint's
+    // model selected, or fetch a same-origin `/v1/models` and blame the server.
+    const fetchSpy = vi.fn();
+    stubModels(["llama3.2:3b"]);
+    const { result } = renderHook(() => useBrain());
+
+    await act(async () => {
+      await result.current.listEndpointModels();
+    });
+    expect(result.current.endpointModel).toBe("llama3.2:3b");
+
+    vi.stubGlobal("fetch", fetchSpy as unknown as typeof fetch);
+    act(() => result.current.setEndpointUrl("  "));
+    await act(async () => {
+      await result.current.listEndpointModels();
+    });
+
+    expect(result.current.endpointModelsStatus).toBe("idle");
+    expect(result.current.endpointModels).toEqual([]);
+    expect(result.current.endpointModel).toBe("");
+    expect(result.current.endpointModelsError).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

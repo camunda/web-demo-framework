@@ -10,6 +10,7 @@ import {
   DEFAULT_ENDPOINT,
   EndpointBrain,
   localEndpointBlockedReason,
+  pageIsLocal,
 } from "./brains/endpoint";
 import { ChromeBrain, chromeAiUnavailableReason } from "./brains/chrome";
 import { BrowserVisionBrain, DEFAULT_VISION_MODEL } from "./brains/vision";
@@ -23,8 +24,9 @@ import type { BrainKind, ChatFn, VisionBrainKind, VisionFn } from "./brains/type
  * - `browser` — a quantised model on WebGPU (works from a hosted https page).
  * - `chrome` — Gemini Nano built into Chrome, downloaded and owned by the
  *   browser rather than by this app (Chrome only).
- * - `endpoint` — any OpenAI-compatible server, Ollama by default (local only:
- *   an https page can't reach `http://localhost`).
+ * - `endpoint` — any OpenAI-compatible server: a local Ollama when the page
+ *   itself is served from localhost (an https page can't reach
+ *   `http://localhost`), otherwise a remote provider URL plus an API key.
  *
  * `scripted` is always the starting kind: it's deterministic, offline, and
  * needs no download, so the example runs the moment the page does. Picking a
@@ -121,7 +123,11 @@ export function useBrain(): BrainControls {
   const [chromeAiReason, setChromeAiReason] = useState<string | null>(null);
 
   const [browserModel, setBrowserModel] = useState(DEFAULT_BROWSER_MODEL);
-  const [endpointUrl, setEndpointUrl] = useState(DEFAULT_ENDPOINT);
+  // Prefill a local Ollama only when this page could reach one; a hosted page
+  // starts blank so the reader supplies their own provider URL.
+  const [endpointUrl, setEndpointUrl] = useState(
+    pageIsLocal() ? DEFAULT_ENDPOINT : "",
+  );
   const [endpointModel, setEndpointModel] = useState("");
   const [endpointModels, setEndpointModels] = useState<string[]>([]);
   const [endpointModelsStatus, setEndpointModelsStatus] = useState<
@@ -311,9 +317,20 @@ export function useBrain(): BrainControls {
   const listEndpointModels = useCallback(async () => {
     const seq = ++endpointModelsSeq.current;
     const isStale = () => seq !== endpointModelsSeq.current;
+    // Both early returns clear the selection too: leaving the last endpoint's
+    // model behind would show a stale id in the picker and hand `connect` a
+    // model this endpoint never offered.
+    if (!endpointUrl.trim()) {
+      setEndpointModels([]);
+      setEndpointModel("");
+      setEndpointModelsStatus("idle");
+      setEndpointModelsError(null);
+      return;
+    }
     const blocked = localEndpointBlockedReason(endpointUrl);
     if (blocked) {
       setEndpointModels([]);
+      setEndpointModel("");
       setEndpointModelsStatus("error");
       setEndpointModelsError(blocked);
       return;
