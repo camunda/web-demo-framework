@@ -122,9 +122,12 @@ function TextBrain({ brain }: { brain: BrainControls }) {
   }, []);
   // Auto-populate the endpoint model picker from the server's /models whenever
   // the endpoint or key changes, debounced so typing a URL doesn't spam it.
+  // A blank URL runs too rather than being skipped: clearing the box (or
+  // switching mode) has to reset the picker, and listEndpointModels does that
+  // without fetching.
   const { kind: brainKind, endpointUrl, apiKey, listEndpointModels } = brain;
   useEffect(() => {
-    if (brainKind !== "endpoint" || localBlocked || !endpointUrl.trim()) return;
+    if (brainKind !== "endpoint" || localBlocked) return;
     const timer = setTimeout(() => void listEndpointModels(), 400);
     return () => clearTimeout(timer);
   }, [brainKind, endpointUrl, apiKey, localBlocked, listEndpointModels]);
