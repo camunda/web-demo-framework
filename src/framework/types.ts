@@ -193,7 +193,17 @@ export interface ExampleHero {
  * else — the tool manifest, the prompts, the job types, the forms — the runner
  * derives from the model.
  */
-export interface ExampleDef {
+/**
+ * What the gallery needs to render an example's card and route to it — and
+ * nothing else.
+ *
+ * Split out from {@link ExampleDef} because the registry imports every
+ * example's metadata eagerly, and would otherwise drag every model's XML,
+ * every form schema and every handler's source onto the initial-load path for
+ * a page that only shows titles. Lives in `src/examples/<id>/meta.ts`; the
+ * payload sits behind a dynamic import (see `loadExample`).
+ */
+export interface ExampleMeta {
   id: string;
   title: string;
   blurb: string;
@@ -220,6 +230,9 @@ export interface ExampleDef {
    * in the scenario section as before.
    */
   group?: "scenario" | "learn-bpmn";
+}
+
+export interface ExampleDef extends ExampleMeta {
   /** The BPMN XML. */
   bpmn: string;
   /** Camunda `.form` schemas by form id, for the start and user-task forms. */

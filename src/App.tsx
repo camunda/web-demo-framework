@@ -1,13 +1,13 @@
 import { AppHeader, Button } from "@camunda/design-system";
-import { Fragment } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ExampleRunner } from "./framework/ui/ExampleRunner";
-import { EXAMPLES } from "./examples";
+import { EXAMPLES, loadExample } from "./examples";
 import { useRoute } from "./framework/useRoute";
 import { examplePath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
 import { readTourParam } from "./framework/tour";
 import { useEmbedHeightReporter } from "./framework/embedHeight";
-import type { ExampleHero } from "./framework/types";
+import type { ExampleDef, ExampleHero } from "./framework/types";
 
 /** The hero shown for an example that doesn't supply one of its own. */
 const DEFAULT_HERO: ExampleHero = {
@@ -62,6 +62,27 @@ export function App() {
 
   const activeId = route.kind === "example" ? route.id : EXAMPLES[0].id;
   const example = EXAMPLES.find((e) => e.id === activeId) ?? EXAMPLES[0];
+
+  // The card copy is already here; the model, forms and handler source are
+  // fetched only for the example actually being opened (see `loadExample`).
+  const [definition, setDefinition] = useState<ExampleDef | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setDefinition(null);
+    setLoadError(null);
+    loadExample(example.id)
+      .then((def) => {
+        if (!cancelled) setDefinition(def);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [example.id]);
+
   // Split the gallery nav by `group` — existing scenario examples (no
   // `group`, or `group: "scenario"`) render exactly as before; `learn-bpmn`
   // examples get their own visibly-labelled section.
@@ -147,14 +168,22 @@ export function App() {
         )}
       </div>
       {/* Keyed so switching examples remounts with fresh editor/run state. */}
-      <ExampleRunner
-        key={example.id}
-        example={example}
-        compact={compact}
-        autostart={autostart}
-        initialBrainKind={initialBrainKind}
-        initialTourId={initialTourId}
-      />
+      {loadError ? (
+        <p className="example-load-error" role="alert">
+          Couldn't load “{example.title}” — {loadError}
+        </p>
+      ) : definition ? (
+        <ExampleRunner
+          key={definition.id}
+          example={definition}
+          compact={compact}
+          autostart={autostart}
+          initialBrainKind={initialBrainKind}
+          initialTourId={initialTourId}
+        />
+      ) : (
+        <p className="form-fallback">Loading {example.title}…</p>
+      )}
     </>
   );
 

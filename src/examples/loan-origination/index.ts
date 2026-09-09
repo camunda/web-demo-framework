@@ -1,4 +1,5 @@
 import type { ExampleDef } from "../../framework/types";
+import meta from "./meta";
 import { createTemplateMap, templateNameFromPath } from "../../framework/templates";
 import { loanTour } from "./tour";
 import bpmn from "./model.bpmn?raw";
@@ -210,11 +211,7 @@ const SEND_DECLINE_NOTICE = `async (job, { text, sleep, trace }) => {
 }`;
 
 export const loanOrigination: ExampleDef = {
-  id: "loan-origination",
-  title: "Loan origination agent",
-  blurb:
-    "An AI agent gathers a loan case with its own tools — customer lookup, credit bureau, an underwriting policy, a status update — then every application passes through a mandatory senior-officer review before a gateway routes it to an offer or a decline. The agent advises; the process governs.",
-  docsUrl: "https://camunda.com/orchestrate/agents/",
+  ...meta,
   bpmn,
   forms: {
     "loan-application": applicationForm,
@@ -244,5 +241,5 @@ export const loanOrigination: ExampleDef = {
     { elementId: "UpdateApplicationStatus", standsInFor: "REST connector — origination system", source: UPDATE_APPLICATION_STATUS },
     { elementId: "IssueLoanOffer", standsInFor: "REST connector — offer/booking system", source: ISSUE_LOAN_OFFER },
     { elementId: "SendDeclineNotice", standsInFor: "REST connector — notifications", source: SEND_DECLINE_NOTICE },
-  ],
+  ]
 };

@@ -63,7 +63,8 @@ author never restates any of this in code:
 
 An example manifest (`src/examples/*/index.ts`) supplies only what the diagram
 can't: handler source per element, a seed payload, optional scenarios, and a
-deterministic stand-in for the LLM.
+deterministic stand-in for the LLM. Its card copy lives next door in `meta.ts`,
+which is the only half the gallery loads up front.
 
 ## The brains
 
@@ -171,9 +172,19 @@ same repository (previews are skipped for fork PRs; see the hosting doc).
 ## Adding an example
 
 1. Drop the `.bpmn` (and any `.form` JSON) into `src/examples/<id>/`.
-2. Write the manifest: handler source per element id, a seed, optional
-   scenarios, and — for an agentic model — a scripted stand-in agent.
-3. Register it in `src/examples/index.ts`.
+2. Write `meta.ts`: the card copy the gallery shows — `id`, `title`, `blurb`, and
+   optionally `hero`, `docsUrl`, `group`. Default-export it.
+3. Write `index.ts`: the manifest. Spread `meta`, then add handler source per
+   element id, a seed, optional scenarios, and — for an agentic model — a
+   scripted stand-in agent.
+4. Register it in `src/examples/index.ts` — scenario examples are hand-listed
+   there for display order; a `learn-*` example is discovered automatically and
+   needs no edit to that file.
+
+The split is what keeps the gallery cheap: metadata is imported eagerly, and
+the manifest — model XML, forms, handler source — is fetched only when that
+example is opened. So an example costs the initial bundle nothing, and
+`npm run budget` shouldn't move when you add one.
 
 Handlers receive `(job, { sleep, trace, text, num })` and return the variables to
 merge, or throw to fail the job and raise an incident on the diagram.
