@@ -76,4 +76,21 @@ describe("App — switching examples while a manifest is in flight", () => {
     await waitFor(() => expect(screen.getByText(/Loading Beta/)).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("lets a retry of a failed example replace its error", async () => {
+    history.pushState({}, "", "/examples/alpha");
+    render(<App />);
+    rejectors.get("alpha")!(new Error("network died"));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+    settle("beta");
+    await screen.findByText("running beta");
+
+    fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+    settle("alpha");
+
+    await screen.findByText("running alpha");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

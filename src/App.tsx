@@ -65,33 +65,29 @@ export function App() {
 
   // The card copy is already here; the model, forms and handler source are
   // fetched only for the example actually being opened (see `loadExample`).
-  const [definition, setDefinition] = useState<ExampleDef | null>(null);
-  const [loadError, setLoadError] = useState<{ id: string; message: string } | null>(
-    null,
-  );
+  // One slot, tagged with the id it belongs to: a load can't half-replace an
+  // earlier one, and the tag keeps the previous example's outcome off the new
+  // example's page for the commit before this effect runs.
+  const [loaded, setLoaded] = useState<
+    { id: string; def: ExampleDef } | { id: string; error: string } | null
+  >(null);
   useEffect(() => {
     let cancelled = false;
-    loadExample(example.id)
+    const id = example.id;
+    loadExample(id)
       .then((def) => {
-        if (!cancelled) setDefinition(def);
+        if (!cancelled) setLoaded({ id, def });
       })
       .catch((e: unknown) => {
-        if (cancelled) return;
-        setLoadError({
-          id: example.id,
-          message: e instanceof Error ? e.message : String(e),
-        });
+        if (!cancelled)
+          setLoaded({ id, error: e instanceof Error ? e.message : String(e) });
       });
     return () => {
       cancelled = true;
     };
   }, [example.id]);
 
-  // Both hold whatever the *last* example resolved to, and this effect only
-  // runs after the commit that switched example — so without this check a
-  // navigation renders the previous model under the new card.
-  const activeDefinition = definition?.id === example.id ? definition : null;
-  const activeError = loadError?.id === example.id ? loadError.message : null;
+  const active = loaded?.id === example.id ? loaded : null;
 
   // Split the gallery nav by `group` — existing scenario examples (no
   // `group`, or `group: "scenario"`) render exactly as before; `learn-bpmn`
@@ -178,14 +174,14 @@ export function App() {
         )}
       </div>
       {/* Keyed so switching examples remounts with fresh editor/run state. */}
-      {activeError ? (
+      {active && "error" in active ? (
         <p className="example-load-error" role="alert">
-          Couldn't load “{example.title}” — {activeError}
+          Couldn't load “{example.title}” — {active.error}
         </p>
-      ) : activeDefinition ? (
+      ) : active ? (
         <ExampleRunner
-          key={activeDefinition.id}
-          example={activeDefinition}
+          key={active.def.id}
+          example={active.def}
           compact={compact}
           autostart={autostart}
           initialBrainKind={initialBrainKind}
