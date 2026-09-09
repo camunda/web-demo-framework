@@ -706,18 +706,19 @@ export function ExampleRunner({
           snap = run.advanceTime(Math.max(dueInMs, 0) + 1);
           successText = `  ↳ advanced the clock — timer fired`;
         } else if (control.action.kind === "message") {
-          // Correlate against the open subscription's own key rather than a
-          // key the example restates: the engine resolved it from the
-          // instance's variables, so this can't drift out of step with the
-          // model the way a hardcoded key would.
-          const { messageName } = control.action;
+          // Match on the catch/boundary element as well as the name: the same
+          // message name can be open in several scopes at once with different
+          // keys, and firing the wrong one would cancel an unrelated activity.
+          // The key itself still comes off the subscription rather than the
+          // example, so it can't drift from what the engine resolved.
+          const { messageName, elementId } = control.action;
           const sub = run.snapshot?.messageSubscriptions.find(
-            (m) => m.messageName === messageName,
+            (m) => m.messageName === messageName && m.elementId === elementId,
           );
           if (!sub) {
             trace({
               kind: "error",
-              text: `  ↳ no open subscription for "${messageName}" to correlate against`,
+              text: `  ↳ no open "${messageName}" subscription on ${elementId} to correlate against`,
               elementId: job.elementId,
             });
             return;

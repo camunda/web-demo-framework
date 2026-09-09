@@ -130,8 +130,14 @@ export interface HandlerDef {
        * that arrives mid-activity — a message boundary event on this task or
        * on a container around it, which the run loop deliberately never fires
        * on its own (see `ExampleRunner`'s `driveLoop`).
+       *
+       * `elementId` names the catch/boundary event to fire. A message name
+       * alone doesn't identify a subscription — parallel scopes can wait on
+       * the same name with different correlation keys — so without it the
+       * button could correlate an unrelated event and cancel the wrong
+       * activity.
        */
-      | { kind: "message"; messageName: string; label: string };
+      | { kind: "message"; messageName: string; elementId: string; label: string };
   };
 }
 

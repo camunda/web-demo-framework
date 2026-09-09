@@ -9,26 +9,41 @@ import complianceSignoffForm from "./compliance-signoff.form.json";
  * camunda.com/orchestrate/agents, ported from
  * `camunda/camunda-8-tutorials/examples/human-in-the-loop-agent`.
  *
- * The model is the tutorial's `invoice-payment-agent.bpmn` unchanged: it
- * deploys and runs on this repo's wasm engine as-is (`npm run probe` reaches
- * completion with no incidents), so nothing about the diagram is an
- * adaptation. Only the connector bodies are — see the handlers below.
+ * **Divergences from the upstream model**, for whoever next syncs it:
+ *
+ * 1. Upstream, `RequestPaymentRelease` is a user task sitting directly in the
+ *    ad-hoc sub-process, with a sequence flow from it to
+ *    `Gateway_ReleaseApproved`. This engine drops sequence flows between an
+ *    ad-hoc sub-process's children, so that whole gated flow would never run
+ *    (docs/engine-coverage.md; Magikcraft/nano-bpm#1154). It is wrapped here
+ *    in an embedded sub-process — a compound tool, whose inner flow the engine
+ *    *does* drive — keeping the guarantee that matters: `ReleasePayment` still
+ *    has exactly one incoming flow. The sub-process takes the tool name the
+ *    system prompt already uses, `RequestPaymentRelease`, and the user task
+ *    inside it is renamed `ReviewPaymentRelease`.
+ * 2. `caseOutcome`/`caseSummary` are derived in the handlers rather than by
+ *    the agent's own output mapping, which this engine doesn't apply.
+ *
+ * Everything else — the prompts, the forms, the tool set, the gateways — is
+ * the tutorial's. The connector bodies are stand-ins; see the handlers below.
  *
  * Two different human gates, on purpose:
  *
- * - **In-loop.** `RequestPaymentRelease` is a sub-process the agent calls as
- *   one of its tools, and the first thing inside it is a user task. The agent
- *   asks for a release the same way it calls any other tool, and gets the
- *   reviewer's answer back as that tool's result — so a denial is something it
- *   can reason about and respond to, not an exception thrown at it.
- *   `ReleasePayment` has exactly one incoming flow, from the approved branch
- *   of `Gateway_ReleaseApproved`: money cannot move on any other path,
- *   whatever the model decides or is talked into.
+ * - **In-loop.** `RequestPaymentRelease` is a tool the agent calls, and the
+ *   first thing inside it is a user task. The agent asks for a release the
+ *   same way it calls any other tool, and gets the reviewer's answer back as
+ *   that tool's result — so a denial is something it can reason about and
+ *   respond to, not an exception thrown at it. `ReleasePayment` has exactly
+ *   one incoming flow, from the approved branch of `Gateway_ReleaseApproved`:
+ *   money cannot move on any other path, whatever the model decides or is
+ *   talked into.
  * - **Post-hoc.** `HumanTask_ComplianceSignoff` sits outside the agent
- *   entirely and only ever sees `caseOutcome`/`caseSummary` — two values the
- *   agent's output mapping derives from what actually happened
- *   (`paymentReceipt`, `disputeNoticeReceipt`), not from anything the model
- *   said about itself.
+ *   entirely. It sees the case — the invoice, the release decision, the amount
+ *   approved, and `caseOutcome`/`caseSummary` derived from what actually
+ *   happened (`paymentReceipt`, `disputeNoticeReceipt`) — but none of the
+ *   agent's own state: not its reasoning, not its context, not its tool log.
+ *   The check is on the outcome, not on how the model got there, which is why
+ *   it needs nothing from the agent to be worth doing.
  */
 
 const SCENARIO_CLEAN_MATCH = {
