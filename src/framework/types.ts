@@ -123,7 +123,15 @@ export interface HandlerDef {
     /** What the other button does. */
     action:
       | { kind: "error"; errorCode: string; message: string; label: string }
-      | { kind: "timer"; label: string };
+      | { kind: "timer"; label: string }
+      /**
+       * Publish `messageName` while this job is held, correlating it against
+       * the open subscription's own key. The reader's stand-in for the event
+       * that arrives mid-activity — a message boundary event on this task or
+       * on a container around it, which the run loop deliberately never fires
+       * on its own (see `ExampleRunner`'s `driveLoop`).
+       */
+      | { kind: "message"; messageName: string; label: string };
   };
 }
 

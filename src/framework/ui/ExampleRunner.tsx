@@ -20,6 +20,7 @@ import {
   TabsTrigger,
 } from "@camunda/design-system";
 import type { AgentSpec } from "../model";
+import { resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
@@ -49,6 +50,17 @@ const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
 const TEMPLATE_TAB_PREFIX = "__template__:";
+
+/**
+ * Is this subscription a boundary event's, rather than something the token is
+ * actually parked on? `MessageSubscriptionDto.kind` is typed `string` upstream,
+ * so match on the shape of the value (`interruptingBoundary`,
+ * `nonInterruptingBoundary`) rather than an exhaustive union that a new engine
+ * version could silently widen.
+ */
+function isBoundarySubscription(sub: { kind: string }): boolean {
+  return sub.kind.toLowerCase().includes("boundary");
+}
 
 // Both the live diagram (bpmn-js, via `./RuntimeDiagram`) and the code
 // editor (Monaco) are multi-MB dependencies that most of a first paint never
@@ -501,15 +513,24 @@ export function ExampleRunner({
         if (round.handled === 0) {
           // A round with nothing handled but a waiting message subscription
           // (`SettleReason: "messages"`) means the process is parked on a
-          // message catch/boundary event — the in-browser equivalent of an
-          // external system needing to publish it. Echo the subscription's
-          // own `messageName`/`correlationKey` straight back via
+          // message catch event — the in-browser equivalent of an external
+          // system needing to publish it. Echo the subscription's own
+          // `messageName`/`correlationKey` straight back via
           // `correlateMessage` (no extra variables) so a plain Run completes
           // the demo without a separate manual step; the panel below still
           // shows the correlation happening. Any settle reason not handled
           // here (an unhandled job type, an incident) still just stops the
           // loop below as before.
-          const pendingMessage = snap.messageSubscriptions[0];
+          //
+          // Boundary subscriptions are excluded on purpose. A boundary event
+          // is an *exception* the process is not waiting for — firing it
+          // because nothing else can progress would cancel the activity it is
+          // attached to every single run, which is the opposite of what the
+          // model says. Those are the reader's to fire, via
+          // `HandlerDef.manualControl`'s `kind: "message"` action.
+          const pendingMessage = snap.messageSubscriptions.find(
+            (m) => !isBoundarySubscription(m),
+          );
           if (round.reason === "messages" && pendingMessage) {
             trace({
               kind: "step",
@@ -659,6 +680,25 @@ export function ExampleRunner({
           const dueInMs = run.snapshot?.timers[0]?.dueInMs ?? 0;
           snap = run.advanceTime(Math.max(dueInMs, 0) + 1);
           successText = `  ↳ advanced the clock — timer fired`;
+        } else if (control.action.kind === "message") {
+          // Correlate against the open subscription's own key rather than a
+          // key the example restates: the engine resolved it from the
+          // instance's variables, so this can't drift out of step with the
+          // model the way a hardcoded key would.
+          const { messageName } = control.action;
+          const sub = run.snapshot?.messageSubscriptions.find(
+            (m) => m.messageName === messageName,
+          );
+          if (!sub) {
+            trace({
+              kind: "error",
+              text: `  ↳ no open subscription for "${messageName}" to correlate against`,
+              elementId: job.elementId,
+            });
+            return;
+          }
+          snap = run.correlateMessage(messageName, sub.correlationKey, "{}");
+          successText = `  ↳ published "${messageName}" (key: ${sub.correlationKey})`;
         } else {
           const { errorCode, message } = control.action;
           snap = run.throwJobError(job.jobType, errorCode, message);
@@ -763,31 +803,22 @@ export function ExampleRunner({
             requiredTools: example.requiredTools,
           });
       } else if (scripted && model.agent) {
-        // The scripted brain is one closure today — it only drives the
-        // primary process's first agent host. Every AI Agent host shares one
-        // job type, so without an elementId guard this closure would also be
-        // dispatched for any other host's jobs. Guard explicitly: any host
-        // other than the primary throws, which the engine reports as an
-        // incident on the diagram (not a silent stall, and not silently
-        // driven by the primary host's closure).
-        const primaryElementId = model.agent.elementId;
+        // Every AI Agent host shares one job type, so one closure serves them
+        // all; `job.elementId` tells the example's scripted source which host
+        // it is being asked about, exactly as it tells a live brain. A
+        // single-host example never has to look at it.
         agents[model.agent.jobType] = async (job) => {
-          if (job.elementId !== primaryElementId) {
-            throw new Error(
-              `No scripted agent handler for "${job.elementId}" — only "${primaryElementId}" ` +
-                `(the primary process's first agent host) is driven by the scripted brain. ` +
-                `Use a live brain to exercise more than one host.`,
-            );
-          }
           const result = await scripted!(job);
           const tools = (result.activateElements ?? [])
             .map((a) => a.elementId)
             .join(", ");
+          const host =
+            model.agents.length > 1 ? ` (${job.elementId})` : "";
           trace({
             kind: "agent",
             text: result.completionConditionFulfilled
-              ? "🤖 scripted agent: done"
-              : `🤖 scripted agent: calling ${tools || "(nothing)"}`,
+              ? `🤖 scripted agent${host}: done`
+              : `🤖 scripted agent${host}: calling ${tools || "(nothing)"}`,
           });
           return result;
         };
@@ -820,7 +851,23 @@ export function ExampleRunner({
           : "no agent in this model"
       }`,
     });
-    const snap = run.createInstance(pid, JSON.stringify(seed));
+    // A message start event has no "create an instance" entry point at all:
+    // the only way in is to publish the message, which is what a webhook or a
+    // broker would do in a real deployment. Publishing it here is the same
+    // move, made by the page.
+    let snap: Snapshot | null;
+    if (model.startMessage) {
+      const { messageName, correlationKey } = model.startMessage;
+      const key = resolveCorrelationKey(correlationKey, seed);
+      trace({
+        kind: "step",
+        text: `📨 publishing "${messageName}" (key: ${key}) — a message start event has no other way in`,
+        elementId: model.startMessage.elementId,
+      });
+      snap = run.correlateMessage(messageName, key, JSON.stringify(seed));
+    } else {
+      snap = run.createInstance(pid, JSON.stringify(seed));
+    }
     // Stash the picked image against the instance just created, so
     // `helpers.vision`/`helpers.image` can resolve it during the run.
     const instanceKey = snap?.instances[0]?.key;

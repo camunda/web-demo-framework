@@ -125,6 +125,27 @@ export interface ProcessSpec {
   userTasks: UserTaskSpec[];
   /** The `formId` bound to the start event, if any. */
   startFormId?: string;
+  /**
+   * Set when this process's start event is a **message** start event: there is
+   * no "just create an instance" entry point, only a published message.
+   */
+  startMessage?: StartMessageSpec;
+}
+
+/**
+ * A message start event, as the runner needs it: publishing this message with a
+ * matching correlation key is what creates an instance — the in-browser stand-in
+ * for the webhook or broker that would publish it in a real deployment.
+ */
+export interface StartMessageSpec {
+  /** `<bpmn:message name="…">` — the name a publisher has to match. */
+  messageName: string;
+  /**
+   * The raw `zeebe:subscription correlationKey` expression, e.g. `=customerId`.
+   * Resolved against the start variables at run time, not parse time.
+   */
+  correlationKey: string;
+  elementId: string;
 }
 
 export interface ModelInfo {
@@ -151,6 +172,8 @@ export interface ModelInfo {
   userTasks: UserTaskSpec[];
   /** The `formId` bound to the primary process's start event, if any. */
   startFormId?: string;
+  /** The primary process's message start event, if it has one. */
+  startMessage?: StartMessageSpec;
 }
 
 export interface ParseModelOptions {
@@ -459,13 +482,81 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     formId: zeebeEls(el, "formDefinition")[0]?.getAttribute("formId") ?? undefined,
   }));
 
-  const startEvent = process.getElementsByTagNameNS(BPMN_NS, "startEvent")[0];
+  // The process's *own* start event — `getElementsByTagNameNS` would also
+  // return the start event of any embedded sub-process nested inside it.
+  const startEvent = Array.from(process.children).find(
+    (el) => el.namespaceURI === BPMN_NS && el.localName === "startEvent",
+  );
   const startFormId = startEvent
     ? (zeebeEls(startEvent, "formDefinition")[0]?.getAttribute("formId") ??
       undefined)
     : undefined;
+  const startMessage = startEvent ? startMessageOf(startEvent) : undefined;
 
-  return { processId, processName: processLabel, tasks, agents, userTasks, startFormId };
+  return {
+    processId,
+    processName: processLabel,
+    tasks,
+    agents,
+    userTasks,
+    startFormId,
+    startMessage,
+  };
+}
+
+/**
+ * Read a start event's message definition, if it has one: the `<bpmn:message>`
+ * it references lives at the definitions level, and carries the
+ * `zeebe:subscription correlationKey` a publisher has to match.
+ */
+function startMessageOf(startEvent: Element): StartMessageSpec | undefined {
+  const def = Array.from(startEvent.children).find(
+    (el) => el.namespaceURI === BPMN_NS && el.localName === "messageEventDefinition",
+  );
+  const ref = def?.getAttribute("messageRef");
+  if (!ref) return undefined;
+
+  const message = Array.from(
+    startEvent.ownerDocument.getElementsByTagNameNS(BPMN_NS, "message"),
+  ).find((m) => m.getAttribute("id") === ref);
+  if (!message) return undefined;
+  const messageName = message.getAttribute("name");
+  if (!messageName) return undefined;
+
+  return {
+    messageName,
+    correlationKey:
+      zeebeEls(message, "subscription")[0]?.getAttribute("correlationKey") ?? "",
+    elementId: startEvent.getAttribute("id") ?? "",
+  };
+}
+
+/**
+ * Resolve a `zeebe:subscription correlationKey` expression against the
+ * variables an instance is starting with, so the page can publish a message
+ * start event's message with the key the engine will compute for it.
+ *
+ * Deliberately not a FEEL evaluator: the two forms a correlation key takes in
+ * practice are a bare variable reference (`=customerId`) and a string literal
+ * (`="fixed-key"`). Anything else is returned as written, which correlates
+ * against nothing and shows up as a run that never starts — visible, rather
+ * than a wrong key silently starting the wrong thing.
+ */
+export function resolveCorrelationKey(
+  expression: string,
+  variables: Record<string, unknown>,
+): string {
+  const expr = expression.trim().replace(/^=/, "").trim();
+
+  const literal = expr.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (literal) return literal[1].replace(/\\"/g, '"');
+
+  if (/^[A-Za-z_$][\w$]*$/.test(expr)) {
+    const value = variables[expr];
+    return value == null ? "" : String(value);
+  }
+
+  return expr;
 }
 
 export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo {
@@ -510,5 +601,6 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
     agents: processes.flatMap((p) => p.agents),
     userTasks: primary.userTasks,
     startFormId: primary.startFormId,
+    startMessage: primary.startMessage,
   };
 }
