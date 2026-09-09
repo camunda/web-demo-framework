@@ -189,11 +189,6 @@ export interface ExampleHero {
 }
 
 /**
- * An example, as a manifest: model + code + optional LLM wiring. Everything
- * else — the tool manifest, the prompts, the job types, the forms — the runner
- * derives from the model.
- */
-/**
  * What the gallery needs to render an example's card and route to it — and
  * nothing else.
  *
@@ -232,6 +227,11 @@ export interface ExampleMeta {
   group?: "scenario" | "learn-bpmn";
 }
 
+/**
+ * An example, as a manifest: its card metadata plus model + code + optional
+ * LLM wiring. Everything else — the tool manifest, the prompts, the job types,
+ * the forms — the runner derives from the model.
+ */
 export interface ExampleDef extends ExampleMeta {
   /** The BPMN XML. */
   bpmn: string;

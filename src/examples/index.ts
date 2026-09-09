@@ -87,7 +87,7 @@ export async function loadExample(id: string): Promise<ExampleDef> {
   );
   if (!def) {
     throw new Error(
-      `"${id}"'s manifest exports no ExampleDef with that id — check src/examples/${id}/index.ts`,
+      `Manifest for "${id}" exports no ExampleDef with that id — check src/examples/${id}/index.ts`,
     );
   }
   return def;

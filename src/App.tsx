@@ -66,22 +66,32 @@ export function App() {
   // The card copy is already here; the model, forms and handler source are
   // fetched only for the example actually being opened (see `loadExample`).
   const [definition, setDefinition] = useState<ExampleDef | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<{ id: string; message: string } | null>(
+    null,
+  );
   useEffect(() => {
     let cancelled = false;
-    setDefinition(null);
-    setLoadError(null);
     loadExample(example.id)
       .then((def) => {
         if (!cancelled) setDefinition(def);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+        if (cancelled) return;
+        setLoadError({
+          id: example.id,
+          message: e instanceof Error ? e.message : String(e),
+        });
       });
     return () => {
       cancelled = true;
     };
   }, [example.id]);
+
+  // Both hold whatever the *last* example resolved to, and this effect only
+  // runs after the commit that switched example — so without this check a
+  // navigation renders the previous model under the new card.
+  const activeDefinition = definition?.id === example.id ? definition : null;
+  const activeError = loadError?.id === example.id ? loadError.message : null;
 
   // Split the gallery nav by `group` — existing scenario examples (no
   // `group`, or `group: "scenario"`) render exactly as before; `learn-bpmn`
@@ -168,14 +178,14 @@ export function App() {
         )}
       </div>
       {/* Keyed so switching examples remounts with fresh editor/run state. */}
-      {loadError ? (
+      {activeError ? (
         <p className="example-load-error" role="alert">
-          Couldn't load “{example.title}” — {loadError}
+          Couldn't load “{example.title}” — {activeError}
         </p>
-      ) : definition ? (
+      ) : activeDefinition ? (
         <ExampleRunner
-          key={definition.id}
-          example={definition}
+          key={activeDefinition.id}
+          example={activeDefinition}
           compact={compact}
           autostart={autostart}
           initialBrainKind={initialBrainKind}
