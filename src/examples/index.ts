@@ -5,6 +5,7 @@ import { orderProcess } from "./order-process";
 import { rocketLaunch } from "./rocket-launch";
 import { orderProcessBoundaryEvents } from "./order-process-boundary-events";
 import { plateRecognition } from "./plate-recognition";
+import { invoicePayment } from "./invoice-payment";
 
 /** Every hand-listed scenario example the gallery offers. Adding one means
  *  adding a manifest here. */
@@ -12,6 +13,7 @@ const scenarioExamples: ExampleDef[] = [
   rocketLaunch,
   seedExportCompliance,
   loanOrigination,
+  invoicePayment,
   orderProcess,
   orderProcessBoundaryEvents,
   plateRecognition,
