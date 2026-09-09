@@ -44,6 +44,8 @@ export interface RunnerHarness {
   status(): string;
   /** Every line in the Activity panel, in order. */
   trace(): string[];
+  /** The instance variables the page is currently showing. */
+  variables(): unknown;
   /**
    * Whether `text` appears anywhere outside the rendered diagram. bpmn-js
    * paints every element's name into the SVG, so a plain `getByText` for a
@@ -99,6 +101,14 @@ export async function renderExample(example: ExampleDef): Promise<RunnerHarness>
     status,
     trace,
     settle,
+    variables() {
+      const el = document.querySelector(".vars");
+      try {
+        return JSON.parse(el?.textContent ?? "{}");
+      } catch {
+        return {};
+      }
+    },
     showsOutsideDiagram(text: string) {
       return screen
         .queryAllByText(text)

@@ -61,6 +61,7 @@ function emptyModel(): ModelInfo {
     agents: [],
     userTasks: [],
     startFormId: undefined,
+    boundaryEventHosts: {},
   };
 }
 

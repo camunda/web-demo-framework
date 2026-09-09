@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { renderExample } from "../testing/renderExample";
+import { messageStartFixture } from "../testing/messageStartFixture";
 import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
 import { seedExportCompliance } from "../../examples/seed-export-compliance";
@@ -96,6 +97,44 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     // asking, so there is nothing yet to judge it on.
     expect(app.showsOutsideDiagram("Review release request")).toBe(true);
     expect(screen.queryByText(ALERT)).not.toBeInTheDocument();
+  }, 30_000);
+});
+
+describe("ExampleRunner — a process only a message can start", () => {
+  it("publishes the start message and drives the instance it creates", async () => {
+    const app = await renderExample(messageStartFixture);
+    await app.run();
+
+    // No `createInstance` path exists for this model: if the runner didn't
+    // publish, or published a key the subscription didn't resolve to, nothing
+    // would exist to drive.
+    const trace = app.trace().join("\n");
+    expect(trace).toContain('publishing "alert-raised"');
+    expect(trace).toContain("CASE-1");
+    expect(app.status()).toBe("Waiting for a human");
+    expect(app.showsOutsideDiagram("Triage the alert")).toBe(true);
+  }, 30_000);
+
+  it("offers the boundary event while parked on a human task, payload and all", async () => {
+    const app = await renderExample(messageStartFixture);
+    await app.run();
+
+    // The interrupt arrives while the process waits on a person — there is no
+    // held job to hang the choice off, which is the case this has to cover.
+    expect(app.status()).toBe("Waiting for a human");
+    // And the drive loop must not have fired it on its own on the way here;
+    // that would interrupt every run.
+    expect(app.trace().join("\n")).not.toContain("alert-withdrawn");
+
+    fireEvent.click(screen.getByRole("button", { name: "🚫 The alert is withdrawn" }));
+    await app.settle();
+
+    expect(app.trace().join("\n")).toContain('published "alert-withdrawn"');
+    // Publishing an empty payload would route the boundary but leave the case
+    // reading exactly as it did before the event — so the interrupted path
+    // reads the payload back rather than trusting the correlation happened.
+    expect(app.trace().join("\n")).toContain("withdrawn by monitoring");
+    expect(app.status()).toBe("Completed");
   }, 30_000);
 });
 

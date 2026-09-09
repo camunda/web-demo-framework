@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseModel } from "../framework/model";
+import { createTemplateMap, substituteTemplates } from "../framework/templates";
+import { EXAMPLES } from "./index";
 
 /**
  * Every example model, as raw XML. `import.meta.glob` with `eager` so this
@@ -38,31 +40,43 @@ describe("example models", () => {
 
   /**
    * A prompt that names a tool the agent can't call costs a live brain real
-   * turns: `liveAgent` matches a tool call against `ToolSpec.elementId`
-   * exactly, so "call RequestPaymentRelease" is useless if what's advertised
-   * is `PaymentReleaseGate`. It's an easy mistake to make when an element is
-   * renamed or wrapped, and it's invisible to the scripted brain, which
-   * activates ids directly and never reads the prompt.
+   * turns: `makeLiveAgent` resolves a tool call against `spec.tools` and
+   * nothing else, so "call RequestPaymentRelease" is useless if what's
+   * advertised is `PaymentReleaseGate`. It's an easy mistake to make when an
+   * element is renamed or wrapped, and it's invisible to the scripted brain,
+   * which activates ids directly and never reads the prompt.
+   *
+   * Run over the *resolved* XML, since an example's real prompts usually live
+   * in `prompts/*.md` behind a `{{system-prompt}}` placeholder — parsing the
+   * raw file would only ever see the placeholder and check nothing.
    *
    * Only element ids the prompt actually mentions are checked, so ordinary
    * prose is left alone.
    */
-  it.each(Object.keys(models))("%s prompts only name callable tools", (path) => {
-    const model = parseModel(models[path]);
-    for (const agent of model.agents) {
-      const callable = new Set([
-        agent.elementId,
-        ...agent.tools.map((t) => t.elementId),
-      ]);
-      const everyElementId = new Set(
-        Array.from(models[path].matchAll(/\sid="([A-Za-z_][\w.-]*)"/g), (m) => m[1]),
+  it.each(EXAMPLES.map((e) => [e.id, e] as const))(
+    "%s prompts only name callable tools",
+    (_id, example) => {
+      const { result: xml } = substituteTemplates(
+        example.bpmn,
+        createTemplateMap(example.templates),
+        "xml",
       );
-      const prompt = `${agent.systemPrompt} ${agent.userPrompt}`;
-      const named = Array.from(
-        new Set(Array.from(prompt.matchAll(/\b[A-Za-z_][\w.-]*\b/g), (m) => m[0])),
-      ).filter((token) => everyElementId.has(token) && !callable.has(token));
+      const model = parseModel(xml);
+      const everyElementId = new Set(
+        Array.from(xml.matchAll(/\sid="([A-Za-z_][\w.-]*)"/g), (m) => m[1]),
+      );
 
-      expect(named, `${agent.elementId} prompt names non-callable element(s)`).toEqual([]);
-    }
-  });
+      for (const agent of model.agents) {
+        // The host itself is deliberately not in this set: a live brain can't
+        // call it either, so a prompt naming it is the same bug.
+        const callable = new Set(agent.tools.map((t) => t.elementId));
+        const prompt = `${agent.systemPrompt} ${agent.userPrompt}`;
+        const named = Array.from(
+          new Set(Array.from(prompt.matchAll(/\b[A-Za-z_][\w.-]*\b/g), (m) => m[0])),
+        ).filter((token) => everyElementId.has(token) && !callable.has(token));
+
+        expect(named, `${agent.elementId} prompt names non-callable element(s)`).toEqual([]);
+      }
+    },
+  );
 });

@@ -405,10 +405,22 @@ export function ExampleRunner({
     });
   }, []);
 
-  const openUserTask = useMemo(
-    () => run.snapshot?.userTasks.find((t) => t.state === "Created") ?? null,
-    [run.snapshot],
-  );
+  const openUserTask = useMemo(() => {
+    const snap = run.snapshot;
+    if (!snap) return null;
+    // Scoped to instances still running. An interrupting boundary event
+    // cancels the activity it is attached to, but the cancelled task can
+    // still be reported `Created` — so without this the page keeps offering
+    // a form for a task that no longer exists, on a finished instance.
+    const live = new Set(
+      snap.instances.filter((i) => !i.completed).map((i) => i.key),
+    );
+    return (
+      snap.userTasks.find(
+        (t) => t.state === "Created" && live.has(t.instanceKey),
+      ) ?? null
+    );
+  }, [run.snapshot]);
 
   // A run now drives itself onward after a human task (see `submitUserTask`),
   // so the *next* task can open while these still hold the last one's answers.
@@ -728,26 +740,6 @@ export function ExampleRunner({
           const dueInMs = run.snapshot?.timers[0]?.dueInMs ?? 0;
           snap = run.advanceTime(Math.max(dueInMs, 0) + 1);
           successText = `  ↳ advanced the clock — timer fired`;
-        } else if (control.action.kind === "message") {
-          // Match on the catch/boundary element as well as the name: the same
-          // message name can be open in several scopes at once with different
-          // keys, and firing the wrong one would cancel an unrelated activity.
-          // The key itself still comes off the subscription rather than the
-          // example, so it can't drift from what the engine resolved.
-          const { messageName, elementId } = control.action;
-          const sub = run.snapshot?.messageSubscriptions.find(
-            (m) => m.messageName === messageName && m.elementId === elementId,
-          );
-          if (!sub) {
-            trace({
-              kind: "error",
-              text: `  ↳ no open "${messageName}" subscription on ${elementId} to correlate against`,
-              elementId: job.elementId,
-            });
-            return;
-          }
-          snap = run.correlateMessage(messageName, sub.correlationKey, "{}");
-          successText = `  ↳ published "${messageName}" (key: ${sub.correlationKey})`;
         } else {
           const { errorCode, message } = control.action;
           snap = run.throwJobError(job.jobType, errorCode, message);
@@ -1173,6 +1165,72 @@ export function ExampleRunner({
     setDisplayVars({});
   }, [run]);
 
+  /**
+   * Events the reader can fire right now: an example's declared
+   * `messageEvents` whose subscription is currently open. Boundary events are
+   * never fired by the drive loop (see `driveLoop`), so this is the only way
+   * to reach one — and it has to work while the process is parked on a human
+   * task, which is exactly when the interesting interrupts arrive.
+   */
+  const readyMessageEvents = useMemo(() => {
+    const declared = example.messageEvents;
+    if (!declared?.length || !run.snapshot) return [];
+    return declared.flatMap((event) => {
+      // A boundary event's subscription is reported against the activity it is
+      // attached to, so accept either id — an example names the event.
+      const host = model.boundaryEventHosts[event.elementId];
+      const sub = run.snapshot!.messageSubscriptions.find(
+        (m) => m.elementId === event.elementId || m.elementId === host,
+      );
+      return sub ? [{ event, sub }] : [];
+    });
+  }, [example.messageEvents, run.snapshot, model.boundaryEventHosts]);
+
+  /** Publish one, then keep driving — the interrupt is mid-run, not a restart. */
+  const publishMessageEvent = useCallback(
+    async (elementId: string) => {
+      if (runningRef.current) return;
+      const match = readyMessageEvents.find((m) => m.event.elementId === elementId);
+      if (!match) return;
+      const { event, sub } = match;
+      const seq = ++runSeqRef.current;
+      runningRef.current = true;
+      setRunning(true);
+      try {
+        // The key comes off the subscription the engine actually opened, so it
+        // can't drift from what the instance resolved.
+        const snap = run.correlateMessage(
+          sub.messageName,
+          sub.correlationKey,
+          JSON.stringify(event.variables ?? {}),
+        );
+        if (!snap) {
+          trace({
+            kind: "error",
+            text: `▶ publishing "${sub.messageName}" failed`,
+            elementId,
+          });
+          return;
+        }
+        trace({
+          kind: "vars",
+          text: `📨 published "${sub.messageName}" (key: ${sub.correlationKey})`,
+          elementId,
+        });
+        const vars = snap.instances[0]?.variables;
+        if (vars) setDisplayVars({ ...vars });
+        await new Promise((r) => setTimeout(r, BEAT));
+        await driveLoop(workersRef.current, agentsRef.current, snap, seq);
+      } finally {
+        if (runSeqRef.current === seq) {
+          runningRef.current = false;
+          setRunning(false);
+        }
+      }
+    },
+    [readyMessageEvents, run, trace, driveLoop],
+  );
+
   const submitUserTask = useCallback(async () => {
     if (!openUserTask || runningRef.current) return;
     // Re-validate synchronously rather than trusting only the last
@@ -1558,6 +1616,27 @@ export function ExampleRunner({
                 >
                   {pendingManualJob.control.action.label}
                 </Button>
+              </div>
+            </CollapsibleCard>
+          )}
+
+          {readyMessageEvents.length > 0 && (
+            <CollapsibleCard
+              sectionId="message-events"
+              title="Something else happens"
+              description="An event the process isn't waiting for. The run never fires these on its own — that would interrupt every time — so they're yours."
+            >
+              <div className="controls">
+                {readyMessageEvents.map(({ event }) => (
+                  <Button
+                    key={event.elementId}
+                    variant="secondary"
+                    onClick={() => void publishMessageEvent(event.elementId)}
+                    disabled={running || stepping}
+                  >
+                    {event.label}
+                  </Button>
+                ))}
               </div>
             </CollapsibleCard>
           )}
