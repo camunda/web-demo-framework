@@ -397,6 +397,16 @@ export function ExampleRunner({
     [run.snapshot],
   );
 
+  // A run now drives itself onward after a human task (see `submitUserTask`),
+  // so the *next* task can open while these still hold the last one's answers.
+  // Left alone, its fields would be re-submitted with the new task, and its
+  // "valid" verdict would enable Complete task before the new form's required
+  // fields had been touched.
+  useEffect(() => {
+    setReviewValues({});
+    setReviewFormValid(false);
+  }, [openUserTask?.key]);
+
   /**
    * Job types this example holds out of the automatic drive loop (see
    * `HandlerDef.manualControl`), keyed by the job type the engine actually
@@ -771,7 +781,7 @@ export function ExampleRunner({
     // still compiled here, next to the editor, before the engine is touched.
     let scripted: AgentHandler | null = null;
     try {
-      if (model.agent && agentSource.trim())
+      if (model.agents.length > 0 && agentSource.trim())
         scripted = compileAgent(agentSource);
     } catch (e) {
       setCompileError(e instanceof Error ? e.message : String(e));
@@ -828,26 +838,32 @@ export function ExampleRunner({
             turnRef: turnRef.current,
             requiredTools: example.requiredTools,
           });
-      } else if (scripted && model.agent) {
+      } else if (scripted) {
         // Every AI Agent host shares one job type, so one closure serves them
         // all; `job.elementId` tells the example's scripted source which host
         // it is being asked about, exactly as it tells a live brain. A
         // single-host example never has to look at it.
-        agents[model.agent.jobType] = async (job) => {
-          const result = await scripted!(job);
-          const tools = (result.activateElements ?? [])
-            .map((a) => a.elementId)
-            .join(", ");
-          const host =
-            model.agents.length > 1 ? ` (${job.elementId})` : "";
-          trace({
-            kind: "agent",
-            text: result.completionConditionFulfilled
-              ? `🤖 scripted agent${host}: done`
-              : `🤖 scripted agent${host}: calling ${tools || "(nothing)"}`,
-          });
-          return result;
-        };
+        //
+        // Registered per job type across *every* process, not just the
+        // primary one: a host can live in a called process (the orchestrator
+        // shape), where `model.agent` — the primary process's first host — is
+        // null and nothing would be registered at all.
+        for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
+          agents[jobType] = async (job) => {
+            const result = await scripted!(job);
+            const tools = (result.activateElements ?? [])
+              .map((a) => a.elementId)
+              .join(", ");
+            const host = model.agents.length > 1 ? ` (${job.elementId})` : "";
+            trace({
+              kind: "agent",
+              text: result.completionConditionFulfilled
+                ? `🤖 scripted agent${host}: done`
+                : `🤖 scripted agent${host}: calling ${tools || "(nothing)"}`,
+            });
+            return result;
+          };
+        }
       }
     }
 

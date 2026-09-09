@@ -72,6 +72,12 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     expect(trace).toContain("scripted agent: done");
     expect(app.status()).toBe("Waiting for a human");
     expect(app.showsOutsideDiagram("Final compliance sign-off")).toBe(true);
+
+    // Driving straight on left the next task's form holding the finished
+    // task's answers: they were resubmitted with it, and its own required
+    // decision could be skipped because the form still reported valid from
+    // the previous one.
+    expect(screen.getByRole("button", { name: "Complete task" })).toBeDisabled();
   }, 40_000);
 
   it("does not accuse the agent of giving up while it is still asking", async () => {
