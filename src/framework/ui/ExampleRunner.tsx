@@ -20,6 +20,7 @@ import {
   TabsTrigger,
 } from "@camunda/design-system";
 import type { AgentSpec } from "../model";
+import { resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
@@ -49,6 +50,40 @@ const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
 const TEMPLATE_TAB_PREFIX = "__template__:";
+
+/**
+ * Is this subscription a boundary event's, rather than something the token is
+ * actually parked on? `MessageSubscriptionDto.kind` is typed `string` upstream,
+ * so match on the shape of the value (`interruptingBoundary`,
+ * `nonInterruptingBoundary`) rather than an exhaustive union that a new engine
+ * version could silently widen.
+ */
+function isBoundarySubscription(sub: { kind: string }): boolean {
+  return sub.kind.toLowerCase().includes("boundary");
+}
+
+/**
+ * The user tasks a human can actually act on right now.
+ *
+ * `state === "Created"` is not enough on its own: an interrupting boundary
+ * event cancels the activity it is attached to, but the cancelled task can
+ * still be reported `Created` indefinitely. Cross-check against the
+ * instance's own active elements, which is what the engine will actually
+ * accept a completion for — otherwise the run stops on a task that no longer
+ * exists, and the page offers its form.
+ */
+function openUserTasksOf(snapshot: Snapshot): Snapshot["userTasks"] {
+  const activeByInstance = new Map(
+    snapshot.instances
+      .filter((i) => !i.completed)
+      .map((i) => [i.key, new Set(i.activeElements.map((el) => el.elementId))]),
+  );
+  return snapshot.userTasks.filter(
+    (t) =>
+      t.state === "Created" &&
+      activeByInstance.get(t.instanceKey)?.has(t.elementId),
+  );
+}
 
 // Both the live diagram (bpmn-js, via `./RuntimeDiagram`) and the code
 // editor (Monaco) are multi-MB dependencies that most of a first paint never
@@ -222,6 +257,19 @@ export function ExampleRunner({
   );
   const model = draft.model;
 
+  /**
+   * The agent host this page presents: its prompts, its tools, its brain
+   * picker, its source tab.
+   *
+   * `model.agent` is only the *primary* process's first host, so a diagram
+   * whose agent lives in a called process has none — and every gate keyed on
+   * it would hide the agent that is about to run, telling the reader "no agent
+   * in this model" while the scripted source drives one. Falls back to the
+   * first host found anywhere. (Which host *runs* is not this decision:
+   * `beginRun` registers a handler for every one of them.)
+   */
+  const displayAgent = model.agent ?? model.agents[0] ?? null;
+
   // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
   // not `example.bpmn` directly — so what runs and what's shown is exactly
   // what the diagnostics above are about.
@@ -261,7 +309,7 @@ export function ExampleRunner({
   );
 
   const [activeTab, setActiveTab] = useState<string>(
-    model.agent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
+    displayAgent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
   );
   // Which preset the segmented picker shows as chosen. Derived from the live
   // payload rather than held as state, so editing the start form deselects a
@@ -381,9 +429,19 @@ export function ExampleRunner({
   }, []);
 
   const openUserTask = useMemo(
-    () => run.snapshot?.userTasks.find((t) => t.state === "Created") ?? null,
+    () => (run.snapshot ? (openUserTasksOf(run.snapshot)[0] ?? null) : null),
     [run.snapshot],
   );
+
+  // A run now drives itself onward after a human task (see `submitUserTask`),
+  // so the *next* task can open while these still hold the last one's answers.
+  // Left alone, its fields would be re-submitted with the new task, and its
+  // "valid" verdict would enable Complete task before the new form's required
+  // fields had been touched.
+  useEffect(() => {
+    setReviewValues({});
+    setReviewFormValid(false);
+  }, [openUserTask?.key]);
 
   /**
    * Job types this example holds out of the automatic drive loop (see
@@ -423,23 +481,48 @@ export function ExampleRunner({
   }, [run.snapshot, manualControls]);
 
   /**
-   * Agent tools that never ran this instance. When a human task opens with some
-   * of these outstanding, the agent finished early — a hallucinated tool name,
-   * or it declared itself done — and the process took a gateway's default path.
-   * Saying so beats handing the reviewer a form full of dashes.
+   * Required tools the agent never ran. When a human task opens downstream
+   * with some of these outstanding, the agent finished early — a hallucinated
+   * tool name, or it declared itself done — and the process took a gateway's
+   * default path. Saying so beats handing the reviewer a form full of dashes.
+   *
+   * Scoped to `example.requiredTools` (the same list `liveAgent` uses to
+   * decide whether "done" can be trusted), because "a tool didn't run" is not
+   * evidence of anything on its own: an agent that skips a currency
+   * conversion for an invoice already in USD is doing exactly what its prompt
+   * asks. Only an example can say which tools had to run.
    *
    * Read from the engine's own per-element stats, so it holds for any diagram
    * rather than looking for an example's variable names.
    */
   const unrunTools = useMemo(() => {
-    if (!model.agent || !run.snapshot) return [];
+    const required = example.requiredTools;
+    if (!displayAgent || !run.snapshot || !required?.length) return [];
     const completed = new Map(
       run.snapshot.elementStats.map((s) => [s.elementId, s.completed]),
     );
-    return model.agent.tools.filter(
-      (t) => (completed.get(t.elementId) ?? 0) === 0,
+    return displayAgent.tools.filter(
+      (t) => required.includes(t.elementId) && (completed.get(t.elementId) ?? 0) === 0,
     );
-  }, [model.agent, run.snapshot]);
+  }, [displayAgent, run.snapshot, example.requiredTools]);
+
+  /**
+   * True while the open human task is one of the agent's own tools (or sits
+   * inside one). The agent hasn't finished — it is *asking*, mid-loop — so
+   * nothing about its tool use can be judged yet.
+   */
+  const openUserTaskIsAgentTool = useMemo(() => {
+    if (!openUserTask || !displayAgent) return false;
+    const toolIds = new Set(displayAgent.tools.map((t) => t.elementId));
+    if (toolIds.has(openUserTask.elementId)) return true;
+    // A compound tool's inner elements are tools of that tool, not of the
+    // host, so they never appear in `agent.tools` — match them by the host's
+    // own completion instead: an agent still running hasn't finished.
+    const hostCompleted =
+      run.snapshot?.elementStats.find((s) => s.elementId === displayAgent.elementId)
+        ?.completed ?? 0;
+    return hostCompleted === 0;
+  }, [openUserTask, displayAgent, run.snapshot]);
   const openUserTaskSpec = openUserTask
     ? model.userTasks.find((u) => u.elementId === openUserTask.elementId)
     : undefined;
@@ -480,7 +563,7 @@ export function ExampleRunner({
         snap = round?.snapshot ?? snap;
         const vars = snap.instances[0]?.variables;
         if (vars) setDisplayVars({ ...vars });
-        if (snap.userTasks.some((t) => t.state === "Created")) {
+        if (openUserTasksOf(snap).length > 0) {
           trace({
             kind: "human",
             text: "⏸ waiting for a human — complete the task below to continue",
@@ -501,15 +584,24 @@ export function ExampleRunner({
         if (round.handled === 0) {
           // A round with nothing handled but a waiting message subscription
           // (`SettleReason: "messages"`) means the process is parked on a
-          // message catch/boundary event — the in-browser equivalent of an
-          // external system needing to publish it. Echo the subscription's
-          // own `messageName`/`correlationKey` straight back via
+          // message catch event — the in-browser equivalent of an external
+          // system needing to publish it. Echo the subscription's own
+          // `messageName`/`correlationKey` straight back via
           // `correlateMessage` (no extra variables) so a plain Run completes
           // the demo without a separate manual step; the panel below still
           // shows the correlation happening. Any settle reason not handled
           // here (an unhandled job type, an incident) still just stops the
           // loop below as before.
-          const pendingMessage = snap.messageSubscriptions[0];
+          //
+          // Boundary subscriptions are excluded on purpose. A boundary event
+          // is an *exception* the process is not waiting for — firing it
+          // because nothing else can progress would cancel the activity it is
+          // attached to every single run, which is the opposite of what the
+          // model says. Those are the reader's to fire, via
+          // `ExampleDef.messageEvents`.
+          const pendingMessage = snap.messageSubscriptions.find(
+            (m) => !isBoundarySubscription(m),
+          );
           if (round.reason === "messages" && pendingMessage) {
             trace({
               kind: "step",
@@ -705,7 +797,7 @@ export function ExampleRunner({
     // still compiled here, next to the editor, before the engine is touched.
     let scripted: AgentHandler | null = null;
     try {
-      if (model.agent && agentSource.trim())
+      if (model.agents.length > 0 && agentSource.trim())
         scripted = compileAgent(agentSource);
     } catch (e) {
       setCompileError(e instanceof Error ? e.message : String(e));
@@ -762,35 +854,32 @@ export function ExampleRunner({
             turnRef: turnRef.current,
             requiredTools: example.requiredTools,
           });
-      } else if (scripted && model.agent) {
-        // The scripted brain is one closure today — it only drives the
-        // primary process's first agent host. Every AI Agent host shares one
-        // job type, so without an elementId guard this closure would also be
-        // dispatched for any other host's jobs. Guard explicitly: any host
-        // other than the primary throws, which the engine reports as an
-        // incident on the diagram (not a silent stall, and not silently
-        // driven by the primary host's closure).
-        const primaryElementId = model.agent.elementId;
-        agents[model.agent.jobType] = async (job) => {
-          if (job.elementId !== primaryElementId) {
-            throw new Error(
-              `No scripted agent handler for "${job.elementId}" — only "${primaryElementId}" ` +
-                `(the primary process's first agent host) is driven by the scripted brain. ` +
-                `Use a live brain to exercise more than one host.`,
-            );
-          }
-          const result = await scripted!(job);
-          const tools = (result.activateElements ?? [])
-            .map((a) => a.elementId)
-            .join(", ");
-          trace({
-            kind: "agent",
-            text: result.completionConditionFulfilled
-              ? "🤖 scripted agent: done"
-              : `🤖 scripted agent: calling ${tools || "(nothing)"}`,
-          });
-          return result;
-        };
+      } else if (scripted) {
+        // Every AI Agent host shares one job type, so one closure serves them
+        // all; `job.elementId` tells the example's scripted source which host
+        // it is being asked about, exactly as it tells a live brain. A
+        // single-host example never has to look at it.
+        //
+        // Registered per job type across *every* process, not just the
+        // primary one: a host can live in a called process (the orchestrator
+        // shape), where `model.agent` — the primary process's first host — is
+        // null and nothing would be registered at all.
+        for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
+          agents[jobType] = async (job) => {
+            const result = await scripted!(job);
+            const tools = (result.activateElements ?? [])
+              .map((a) => a.elementId)
+              .join(", ");
+            const host = model.agents.length > 1 ? ` (${job.elementId})` : "";
+            trace({
+              kind: "agent",
+              text: result.completionConditionFulfilled
+                ? `🤖 scripted agent${host}: done`
+                : `🤖 scripted agent${host}: calling ${tools || "(nothing)"}`,
+            });
+            return result;
+          };
+        }
       }
     }
 
@@ -808,19 +897,54 @@ export function ExampleRunner({
     // `useExampleRun`'s `bpmn` param) — so Run/Step always execute exactly
     // what's in the editor. `draft.hasErrors` already gated both buttons
     // above, so this redeploy is against XML the model parser accepted.
-    const ids = await run.redeploy(bpmn);
+    //
+    // The *resolved* XML, matching what `parseModel` read and what the diagram
+    // shows. Deploying the raw editor text instead would leave `{{template}}`
+    // placeholders in whatever the engine itself evaluates — a message start
+    // event's name or correlation key among them, so the runner would publish
+    // the resolved value against an unresolved subscription and nothing would
+    // start.
+    const ids = await run.redeploy(draft.resolvedBpmn);
     const pid = ids?.[0] ?? model.processId;
     trace({
       kind: "start",
       text: `Starting "${pid}" — ${
-        model.agent
+        displayAgent
           ? brain.kind === "scripted" || !brain.chat
             ? "scripted brain"
             : `live brain (${brain.modelInUse ?? brain.kind})`
           : "no agent in this model"
       }`,
     });
-    const snap = run.createInstance(pid, JSON.stringify(seed));
+    // A message start event has no "create an instance" entry point at all:
+    // the only way in is to publish the message, which is what a webhook or a
+    // broker would do in a real deployment. Publishing it here is the same
+    // move, made by the page.
+    let snap: Snapshot | null;
+    if (model.startMessage) {
+      const { messageName, correlationKey } = model.startMessage;
+      const key = resolveCorrelationKey(correlationKey, seed);
+      trace({
+        kind: "step",
+        text: `📨 publishing "${messageName}" (key: ${key}) — a message start event has no other way in`,
+        elementId: model.startMessage.elementId,
+      });
+      snap = run.correlateMessage(messageName, key, JSON.stringify(seed));
+      // Publishing a start message that matches nothing is a legitimate
+      // outcome, not an error — an unreadable correlation expression resolves
+      // to a key no subscription has (see `resolveCorrelationKey`). It leaves
+      // a snapshot with no instance at all, so say so rather than letting the
+      // run look merely paused.
+      if (snap && snap.instances.length === 0) {
+        trace({
+          kind: "error",
+          text: `▶ nothing started — no start subscription matched key "${key}". Fix the input or the correlation key and press Run again.`,
+          elementId: model.startMessage.elementId,
+        });
+      }
+    } else {
+      snap = run.createInstance(pid, JSON.stringify(seed));
+    }
     // Stash the picked image against the instance just created, so
     // `helpers.vision`/`helpers.image` can resolve it during the run.
     const instanceKey = snap?.instances[0]?.key;
@@ -831,7 +955,6 @@ export function ExampleRunner({
     run,
     example,
     draft,
-    bpmn,
     agentSource,
     startValues,
     imageSelection,
@@ -850,8 +973,17 @@ export function ExampleRunner({
    * `redeploy` and only becomes non-null once `createInstance` runs, and
    * `reset()` (Reset) nulls it again — so this same check is what makes
    * Reset return the page to its pre-run state.
+   *
+   * An instance has to actually exist, not just a snapshot: publishing a start
+   * message that correlates with nothing leaves a snapshot holding no
+   * instances, and treating that as resumable would make every subsequent Run
+   * drive an empty snapshot instead of republishing — a dead end only Reset
+   * could clear.
    */
-  const canResume = !!run.snapshot && run.snapshot.completedInstances < 1;
+  const canResume =
+    !!run.snapshot &&
+    run.snapshot.instances.length > 0 &&
+    run.snapshot.completedInstances < 1;
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
@@ -1044,12 +1176,86 @@ export function ExampleRunner({
     setDisplayVars({});
   }, [run]);
 
-  const submitUserTask = useCallback(() => {
-    if (!openUserTask) return;
+  /**
+   * Events the reader can fire right now: an example's declared
+   * `messageEvents` whose subscription is currently open. Boundary events are
+   * never fired by the drive loop (see `driveLoop`), so this is the only way
+   * to reach one — and it has to work while the process is parked on a human
+   * task, which is exactly when the interesting interrupts arrive.
+   */
+  const readyMessageEvents = useMemo(() => {
+    const declared = example.messageEvents;
+    if (!declared?.length || !run.snapshot) return [];
+    return declared.flatMap((event) => {
+      // A boundary event's subscription is reported against the activity it is
+      // attached to, so an example names the event and this resolves it. Match
+      // the message name too: one activity can carry several message
+      // boundaries, and the host alone would bind every button to whichever
+      // subscription came first.
+      const spec = model.boundaryEvents.find((b) => b.elementId === event.elementId);
+      const sub = run.snapshot!.messageSubscriptions.find((m) =>
+        m.elementId === event.elementId
+          ? true
+          : !!spec &&
+            m.elementId === spec.attachedTo &&
+            (!spec.messageName || m.messageName === spec.messageName),
+      );
+      return sub ? [{ event, sub }] : [];
+    });
+  }, [example.messageEvents, run.snapshot, model.boundaryEvents]);
+
+  /** Publish one, then keep driving — the interrupt is mid-run, not a restart. */
+  const publishMessageEvent = useCallback(
+    async (elementId: string) => {
+      if (runningRef.current) return;
+      const match = readyMessageEvents.find((m) => m.event.elementId === elementId);
+      if (!match) return;
+      const { event, sub } = match;
+      const seq = ++runSeqRef.current;
+      runningRef.current = true;
+      setRunning(true);
+      try {
+        // The key comes off the subscription the engine actually opened, so it
+        // can't drift from what the instance resolved.
+        const snap = run.correlateMessage(
+          sub.messageName,
+          sub.correlationKey,
+          JSON.stringify(event.variables ?? {}),
+        );
+        if (!snap) {
+          trace({
+            kind: "error",
+            text: `▶ publishing "${sub.messageName}" failed`,
+            elementId,
+          });
+          return;
+        }
+        trace({
+          kind: "vars",
+          text: `📨 published "${sub.messageName}" (key: ${sub.correlationKey})`,
+          elementId,
+        });
+        const vars = snap.instances[0]?.variables;
+        if (vars) setDisplayVars({ ...vars });
+        await new Promise((r) => setTimeout(r, BEAT));
+        await driveLoop(workersRef.current, agentsRef.current, snap, seq);
+      } finally {
+        if (runSeqRef.current === seq) {
+          runningRef.current = false;
+          setRunning(false);
+        }
+      }
+    },
+    [readyMessageEvents, run, trace, driveLoop],
+  );
+
+  const submitUserTask = useCallback(async () => {
+    if (!openUserTask || runningRef.current) return;
     // Re-validate synchronously rather than trusting only the last
     // `onValidityChange` flag — this is the actual submit-time gate; a form
     // with no linked schema (reviewFormRef unset) has nothing to validate.
     if (reviewFormRef.current && !reviewFormRef.current.validate()) return;
+    const seq = ++runSeqRef.current;
     const snap = run.completeUserTask(
       openUserTask.key,
       JSON.stringify(reviewValues),
@@ -1060,9 +1266,30 @@ export function ExampleRunner({
     // otherwise completing the last task would blank the card.
     const vars = snap?.instances[0]?.variables;
     setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
-    if (snap && snap.completedInstances >= 1)
+    if (snap && snap.completedInstances >= 1) {
       trace({ kind: "done", text: "✅ process instance completed" });
-  }, [openUserTask, reviewValues, run, trace]);
+      return;
+    }
+    if (!snap) return;
+
+    // Completing the task only moves the token; whatever it unblocks — a job,
+    // the next agent turn — still needs driving. Without this the run reads as
+    // stalled ("Paused", nothing in the log) until the reader presses Run
+    // again, which is worst of all when the task is one of the agent's own
+    // tools: the agent stops mid-thought with its answer already in hand.
+    // `resolveManualControl` has always resumed the loop this way; a human
+    // task is the same kind of wait.
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      await driveLoop(workersRef.current, agentsRef.current, snap, seq);
+    } finally {
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setRunning(false);
+      }
+    }
+  }, [openUserTask, reviewValues, run, trace, driveLoop]);
 
   const statusBadge = useMemo(() => {
     if (run.phase === "loading")
@@ -1210,21 +1437,21 @@ export function ExampleRunner({
         )}
       </div>
 
-      {!compact && (model.agent || example.imageInput) && (
+      {!compact && (displayAgent || example.imageInput) && (
         <CollapsibleCard
           sectionId="brain"
           className="brain-card"
           data-tour={TOUR_ANCHOR.brainPanel}
           title="Agent brain"
           description={
-            model.agent
-              ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
+            displayAgent
+              ? `What drives “${displayAgent.label}”. The model recommends; the process governs.`
               : "What reads the image. The model recommends; the process governs."
           }
         >
           <BrainPanel
             brain={brain}
-            showText={!!model.agent}
+            showText={!!displayAgent}
             showVision={!!example.imageInput}
           />
         </CollapsibleCard>
@@ -1352,7 +1579,7 @@ export function ExampleRunner({
                   : "This task has no linked form — complete it with no variables."
               }
             >
-              {unrunTools.length > 0 && (
+              {unrunTools.length > 0 && !openUserTaskIsAgentTool && (
                 <Alert variant="destructive">
                   <AlertTitle>The agent didn't finish its checks</AlertTitle>
                   <AlertDescription>
@@ -1411,6 +1638,27 @@ export function ExampleRunner({
             </CollapsibleCard>
           )}
 
+          {readyMessageEvents.length > 0 && (
+            <CollapsibleCard
+              sectionId="message-events"
+              title="Something else happens"
+              description="An event the process isn't waiting for. The run never fires these on its own — that would interrupt every time — so they're yours."
+            >
+              <div className="controls">
+                {readyMessageEvents.map(({ event }) => (
+                  <Button
+                    key={event.elementId}
+                    variant="secondary"
+                    onClick={() => void publishMessageEvent(event.elementId)}
+                    disabled={running || stepping}
+                  >
+                    {event.label}
+                  </Button>
+                ))}
+              </div>
+            </CollapsibleCard>
+          )}
+
         </div>
 
         <div className="col">
@@ -1419,7 +1667,7 @@ export function ExampleRunner({
             elementStats={run.snapshot?.elementStats}
             incidents={run.snapshot?.incidents}
             labelFor={elementLabels}
-            hasAgent={!!model.agent}
+            hasAgent={!!displayAgent}
             variables={
               <div className="vars-block" data-tour={TOUR_ANCHOR.variablesPanel}>
                 <div className="vars-head">Instance variables</div>
@@ -1453,7 +1701,7 @@ export function ExampleRunner({
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
                   <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
-                  {model.agent && (
+                  {displayAgent && (
                     <TabsTrigger value={AGENT_TAB}>
                       agent (scripted)
                     </TabsTrigger>
@@ -1490,10 +1738,10 @@ export function ExampleRunner({
                   <ModelEditor value={bpmn} onChange={setBpmn} />
                 </TabsContent>
 
-                {model.agent && (
+                {displayAgent && (
                   <TabsContent value={AGENT_TAB}>
                     <div className="editor-meta">
-                      <strong>{model.agent.label}</strong>
+                      <strong>{displayAgent.label}</strong>
                       <code>
                         {brain.kind === "scripted" || !brain.chat
                           ? "in use"
@@ -1573,7 +1821,7 @@ export function ExampleRunner({
             </Suspense>
           </CollapsibleCard>
 
-          {model.agent && (
+          {displayAgent && (
             <CollapsibleCard
               sectionId="tools"
               defaultOpen={false}
@@ -1586,7 +1834,7 @@ export function ExampleRunner({
               }
             >
               <ul className="tool-list">
-                {model.agent.tools.map((t) => (
+                {displayAgent.tools.map((t) => (
                   <li key={t.elementId}>
                     <code>{t.elementId}</code>
                     <span> — {t.documentation || t.label}</span>

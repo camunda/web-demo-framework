@@ -125,6 +125,47 @@ export interface ProcessSpec {
   userTasks: UserTaskSpec[];
   /** The `formId` bound to the start event, if any. */
   startFormId?: string;
+  /**
+   * Set when this process's start event is a **message** start event: there is
+   * no "just create an instance" entry point, only a published message.
+   */
+  startMessage?: StartMessageSpec;
+  /**
+   * Every boundary event in this process, with the activity it is attached to.
+   *
+   * The engine reports an open boundary subscription against the *attached
+   * activity*, not the boundary event, so this is what turns "fire
+   * `Boundary_SecondAlert`" — which is how a person thinks about it — into the
+   * subscription actually on offer. `messageName` matters when an activity
+   * carries more than one message boundary: the host alone doesn't tell them
+   * apart.
+   */
+  boundaryEvents: BoundaryEventSpec[];
+}
+
+/** A boundary event, and what it is attached to. */
+export interface BoundaryEventSpec {
+  elementId: string;
+  /** The activity's id — what an open subscription is reported against. */
+  attachedTo: string;
+  /** Set for a message boundary event: the `<bpmn:message>` name it waits on. */
+  messageName?: string;
+}
+
+/**
+ * A message start event, as the runner needs it: publishing this message with a
+ * matching correlation key is what creates an instance — the in-browser stand-in
+ * for the webhook or broker that would publish it in a real deployment.
+ */
+export interface StartMessageSpec {
+  /** `<bpmn:message name="…">` — the name a publisher has to match. */
+  messageName: string;
+  /**
+   * The raw `zeebe:subscription correlationKey` expression, e.g. `=customerId`.
+   * Resolved against the start variables at run time, not parse time.
+   */
+  correlationKey: string;
+  elementId: string;
 }
 
 export interface ModelInfo {
@@ -151,6 +192,10 @@ export interface ModelInfo {
   userTasks: UserTaskSpec[];
   /** The `formId` bound to the primary process's start event, if any. */
   startFormId?: string;
+  /** The primary process's message start event, if it has one. */
+  startMessage?: StartMessageSpec;
+  /** Every boundary event across every process, with its attached activity. */
+  boundaryEvents: BoundaryEventSpec[];
 }
 
 export interface ParseModelOptions {
@@ -459,13 +504,133 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     formId: zeebeEls(el, "formDefinition")[0]?.getAttribute("formId") ?? undefined,
   }));
 
-  const startEvent = process.getElementsByTagNameNS(BPMN_NS, "startEvent")[0];
+  // The process's *own* start event — `getElementsByTagNameNS` would also
+  // return the start event of any embedded sub-process nested inside it.
+  const startEvent = Array.from(process.children).find(
+    (el) => el.namespaceURI === BPMN_NS && el.localName === "startEvent",
+  );
   const startFormId = startEvent
     ? (zeebeEls(startEvent, "formDefinition")[0]?.getAttribute("formId") ??
       undefined)
     : undefined;
+  const startMessage = startEvent ? startMessageOf(startEvent) : undefined;
 
-  return { processId, processName: processLabel, tasks, agents, userTasks, startFormId };
+  const boundaryEvents: BoundaryEventSpec[] = [];
+  for (const el of Array.from(
+    process.getElementsByTagNameNS(BPMN_NS, "boundaryEvent"),
+  )) {
+    const id = el.getAttribute("id");
+    const attachedTo = el.getAttribute("attachedToRef");
+    if (!id || !attachedTo) continue;
+    boundaryEvents.push({
+      elementId: id,
+      attachedTo,
+      messageName: messageNameOf(el),
+    });
+  }
+
+  return {
+    processId,
+    processName: processLabel,
+    tasks,
+    agents,
+    userTasks,
+    startFormId,
+    startMessage,
+    boundaryEvents,
+  };
+}
+
+/** The `<bpmn:message>` name an event references, if it references one. */
+function messageNameOf(event: Element): string | undefined {
+  const def = Array.from(event.children).find(
+    (el) => el.namespaceURI === BPMN_NS && el.localName === "messageEventDefinition",
+  );
+  const ref = def?.getAttribute("messageRef");
+  if (!ref) return undefined;
+  return (
+    Array.from(event.ownerDocument.getElementsByTagNameNS(BPMN_NS, "message"))
+      .find((m) => m.getAttribute("id") === ref)
+      ?.getAttribute("name") ?? undefined
+  );
+}
+
+/**
+ * Read a start event's message definition, if it has one: the `<bpmn:message>`
+ * it references lives at the definitions level, and carries the
+ * `zeebe:subscription correlationKey` a publisher has to match.
+ */
+function startMessageOf(startEvent: Element): StartMessageSpec | undefined {
+  const def = Array.from(startEvent.children).find(
+    (el) => el.namespaceURI === BPMN_NS && el.localName === "messageEventDefinition",
+  );
+  const ref = def?.getAttribute("messageRef");
+  if (!ref) return undefined;
+
+  const message = Array.from(
+    startEvent.ownerDocument.getElementsByTagNameNS(BPMN_NS, "message"),
+  ).find((m) => m.getAttribute("id") === ref);
+  if (!message) return undefined;
+  const messageName = message.getAttribute("name");
+  if (!messageName) return undefined;
+
+  return {
+    messageName,
+    correlationKey:
+      zeebeEls(message, "subscription")[0]?.getAttribute("correlationKey") ?? "",
+    elementId: startEvent.getAttribute("id") ?? "",
+  };
+}
+
+/**
+ * Resolve a `zeebe:subscription correlationKey` expression against the
+ * variables an instance is starting with, so the page can publish a message
+ * start event's message with the key the engine will compute for it.
+ *
+ * Deliberately not a FEEL evaluator: the two forms a correlation key takes in
+ * practice are a bare variable reference (`=customerId`) and a string literal
+ * (`="fixed-key"`). Anything else is returned as written, which correlates
+ * against nothing and shows up as a run that never starts — visible, rather
+ * than a wrong key silently starting the wrong thing.
+ */
+export function resolveCorrelationKey(
+  expression: string,
+  variables: Record<string, unknown>,
+): string {
+  const expr = expression.trim().replace(/^=/, "").trim();
+
+  const literal = expr.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (literal) return unescapeFeelString(literal[1]);
+
+  if (/^[A-Za-z_$][\w$]*$/.test(expr)) {
+    const value = variables[expr];
+    return value == null ? "" : String(value);
+  }
+
+  return expr;
+}
+
+/**
+ * The escape sequences a FEEL string literal can carry. The engine evaluates
+ * the literal, so a key published in its still-escaped form simply wouldn't
+ * correlate — a backslash or a tab in a correlation key is unusual, but
+ * failing to start with no explanation is not a good way to find that out.
+ */
+function unescapeFeelString(literal: string): string {
+  return literal.replace(/\\(["'\\/nrt]|u[0-9a-fA-F]{4})/g, (_match, escape: string) => {
+    switch (escape[0]) {
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      case "u":
+        return String.fromCharCode(parseInt(escape.slice(1), 16));
+      default:
+        return escape;
+    }
+  });
 }
 
 export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo {
@@ -510,5 +675,7 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
     agents: processes.flatMap((p) => p.agents),
     userTasks: primary.userTasks,
     startFormId: primary.startFormId,
+    startMessage: primary.startMessage,
+    boundaryEvents: processes.flatMap((p) => p.boundaryEvents),
   };
 }

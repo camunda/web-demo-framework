@@ -184,6 +184,214 @@ async function runDmnFixture() {
   );
 }
 
+/** A message start event has no `createInstance` entry point — publishing the
+ *  message is what creates the instance. */
+async function runMessageStartFixture() {
+  const name = "message start event (instance created by correlation)";
+  const xml = readFileSync(path.join(fixturesDir, "message-start.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    session.deploy(xml);
+    // Deliberately no createInstance call: if correlation doesn't start the
+    // process, there is nothing to run.
+    session.correlateMessage(
+      "probe-kickoff",
+      "PROBE-1",
+      JSON.stringify({ customerId: "PROBE-1" }),
+    );
+    const started = session.snapshot().instances.length === 1;
+    if (!started) {
+      record(name, false, "correlating the start message created no instance");
+      return;
+    }
+    const { snapshot } = await driveToQuiescence(
+      session,
+      { "probe-work": () => ({ handled: true }) },
+      {},
+      20,
+    );
+    const completed = snapshot.completedInstances >= 1;
+    record(
+      name,
+      completed,
+      completed
+        ? "correlateMessage created the instance and it ran to completion"
+        : `instance created but did not complete: ${JSON.stringify(snapshot.incidents)}`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/** An interrupting message boundary event must cancel the activity and take
+ *  its own outgoing flow — not the activity's happy path. */
+async function runMessageBoundaryFixture() {
+  const name = "message boundary event (interrupting)";
+  const xml = readFileSync(path.join(fixturesDir, "message-boundary.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], JSON.stringify({ customerId: "PROBE-9" }));
+
+    // The subscription has to be visible *before* it fires, since that is what
+    // tells a UI a boundary event is armed rather than a wait state to resolve.
+    const sub = session.snapshot().messageSubscriptions[0];
+    const kind = sub?.kind ?? "(none)";
+    if (!sub) {
+      record(name, false, "no message subscription opened for the boundary event");
+      return;
+    }
+
+    const snap = session.correlateMessage("probe-cancel", "PROBE-9", "{}");
+    const interrupted = snap.takenSequenceFlows.some((f) => f.from === "MessageBoundary");
+    const tookHappyPath = snap.takenSequenceFlows.some((f) => f.from === "LongWork");
+    // `!tookHappyPath` on its own proves nothing: the happy path can't be
+    // taken while `LongWork`'s job is still uncompleted, so a *non*-
+    // interrupting boundary would look identical. The interrupting claim is
+    // that the activity was cancelled — no job left to activate, and the
+    // instance finished through the boundary alone.
+    const jobStillThere = session
+      .activateJobs("probe-long-work", 1, 1000, "coverage-check")
+      .length > 0;
+    const completed = snap.completedInstances >= 1;
+    // `ExampleRunner` tells a boundary subscription apart from a wait state by
+    // looking for "boundary" in `kind`, and refuses to auto-correlate the
+    // former. If an engine bump renames or drops that discriminator while
+    // boundary routing still works, every ordinary run would start firing
+    // interrupting boundaries on its own — so the contract is asserted, not
+    // merely printed.
+    const discriminated = kind.toLowerCase().includes("boundary");
+    const ok = interrupted && !tookHappyPath && !jobStillThere && completed && discriminated;
+    record(
+      name,
+      ok,
+      !interrupted
+        ? "the boundary path was not taken"
+        : !discriminated
+          ? `routing works but the subscription kind is "${kind}" — no longer identifies a boundary, and ExampleRunner's isBoundarySubscription depends on that`
+          : jobStillThere
+            ? "the boundary fired but the attached activity was not cancelled — not interrupting"
+            : !completed
+              ? "routed through the boundary but the instance did not complete"
+              : `cancelled the activity and completed through the boundary (subscription kind: "${kind}")`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
+ * A `bpmn:receiveTask` should behave like an intermediate message catch event.
+ * It does not: it completes on arrival, opening no subscription and waiting
+ * for nothing. A silent degrade rather than a deploy rejection, so a model
+ * built on it looks like it works while skipping the wait entirely — this
+ * check exists to catch the day that changes.
+ */
+async function runReceiveTaskFixture() {
+  const name = "receive task (message wait) — NOT supported, silently skipped";
+  const xml = readFileSync(path.join(fixturesDir, "receive-task.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], JSON.stringify({ customerId: "PROBE-3" }));
+    const snap = session.snapshot();
+    const subscriptions = snap.messageSubscriptions.length;
+    const completed = snap.completedInstances;
+    // Assert the recorded failure exactly — zero subscriptions AND immediate
+    // completion — rather than merely "it didn't wait". A loose negative would
+    // stay green if the engine started opening a subscription but completed
+    // anyway, or opened none and left the instance stuck: both are changes
+    // worth seeing.
+    const stillBroken = subscriptions === 0 && completed === 1;
+    record(
+      name,
+      stillBroken,
+      stillBroken
+        ? "completed immediately with 0 subscription(s) and no wait"
+        : `behaviour changed — ${subscriptions} subscription(s), ${completed} completed instance(s); re-check the engine and update the coverage doc`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
+ * Two ways to give an ad-hoc tool a follow-up step. Camunda documents chained
+ * sequence flows between an ad-hoc sub-process's children as supported; this
+ * engine drops them, treating an activated tool as a leaf. An embedded
+ * sub-process used as one compound tool does get its inner flow driven, which
+ * is the workaround every example in this repo uses.
+ */
+async function runAdHocInnerFlowFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "adhoc-inner-flow.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  const seen = new Set();
+  const worker = (job) => {
+    seen.add(job.elementId);
+    return {};
+  };
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], "{}");
+    let turn = 0;
+    const { snapshot } = await driveToQuiescence(
+      session,
+      {
+        "probe-chained-tool": worker,
+        "probe-chained-follow-up": worker,
+        "probe-compound-inner": worker,
+        "probe-compound-follow-up": worker,
+      },
+      {
+        "io.camunda.agenticai:aiagent-job-worker:1": () => {
+          turn += 1;
+          return turn === 1
+            ? {
+                activateElements: [
+                  { elementId: "ChainedTool" },
+                  { elementId: "CompoundTool" },
+                ],
+              }
+            : { completionConditionFulfilled: true };
+        },
+      },
+      50,
+    );
+
+    // The recorded failure is specifically "the activated tool runs, only its
+    // outgoing flow is dropped" — so assert the tool ran too. Checking only
+    // the follow-up's absence would stay green if activation broke entirely.
+    const chainedRan = seen.has("ChainedTool");
+    const followUpRan = seen.has("ChainedFollowUp");
+    record(
+      "ad-hoc sub-process: chained sequence flow between tools — NOT followed",
+      chainedRan && !followUpRan,
+      !chainedRan
+        ? "the activated tool itself never ran — this check no longer measures what it claims"
+        : followUpRan
+          ? "the follow-up now runs — engine fixed; update the coverage doc and drop the sub-process workaround"
+          : "the activated tool ran, its outgoing sequence flow was dropped",
+    );
+    // Both inner workers running isn't the claim — the workaround relies on
+    // the compound tool *finishing* and handing control back, so a run that
+    // ran both tasks and then stalled or incidented has to fail this.
+    const finishedCleanly =
+      snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+    const compoundDrove = seen.has("CompoundInner") && seen.has("CompoundFollowUp");
+    record(
+      "ad-hoc sub-process: embedded sub-process as a compound tool",
+      compoundDrove && finishedCleanly,
+      !compoundDrove
+        ? `only ${[...seen].join(", ") || "nothing"} ran`
+        : finishedCleanly
+          ? "the compound tool's whole inner flow was driven, and the instance completed"
+          : `inner flow ran but the instance did not complete cleanly: ${JSON.stringify(snapshot.incidents)}`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
@@ -194,6 +402,10 @@ async function main() {
   await runErrorBoundaryFixture();
   await runExclusiveGatewayFixture();
   await runDmnFixture();
+  await runMessageStartFixture();
+  await runMessageBoundaryFixture();
+  await runReceiveTaskFixture();
+  await runAdHocInnerFlowFixture();
 
   console.log("\nSummary:");
   for (const r of results) console.log(`  ${r.ok ? "✅" : "❌"} ${r.name}`);

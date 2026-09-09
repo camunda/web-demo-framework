@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A `bpmn:receiveTask` waiting on the same message a `message.bpmn`-style
+  intermediate catch event would: same `messageRef`, same
+  `zeebe:subscription correlationKey`. It should open a subscription and park
+  the token until `probe-reply` is correlated.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeReceiveTask" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="Message_Reply" name="probe-reply">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=customerId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="probe-receive-task" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>Flow_ToWait</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToWait" sourceRef="Start" targetRef="Wait" />
+    <bpmn:receiveTask id="Wait" name="Wait for the reply" messageRef="Message_Reply">
+      <bpmn:incoming>Flow_ToWait</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:receiveTask>
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="Wait" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

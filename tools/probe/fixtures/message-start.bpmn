@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A message START event: there is no "create an instance" entry point at all,
+  only a published message. Correlating `probe-kickoff` with a matching key is
+  what creates the instance.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeMessageStart" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="Message_Kickoff" name="probe-kickoff">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=customerId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="probe-message-start" isExecutable="true">
+    <bpmn:startEvent id="Start" name="Alert received">
+      <bpmn:messageEventDefinition id="MessageEventDefinition_Kickoff" messageRef="Message_Kickoff" />
+      <bpmn:outgoing>Flow_ToWork</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToWork" sourceRef="Start" targetRef="Work" />
+    <bpmn:serviceTask id="Work" name="Handle the alert">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-work" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToWork</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="Work" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

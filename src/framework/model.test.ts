@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { feelLiteralText, parseFromAiArgs, parseModel } from "./model";
+import {
+  feelLiteralText,
+  parseFromAiArgs,
+  parseModel,
+  resolveCorrelationKey,
+} from "./model";
 
 const BPMN_HEADER = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -262,6 +267,55 @@ describe("parseModel", () => {
     expect(parseModel(xml).startFormId).toBe("intake");
   });
 
+  it("reads the start event of the process itself, not one nested in a sub-process", () => {
+    const xml = `${BPMN_HEADER}
+    <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
+      <bpmn:subProcess id="Inner">
+        <bpmn:startEvent id="Inner_Start">
+          <bpmn:extensionElements>
+            <zeebe:formDefinition formId="wrong-form" />
+          </bpmn:extensionElements>
+        </bpmn:startEvent>
+      </bpmn:subProcess>
+      <bpmn:startEvent id="Start">
+        <bpmn:extensionElements>
+          <zeebe:formDefinition formId="intake" />
+        </bpmn:extensionElements>
+      </bpmn:startEvent>
+    </bpmn:process>
+    ${BPMN_FOOTER}`;
+    expect(parseModel(xml).startFormId).toBe("intake");
+  });
+
+  it("resolves a message start event's message name and correlation key", () => {
+    const xml = `${BPMN_HEADER}
+    <bpmn:message id="Msg_1" name="fraud-alert">
+      <bpmn:extensionElements>
+        <zeebe:subscription correlationKey="=customerId" />
+      </bpmn:extensionElements>
+    </bpmn:message>
+    <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
+      <bpmn:startEvent id="Start">
+        <bpmn:messageEventDefinition id="MED_1" messageRef="Msg_1" />
+      </bpmn:startEvent>
+    </bpmn:process>
+    ${BPMN_FOOTER}`;
+    expect(parseModel(xml).startMessage).toEqual({
+      messageName: "fraud-alert",
+      correlationKey: "=customerId",
+      elementId: "Start",
+    });
+  });
+
+  it("leaves startMessage unset for an ordinary start event", () => {
+    const xml = `${BPMN_HEADER}
+    <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
+      <bpmn:startEvent id="Start" />
+    </bpmn:process>
+    ${BPMN_FOOTER}`;
+    expect(parseModel(xml).startMessage).toBeUndefined();
+  });
+
   it("produces agent: null for a non-agentic model", () => {
     const xml = `${BPMN_HEADER}
     <bpmn:process id="proc1" name="Proc 1" isExecutable="true">
@@ -414,5 +468,38 @@ describe("feelLiteralText", () => {
 
   it("falls back to the trimmed expression when there are no quoted literals", () => {
     expect(feelLiteralText("=5")).toBe("5");
+  });
+});
+
+describe("resolveCorrelationKey", () => {
+  it("reads a bare variable reference off the start variables", () => {
+    expect(resolveCorrelationKey("=customerId", { customerId: "CUST-1" })).toBe("CUST-1");
+  });
+
+  it("unwraps a FEEL string literal", () => {
+    expect(resolveCorrelationKey('="fixed-key"', {})).toBe("fixed-key");
+  });
+
+  it("decodes every escape a FEEL literal can carry, not just the quote", () => {
+    // The engine evaluates the literal, so a key still carrying `\\t` would
+    // simply never correlate.
+    expect(resolveCorrelationKey('="a\\tb"', {})).toBe("a\tb");
+    expect(resolveCorrelationKey('="a\\\\b"', {})).toBe("a\\b");
+    expect(resolveCorrelationKey('="a\\nb"', {})).toBe("a\nb");
+    expect(resolveCorrelationKey('="say \\"hi\\""', {})).toBe('say "hi"');
+  });
+
+  it("stringifies a non-string variable rather than dropping it", () => {
+    expect(resolveCorrelationKey("=orderId", { orderId: 42 })).toBe("42");
+  });
+
+  it("yields an empty key for a variable the instance never sets", () => {
+    // Correlates against nothing, so the run visibly never starts — better
+    // than guessing a key and quietly starting the wrong thing.
+    expect(resolveCorrelationKey("=missing", {})).toBe("");
+  });
+
+  it("passes an expression it can't interpret through unchanged", () => {
+    expect(resolveCorrelationKey("=a + b", { a: 1, b: 2 })).toBe("a + b");
   });
 });

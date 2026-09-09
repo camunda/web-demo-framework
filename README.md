@@ -34,6 +34,7 @@ them.
 | Example | Shape |
 | --- | --- |
 | Seed export compliance agent | AI Agent ad-hoc sub-process, four connector-backed tools, a gateway on the agent's decision, a human review task, two forms |
+| Invoice payment approval agent | The same ad-hoc sub-process, but one of the tools **is a human**: a user task inside the agent's own tool loop, so a denial comes back as a tool result the agent reasons about. The task that moves money has exactly one incoming flow, from the approved branch — the guardrail is in the diagram, not in the prompt |
 | Order process | Three plain service tasks and a gateway. No agent, no forms, no human step |
 | Read a number plate from a photo | A photo goes into the run, an in-browser **vision** model reads the number plate on the reader's own GPU, a human confirms or corrects it on a pre-filled form, and the process records the result. The model recommends; the process governs — the same shape as the compliance agent, with a vision model in the recommending seat. Offline it falls back to a deterministic scripted reading |
 

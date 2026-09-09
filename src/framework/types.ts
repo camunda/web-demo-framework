@@ -127,6 +127,34 @@ export interface HandlerDef {
   };
 }
 
+/**
+ * An event the reader can publish mid-run: a message boundary event, or any
+ * other catch the run loop deliberately never fires on its own.
+ *
+ * The loop auto-correlates a message the process is *parked* on, because that
+ * is a wait state with an obvious resolution. A boundary event is the
+ * opposite — an interruption the process is not waiting for — so firing it on
+ * every settled round would cancel the attached activity every run. Those are
+ * offered as buttons instead, and this is how an example declares them.
+ *
+ * Deliberately not tied to a held job (`HandlerDef.manualControl`): the case
+ * worth demonstrating is usually an interrupt arriving while the process is
+ * parked on a *human task*, where there is no job to hang the choice off.
+ */
+export interface MessageEventDef {
+  /** The catch/boundary element to fire — a message name alone isn't unique. */
+  elementId: string;
+  /** Button label, e.g. `"🚨 A second alert arrives for this customer"`. */
+  label: string;
+  /**
+   * What the publisher carries. Merged into the instance on correlation, so an
+   * event that overwrites the case under the agent's feet can actually do so —
+   * publishing an empty payload would route the boundary but leave every
+   * variable reading as the original event.
+   */
+  variables?: Record<string, unknown>;
+}
+
 /** One selectable start scenario, rendered by the start form. */
 export interface Scenario {
   label: string;
@@ -258,4 +286,9 @@ export interface ExampleDef {
    * here would push a model into calling things the case doesn't call for.
    */
   requiredTools?: string[];
+  /**
+   * Events the reader can publish mid-run, rendered as buttons whenever the
+   * matching subscription is open — see {@link MessageEventDef}.
+   */
+  messageEvents?: MessageEventDef[];
 }

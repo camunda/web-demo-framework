@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Two shapes of "a tool with steps after it" inside an AI Agent ad-hoc
+  sub-process, side by side, so the coverage check can tell them apart:
+
+  A) ChainedTool -> ChainedFollowUp, joined by a plain sequence flow between
+     two children of the ad-hoc sub-process. Camunda documents this as
+     supported ("If elements depend on each other, the elements can be
+     connected by a sequence flow to build a structured sequence within the
+     ad-hoc sub-process").
+
+  B) CompoundTool, an embedded sub-process used as a single tool, with the
+     same two steps inside it.
+
+  The agent activates ChainedTool and CompoundTool — only those two, since the
+  engine rejects an activation naming anything deeper.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeAdHocInnerFlow" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-adhoc-inner-flow" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>Flow_ToAgent</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToAgent" sourceRef="Start" targetRef="Agent" />
+    <bpmn:adHocSubProcess id="Agent" name="Agent">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToAgent</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+
+      <bpmn:serviceTask id="ChainedTool" name="Chained tool">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="probe-chained-tool" />
+        </bpmn:extensionElements>
+        <bpmn:outgoing>Flow_ChainedToFollowUp</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_ChainedToFollowUp" sourceRef="ChainedTool" targetRef="ChainedFollowUp" />
+      <bpmn:serviceTask id="ChainedFollowUp" name="Chained follow-up">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="probe-chained-follow-up" />
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_ChainedToFollowUp</bpmn:incoming>
+      </bpmn:serviceTask>
+
+      <bpmn:subProcess id="CompoundTool" name="Compound tool">
+        <bpmn:startEvent id="CompoundTool_Start">
+          <bpmn:outgoing>Flow_CompoundToInner</bpmn:outgoing>
+        </bpmn:startEvent>
+        <bpmn:sequenceFlow id="Flow_CompoundToInner" sourceRef="CompoundTool_Start" targetRef="CompoundInner" />
+        <bpmn:serviceTask id="CompoundInner" name="Compound inner step">
+          <bpmn:extensionElements>
+            <zeebe:taskDefinition type="probe-compound-inner" />
+          </bpmn:extensionElements>
+          <bpmn:incoming>Flow_CompoundToInner</bpmn:incoming>
+          <bpmn:outgoing>Flow_InnerToFollowUp</bpmn:outgoing>
+        </bpmn:serviceTask>
+        <bpmn:sequenceFlow id="Flow_InnerToFollowUp" sourceRef="CompoundInner" targetRef="CompoundFollowUp" />
+        <bpmn:serviceTask id="CompoundFollowUp" name="Compound follow-up">
+          <bpmn:extensionElements>
+            <zeebe:taskDefinition type="probe-compound-follow-up" />
+          </bpmn:extensionElements>
+          <bpmn:incoming>Flow_InnerToFollowUp</bpmn:incoming>
+          <bpmn:outgoing>Flow_CompoundToEnd</bpmn:outgoing>
+        </bpmn:serviceTask>
+        <bpmn:sequenceFlow id="Flow_CompoundToEnd" sourceRef="CompoundFollowUp" targetRef="CompoundTool_End" />
+        <bpmn:endEvent id="CompoundTool_End">
+          <bpmn:incoming>Flow_CompoundToEnd</bpmn:incoming>
+        </bpmn:endEvent>
+      </bpmn:subProcess>
+    </bpmn:adHocSubProcess>
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="Agent" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

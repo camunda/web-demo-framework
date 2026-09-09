@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  An interrupting message boundary event. Publishing `probe-cancel` while
+  `LongWork` is in flight must cancel it and route the token through the
+  boundary's own outgoing flow to `EndInterrupted`, not `EndNormal`.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeMessageBoundary" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="Message_Cancel" name="probe-cancel">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=customerId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="probe-message-boundary" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>Flow_ToLongWork</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToLongWork" sourceRef="Start" targetRef="LongWork" />
+    <bpmn:serviceTask id="LongWork" name="Long-running work">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-long-work" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToLongWork</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndNormal</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="MessageBoundary" name="Cancelled" attachedToRef="LongWork">
+      <bpmn:messageEventDefinition id="MessageEventDefinition_Cancel" messageRef="Message_Cancel" />
+      <bpmn:outgoing>Flow_ToEndInterrupted</bpmn:outgoing>
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_ToEndNormal" sourceRef="LongWork" targetRef="EndNormal" />
+    <bpmn:sequenceFlow id="Flow_ToEndInterrupted" sourceRef="MessageBoundary" targetRef="EndInterrupted" />
+    <bpmn:endEvent id="EndNormal">
+      <bpmn:incoming>Flow_ToEndNormal</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndInterrupted">
+      <bpmn:incoming>Flow_ToEndInterrupted</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
