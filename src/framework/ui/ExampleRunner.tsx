@@ -1419,6 +1419,7 @@ export function ExampleRunner({
             elementStats={run.snapshot?.elementStats}
             incidents={run.snapshot?.incidents}
             labelFor={elementLabels}
+            hasAgent={!!model.agent}
             variables={
               <div className="vars-block" data-tour={TOUR_ANCHOR.variablesPanel}>
                 <div className="vars-head">Instance variables</div>

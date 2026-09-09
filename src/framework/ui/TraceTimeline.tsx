@@ -199,6 +199,7 @@ export function TraceTimeline({
   incidents = [],
   labelFor = (id) => id,
   variables,
+  hasAgent = false,
 }: {
   log: TraceLogLine[];
   /** `snapshot.elementStats` — per-element completion counts, engine-side. */
@@ -209,6 +210,8 @@ export function TraceTimeline({
   labelFor?: (elementId: string) => string;
   /** Live instance payload, rendered as this panel's footer. */
   variables?: ReactNode;
+  /** Whether the model has an AI Agent host — decides how this panel names itself. */
+  hasAgent?: boolean;
 }) {
   const rows = useMemo(() => buildRows(log), [log]);
   const [copied, setCopied] = useState(false);
@@ -252,8 +255,12 @@ export function TraceTimeline({
     <CollapsibleCard
       sectionId="activity"
       className="grow activity-card"
-      title="Agent activity"
-      description="Agent turns, model replies, and tool calls — read top to bottom as a story."
+      title={hasAgent ? "Agent activity" : "Activity"}
+      description={
+        hasAgent
+          ? "Agent turns, model replies, and tool calls — read top to bottom as a story."
+          : "Every step the engine took — read top to bottom as a story."
+      }
     >
       <div className="timeline-toolbar">
           <Button variant="secondary" size="sm" onClick={copyJson}>
