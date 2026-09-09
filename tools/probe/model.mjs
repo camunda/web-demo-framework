@@ -75,14 +75,26 @@ function refLookup(root, elementTag, idAttr = "id", nameAttr = "name") {
   return map;
 }
 
-function isDescendant(ancestor, node) {
+/**
+ * The nearest enclosing BPMN *activity* of `node` — the container an element
+ * actually belongs to. Only an ad-hoc sub-process's own children are
+ * activatable; something nested inside a compound tool (an embedded
+ * sub-process used as a tool) belongs to that tool, not to the host, and
+ * asking the engine to activate it is rejected outright:
+ * `ad-hoc sub-process … has no activatable element with id …`. Mirrors
+ * `nearestActivity` in src/framework/model.ts.
+ */
+function nearestActivity(node) {
   let cur = node.parent;
   while (cur) {
-    if (cur === ancestor) return true;
+    if (ACTIVITY_TAGS.includes(localName(cur))) return cur;
     cur = cur.parent;
   }
-  return false;
+  return null;
 }
+
+/** Activity kinds usable as a **compound tool**: no job type, engine-driven inner flow. */
+const COMPOUND_TOOL_TAGS = ["subProcess", "adHocSubProcess", "callActivity"];
 
 export function analyzeModel(xmlRoot) {
   const definitions = directChild(xmlRoot, "definitions") ?? xmlRoot;
@@ -97,12 +109,33 @@ export function analyzeModel(xmlRoot) {
   );
 
   const tasksByElement = [];
+  const compoundTools = [];
   for (const el of findAll(definitions, ACTIVITY_TAGS)) {
     if (agentHosts.includes(el)) continue; // the container itself is handled separately
-    const jobType = jobTypeOf(el);
     const id = el.attrs.id;
-    if (!jobType || !id) continue;
-    const host = agentHosts.find((h) => isDescendant(h, el));
+    if (!id) continue;
+    const container = nearestActivity(el);
+    const host = container && agentHosts.includes(container) ? container : null;
+    const jobType = jobTypeOf(el);
+
+    if (!jobType) {
+      // A compound tool carries no job type — the engine drives its inner
+      // flow — but it is still one of the elements the agent may activate,
+      // so the stub agent has to know about it.
+      if (host && COMPOUND_TOOL_TAGS.includes(localName(el))) {
+        compoundTools.push({
+          elementId: id,
+          label: el.attrs.name ?? id,
+          jobType: "",
+          documentation: documentationOf(el),
+          isTool: true,
+          compound: true,
+          hostElementId: host.attrs.id,
+        });
+      }
+      continue;
+    }
+
     tasksByElement.push({
       elementId: id,
       label: el.attrs.name ?? id,
@@ -118,7 +151,9 @@ export function analyzeModel(xmlRoot) {
     elementId: host.attrs.id ?? "",
     label: host.attrs.name ?? host.attrs.id ?? "",
     jobType: jobTypeOf(host),
-    tools: tasksByElement.filter((t) => t.hostElementId === host.attrs.id),
+    tools: [...tasksByElement, ...compoundTools].filter(
+      (t) => t.hostElementId === host.attrs.id,
+    ),
   }));
 
   const userTasks = findAll(definitions, "userTask").map((el) => ({

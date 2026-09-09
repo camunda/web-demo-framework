@@ -184,6 +184,172 @@ async function runDmnFixture() {
   );
 }
 
+/** A message start event has no `createInstance` entry point — publishing the
+ *  message is what creates the instance. */
+async function runMessageStartFixture() {
+  const name = "message start event (instance created by correlation)";
+  const xml = readFileSync(path.join(fixturesDir, "message-start.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    session.deploy(xml);
+    // Deliberately no createInstance call: if correlation doesn't start the
+    // process, there is nothing to run.
+    session.correlateMessage(
+      "probe-kickoff",
+      "PROBE-1",
+      JSON.stringify({ customerId: "PROBE-1" }),
+    );
+    const started = session.snapshot().instances.length === 1;
+    if (!started) {
+      record(name, false, "correlating the start message created no instance");
+      return;
+    }
+    const { snapshot } = await driveToQuiescence(
+      session,
+      { "probe-work": () => ({ handled: true }) },
+      {},
+      20,
+    );
+    const completed = snapshot.completedInstances >= 1;
+    record(
+      name,
+      completed,
+      completed
+        ? "correlateMessage created the instance and it ran to completion"
+        : `instance created but did not complete: ${JSON.stringify(snapshot.incidents)}`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/** An interrupting message boundary event must cancel the activity and take
+ *  its own outgoing flow — not the activity's happy path. */
+async function runMessageBoundaryFixture() {
+  const name = "message boundary event (interrupting)";
+  const xml = readFileSync(path.join(fixturesDir, "message-boundary.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], JSON.stringify({ customerId: "PROBE-9" }));
+
+    // The subscription has to be visible *before* it fires, since that is what
+    // tells a UI a boundary event is armed rather than a wait state to resolve.
+    const sub = session.snapshot().messageSubscriptions[0];
+    const kind = sub?.kind ?? "(none)";
+    if (!sub) {
+      record(name, false, "no message subscription opened for the boundary event");
+      return;
+    }
+
+    const snap = session.correlateMessage("probe-cancel", "PROBE-9", "{}");
+    const interrupted = snap.takenSequenceFlows.some((f) => f.from === "MessageBoundary");
+    const tookHappyPath = snap.takenSequenceFlows.some((f) => f.from === "LongWork");
+    record(
+      name,
+      interrupted && !tookHappyPath,
+      interrupted
+        ? `routed through the boundary (subscription kind: "${kind}")`
+        : "the boundary path was not taken",
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
+ * A `bpmn:receiveTask` should behave like an intermediate message catch event.
+ * It does not: it completes on arrival, opening no subscription and waiting
+ * for nothing. A silent degrade rather than a deploy rejection, so a model
+ * built on it looks like it works while skipping the wait entirely — this
+ * check exists to catch the day that changes.
+ */
+async function runReceiveTaskFixture() {
+  const name = "receive task (message wait) — NOT supported, silently skipped";
+  const xml = readFileSync(path.join(fixturesDir, "receive-task.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], JSON.stringify({ customerId: "PROBE-3" }));
+    const snap = session.snapshot();
+    const waited = snap.messageSubscriptions.length > 0 && snap.completedInstances === 0;
+    // "ok" here means "still behaves as documented", i.e. still broken. Flip
+    // this and the coverage-doc row together if the engine starts waiting.
+    record(
+      name,
+      !waited,
+      waited
+        ? "the receive task now waits on a subscription — engine fixed; update the coverage doc"
+        : `completed immediately with ${snap.messageSubscriptions.length} subscription(s) and no wait`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
+ * Two ways to give an ad-hoc tool a follow-up step. Camunda documents chained
+ * sequence flows between an ad-hoc sub-process's children as supported; this
+ * engine drops them, treating an activated tool as a leaf. An embedded
+ * sub-process used as one compound tool does get its inner flow driven, which
+ * is the workaround every example in this repo uses.
+ */
+async function runAdHocInnerFlowFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "adhoc-inner-flow.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  const seen = new Set();
+  const worker = (job) => {
+    seen.add(job.elementId);
+    return {};
+  };
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], "{}");
+    let turn = 0;
+    await driveToQuiescence(
+      session,
+      {
+        "probe-chained-tool": worker,
+        "probe-chained-follow-up": worker,
+        "probe-compound-inner": worker,
+        "probe-compound-follow-up": worker,
+      },
+      {
+        "io.camunda.agenticai:aiagent-job-worker:1": () => {
+          turn += 1;
+          return turn === 1
+            ? {
+                activateElements: [
+                  { elementId: "ChainedTool" },
+                  { elementId: "CompoundTool" },
+                ],
+              }
+            : { completionConditionFulfilled: true };
+        },
+      },
+      50,
+    );
+
+    // "ok" means "still behaves as recorded" for the chained case: still dropped.
+    record(
+      "ad-hoc sub-process: chained sequence flow between tools — NOT followed",
+      !seen.has("ChainedFollowUp"),
+      seen.has("ChainedFollowUp")
+        ? "the follow-up now runs — engine fixed; update the coverage doc and drop the sub-process workaround"
+        : "the activated tool ran, its outgoing sequence flow was dropped",
+    );
+    record(
+      "ad-hoc sub-process: embedded sub-process as a compound tool",
+      seen.has("CompoundInner") && seen.has("CompoundFollowUp"),
+      seen.has("CompoundFollowUp")
+        ? "the compound tool's whole inner flow was driven"
+        : `only ${[...seen].join(", ") || "nothing"} ran`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
@@ -194,6 +360,10 @@ async function main() {
   await runErrorBoundaryFixture();
   await runExclusiveGatewayFixture();
   await runDmnFixture();
+  await runMessageStartFixture();
+  await runMessageBoundaryFixture();
+  await runReceiveTaskFixture();
+  await runAdHocInnerFlowFixture();
 
   console.log("\nSummary:");
   for (const r of results) console.log(`  ${r.ok ? "✅" : "❌"} ${r.name}`);
