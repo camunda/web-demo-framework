@@ -110,7 +110,7 @@ const SCRIPTED_AGENT = `async (job) => {
         variables: {
           disputeReason:
             "Payment release denied on review: " +
-            String(v.releaseReviewerComments || "no comments given") +
+            String(v.releaseReviewerComments || "no comments given").trim().replace(/\\.$/, "") +
             ".",
         },
         activateElements: [{ elementId: "NotifyVendorDispute" }],
@@ -182,6 +182,12 @@ const RELEASE_PAYMENT = `async (job, { num, text, sleep }) => {
       releaseReviewerComments: text("releaseReviewerComments", ""),
       settledAt: "2026-01-01T00:00:00Z",
     },
+    // What the compliance reviewer downstream is shown. The diagram derives
+    // these on the agent's output mapping, which this engine doesn't apply,
+    // so they're set where it does run code — still derived from the payment
+    // having actually happened, not from anything the model claimed.
+    caseOutcome: "released",
+    caseSummary: "Payment of " + amount + " USD released to " + vendor + ".",
     toolCallResult:
       "Payment of " + amount + " USD released to " + vendor + ". Receipt logged.",
   };
@@ -213,6 +219,8 @@ const NOTIFY_VENDOR_DISPUTE = `async (job, { text, sleep }) => {
       poNumber: text("poNumber", ""),
       disputeReason: reason,
     },
+    caseOutcome: "disputed",
+    caseSummary: "Vendor notified of dispute. " + reason,
     toolCallResult: "Vendor notified of dispute: " + reason,
   };
 }`;

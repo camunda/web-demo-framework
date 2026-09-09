@@ -435,23 +435,48 @@ export function ExampleRunner({
   }, [run.snapshot, manualControls]);
 
   /**
-   * Agent tools that never ran this instance. When a human task opens with some
-   * of these outstanding, the agent finished early — a hallucinated tool name,
-   * or it declared itself done — and the process took a gateway's default path.
-   * Saying so beats handing the reviewer a form full of dashes.
+   * Required tools the agent never ran. When a human task opens downstream
+   * with some of these outstanding, the agent finished early — a hallucinated
+   * tool name, or it declared itself done — and the process took a gateway's
+   * default path. Saying so beats handing the reviewer a form full of dashes.
+   *
+   * Scoped to `example.requiredTools` (the same list `liveAgent` uses to
+   * decide whether "done" can be trusted), because "a tool didn't run" is not
+   * evidence of anything on its own: an agent that skips a currency
+   * conversion for an invoice already in USD is doing exactly what its prompt
+   * asks. Only an example can say which tools had to run.
    *
    * Read from the engine's own per-element stats, so it holds for any diagram
    * rather than looking for an example's variable names.
    */
   const unrunTools = useMemo(() => {
-    if (!model.agent || !run.snapshot) return [];
+    const required = example.requiredTools;
+    if (!model.agent || !run.snapshot || !required?.length) return [];
     const completed = new Map(
       run.snapshot.elementStats.map((s) => [s.elementId, s.completed]),
     );
     return model.agent.tools.filter(
-      (t) => (completed.get(t.elementId) ?? 0) === 0,
+      (t) => required.includes(t.elementId) && (completed.get(t.elementId) ?? 0) === 0,
     );
-  }, [model.agent, run.snapshot]);
+  }, [model.agent, run.snapshot, example.requiredTools]);
+
+  /**
+   * True while the open human task is one of the agent's own tools (or sits
+   * inside one). The agent hasn't finished — it is *asking*, mid-loop — so
+   * nothing about its tool use can be judged yet.
+   */
+  const openUserTaskIsAgentTool = useMemo(() => {
+    if (!openUserTask || !model.agent) return false;
+    const toolIds = new Set(model.agent.tools.map((t) => t.elementId));
+    if (toolIds.has(openUserTask.elementId)) return true;
+    // A compound tool's inner elements are tools of that tool, not of the
+    // host, so they never appear in `agent.tools` — match them by the host's
+    // own completion instead: an agent still running hasn't finished.
+    const hostCompleted =
+      run.snapshot?.elementStats.find((s) => s.elementId === model.agent!.elementId)
+        ?.completed ?? 0;
+    return hostCompleted === 0;
+  }, [openUserTask, model.agent, run.snapshot]);
   const openUserTaskSpec = openUserTask
     ? model.userTasks.find((u) => u.elementId === openUserTask.elementId)
     : undefined;
@@ -1091,12 +1116,13 @@ export function ExampleRunner({
     setDisplayVars({});
   }, [run]);
 
-  const submitUserTask = useCallback(() => {
-    if (!openUserTask) return;
+  const submitUserTask = useCallback(async () => {
+    if (!openUserTask || runningRef.current) return;
     // Re-validate synchronously rather than trusting only the last
     // `onValidityChange` flag — this is the actual submit-time gate; a form
     // with no linked schema (reviewFormRef unset) has nothing to validate.
     if (reviewFormRef.current && !reviewFormRef.current.validate()) return;
+    const seq = ++runSeqRef.current;
     const snap = run.completeUserTask(
       openUserTask.key,
       JSON.stringify(reviewValues),
@@ -1107,9 +1133,30 @@ export function ExampleRunner({
     // otherwise completing the last task would blank the card.
     const vars = snap?.instances[0]?.variables;
     setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
-    if (snap && snap.completedInstances >= 1)
+    if (snap && snap.completedInstances >= 1) {
       trace({ kind: "done", text: "✅ process instance completed" });
-  }, [openUserTask, reviewValues, run, trace]);
+      return;
+    }
+    if (!snap) return;
+
+    // Completing the task only moves the token; whatever it unblocks — a job,
+    // the next agent turn — still needs driving. Without this the run reads as
+    // stalled ("Paused", nothing in the log) until the reader presses Run
+    // again, which is worst of all when the task is one of the agent's own
+    // tools: the agent stops mid-thought with its answer already in hand.
+    // `resolveManualControl` has always resumed the loop this way; a human
+    // task is the same kind of wait.
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      await driveLoop(workersRef.current, agentsRef.current, snap, seq);
+    } finally {
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setRunning(false);
+      }
+    }
+  }, [openUserTask, reviewValues, run, trace, driveLoop]);
 
   const statusBadge = useMemo(() => {
     if (run.phase === "loading")
@@ -1399,7 +1446,7 @@ export function ExampleRunner({
                   : "This task has no linked form — complete it with no variables."
               }
             >
-              {unrunTools.length > 0 && (
+              {unrunTools.length > 0 && !openUserTaskIsAgentTool && (
                 <Alert variant="destructive">
                   <AlertTitle>The agent didn't finish its checks</AlertTitle>
                   <AlertDescription>

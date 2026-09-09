@@ -131,6 +131,10 @@ function completedCount(elementId: string): number {
   return session.snapshot().elementStats.find((s) => s.elementId === elementId)?.completed ?? 0;
 }
 
+function currentVariables(): Record<string, unknown> {
+  return session.snapshot().instances[0]?.variables ?? {};
+}
+
 describe("invoice-payment on the live engine — the in-loop human gate", () => {
   it("parks on the release request before any payment is made", async () => {
     const reason = await start(CLEAN_MATCH);
@@ -156,6 +160,12 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
     expect(completedCount("ReleasePayment")).toBe(1);
     expect(completedCount("NotifyVendorDispute")).toBe(0);
 
+    // What the compliance reviewer is shown, and the only thing they're
+    // shown: derived from the payment having happened, not from the agent's
+    // account of itself. Blank here means the sign-off form renders empty.
+    expect(currentVariables().caseOutcome).toBe("released");
+    expect(currentVariables().caseSummary).toContain("4200 USD released");
+
     await completeTask("HumanTask_ComplianceSignoff", {
       complianceDecision: "confirm",
       complianceComments: "Clean match, no exceptions.",
@@ -178,6 +188,7 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
     // did next — no payment, a dispute notice instead.
     expect(completedCount("ReleasePayment")).toBe(0);
     expect(completedCount("NotifyVendorDispute")).toBe(1);
+    expect(currentVariables().caseOutcome).toBe("disputed");
 
     await completeTask("HumanTask_ComplianceSignoff", {
       complianceDecision: "escalate",
