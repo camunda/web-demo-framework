@@ -894,7 +894,14 @@ export function ExampleRunner({
     // `useExampleRun`'s `bpmn` param) — so Run/Step always execute exactly
     // what's in the editor. `draft.hasErrors` already gated both buttons
     // above, so this redeploy is against XML the model parser accepted.
-    const ids = await run.redeploy(bpmn);
+    //
+    // The *resolved* XML, matching what `parseModel` read and what the diagram
+    // shows. Deploying the raw editor text instead would leave `{{template}}`
+    // placeholders in whatever the engine itself evaluates — a message start
+    // event's name or correlation key among them, so the runner would publish
+    // the resolved value against an unresolved subscription and nothing would
+    // start.
+    const ids = await run.redeploy(draft.resolvedBpmn);
     const pid = ids?.[0] ?? model.processId;
     trace({
       kind: "start",
@@ -945,7 +952,6 @@ export function ExampleRunner({
     run,
     example,
     draft,
-    bpmn,
     agentSource,
     startValues,
     imageSelection,

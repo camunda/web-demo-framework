@@ -245,6 +245,15 @@ async function runMessageBoundaryFixture() {
     const snap = session.correlateMessage("probe-cancel", "PROBE-9", "{}");
     const interrupted = snap.takenSequenceFlows.some((f) => f.from === "MessageBoundary");
     const tookHappyPath = snap.takenSequenceFlows.some((f) => f.from === "LongWork");
+    // `!tookHappyPath` on its own proves nothing: the happy path can't be
+    // taken while `LongWork`'s job is still uncompleted, so a *non*-
+    // interrupting boundary would look identical. The interrupting claim is
+    // that the activity was cancelled — no job left to activate, and the
+    // instance finished through the boundary alone.
+    const jobStillThere = session
+      .activateJobs("probe-long-work", 1, 1000, "coverage-check")
+      .length > 0;
+    const completed = snap.completedInstances >= 1;
     // `ExampleRunner` tells a boundary subscription apart from a wait state by
     // looking for "boundary" in `kind`, and refuses to auto-correlate the
     // former. If an engine bump renames or drops that discriminator while
@@ -252,14 +261,19 @@ async function runMessageBoundaryFixture() {
     // interrupting boundaries on its own — so the contract is asserted, not
     // merely printed.
     const discriminated = kind.toLowerCase().includes("boundary");
+    const ok = interrupted && !tookHappyPath && !jobStillThere && completed && discriminated;
     record(
       name,
-      interrupted && !tookHappyPath && discriminated,
-      !discriminated
-        ? `routing works but the subscription kind is "${kind}" — no longer identifies a boundary, and ExampleRunner's isBoundarySubscription depends on that`
-        : interrupted
-          ? `routed through the boundary (subscription kind: "${kind}")`
-          : "the boundary path was not taken",
+      ok,
+      !interrupted
+        ? "the boundary path was not taken"
+        : !discriminated
+          ? `routing works but the subscription kind is "${kind}" — no longer identifies a boundary, and ExampleRunner's isBoundarySubscription depends on that`
+          : jobStillThere
+            ? "the boundary fired but the attached activity was not cancelled — not interrupting"
+            : !completed
+              ? "routed through the boundary but the instance did not complete"
+              : `cancelled the activity and completed through the boundary (subscription kind: "${kind}")`,
     );
   } finally {
     session.free();

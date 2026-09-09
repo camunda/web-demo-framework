@@ -81,12 +81,19 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
   }, 40_000);
 
   it("does not accuse the agent of giving up while it is still asking", async () => {
-    const app = await renderExample(invoicePayment);
+    // `invoicePayment` declares no `requiredTools`, so the alert could never
+    // fire for it and asserting its absence would prove nothing. Mark a tool
+    // the clean-match scenario legitimately skips — a USD invoice needs no
+    // currency conversion — so the alert *would* show if the mid-loop
+    // suppression were removed.
+    const app = await renderExample({
+      ...invoicePayment,
+      requiredTools: ["ConvertCurrency"],
+    });
     await app.run();
 
-    // The open task *is* the agent's tool call. Two of its other tools haven't
-    // run and shouldn't have — a USD invoice needs no currency conversion, and
-    // a clean match needs no dispute notice.
+    // The open task *is* the agent's tool call: it hasn't finished, it's
+    // asking, so there is nothing yet to judge it on.
     expect(app.showsOutsideDiagram("Review release request")).toBe(true);
     expect(screen.queryByText(ALERT)).not.toBeInTheDocument();
   }, 30_000);

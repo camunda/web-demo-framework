@@ -10,7 +10,7 @@
       "id": "Field_Heading"
     },
     {
-      "text": "The fields below already hold a clean, matching scenario. To try the others, replace the values with one of these sets before submitting:\n\n| Scenario | PO amount | Invoice amount | Currency | Notes |\n|---|---|---|---|---|\n| Clean match (default) | 4200 | 4200 | USD | Quarterly office supplies delivery per PO, no changes. |\n| Documented adjustment | 12000 | 12540 | USD | Includes a $540 expedited freight surcharge, pre-approved by procurement via email on the 3rd. |\n| Foreign currency, converts and matches | 8000 | 7400 | EUR | Standard components delivery per PO, exact quantities. |\n| Vague justification (deny this one in Tasklist) | 5000 | 5350 | USD | Includes miscellaneous facility charges from the past quarter. |\n\nFor the first three, approve the release when the **Request payment release** task appears in Tasklist. For the last one, the vague justification is just specific enough that the agent will likely still try to release it - deny it instead, to see the agent adapt and notify the vendor of a dispute. Every scenario then reaches a second, independent **Final compliance sign-off** task once the agent is done.",
+      "text": "The fields below already hold a clean, matching scenario — or pick another from the buttons above. The four the agent behaves differently on:\n\n| Scenario | PO amount | Invoice amount | Currency | Notes |\n|---|---|---|---|---|\n| Clean match (default) | 4200 | 4200 | USD | Quarterly office supplies delivery per PO, no changes. |\n| Documented adjustment | 12000 | 12540 | USD | Includes a $540 expedited freight surcharge, pre-approved by procurement via email on the 3rd. |\n| Foreign currency, converts and matches | 8000 | 7400 | EUR | Standard components delivery per PO, exact quantities. |\n| Vague justification (deny this one) | 5000 | 5350 | USD | Includes miscellaneous facility charges from the past quarter. |\n\nFor the first three, approve the release when the **Review release request** form appears below the diagram. For the last one, the vague justification is just specific enough that the agent will still try to release it - deny it instead, to see the agent read the denial and notify the vendor of a dispute. Every scenario then reaches a second, independent **Final compliance sign-off** once the agent is done.",
       "type": "text",
       "layout": {
         "row": "Row_scenarios",
@@ -91,9 +91,18 @@
     {
       "label": "Invoice currency",
       "values": [
-        { "label": "USD", "value": "USD" },
-        { "label": "EUR", "value": "EUR" },
-        { "label": "GBP", "value": "GBP" }
+        {
+          "label": "USD",
+          "value": "USD"
+        },
+        {
+          "label": "EUR",
+          "value": "EUR"
+        },
+        {
+          "label": "GBP",
+          "value": "GBP"
+        }
       ],
       "type": "select",
       "layout": {

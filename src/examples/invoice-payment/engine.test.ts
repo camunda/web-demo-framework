@@ -110,16 +110,22 @@ afterAll(() => {
   session?.free();
 });
 
-async function start(seed: Record<string, unknown>): Promise<string> {
+async function start(
+  seed: Record<string, unknown>,
+  opts: { xml?: string } = {},
+): Promise<string> {
   session.reset();
-  session.deploy(invoicePayment.bpmn);
+  session.deploy(opts.xml ?? invoicePayment.bpmn);
   session.createInstance(PROCESS_ID, JSON.stringify(seed));
   const result = await dispatchWorkers(session, workers, { agents });
   return result.reason;
 }
 
 /** Complete the one open user task with `elementId`, then drain again. */
-async function completeTask(elementId: string, variables: Record<string, unknown>): Promise<void> {
+async function completeTask(
+  elementId: string,
+  variables: Record<string, unknown>,
+): Promise<void> {
   const open = await engine.openUserTasks({ processInstanceKey: undefined });
   const task = open.find((t) => t.elementId === elementId);
   if (!task) throw new Error(`no open ${elementId} task to complete`);
@@ -134,6 +140,33 @@ function completedCount(elementId: string): number {
 function currentVariables(): Record<string, unknown> {
   return session.snapshot().instances[0]?.variables ?? {};
 }
+
+describe("invoice-payment — the guardrail, as modelled", () => {
+  /**
+   * The claim the example exists to make: money moves on exactly one path. A
+   * run can only ever show that no *observed* run paid twice; this reads the
+   * diagram and asserts the structure itself, so adding a second way into
+   * `ReleasePayment` fails here even if every scenario still behaves.
+   */
+  it("gives ReleasePayment exactly one incoming flow, from the approved branch", () => {
+    const doc = new DOMParser().parseFromString(invoicePayment.bpmn, "application/xml");
+    const BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    const flows = Array.from(
+      doc.getElementsByTagNameNS(BPMN_NS, "sequenceFlow"),
+    ).filter((f) => f.getAttribute("targetRef") === "ReleasePayment");
+
+    expect(flows.map((f) => f.getAttribute("id"))).toEqual(["Flow_ReleaseApproved"]);
+    expect(flows[0].getAttribute("sourceRef")).toBe("Gateway_ReleaseApproved");
+
+    // And that branch is the conditional one, not the gateway's default —
+    // otherwise it would be the path taken when nothing matched.
+    const gateway = Array.from(doc.getElementsByTagNameNS(BPMN_NS, "exclusiveGateway")).find(
+      (g) => g.getAttribute("id") === "Gateway_ReleaseApproved",
+    );
+    expect(gateway?.getAttribute("default")).not.toBe("Flow_ReleaseApproved");
+    expect(flows[0].getElementsByTagNameNS(BPMN_NS, "conditionExpression")).toHaveLength(1);
+  });
+});
 
 describe("invoice-payment on the live engine — the in-loop human gate", () => {
   it("parks on the release request before any payment is made", async () => {
@@ -199,5 +232,28 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
       .hasCompleted()
       .hasNoIncident()
       .hasCompletedElements("EndEvent_EscalatedForAudit");
+  });
+
+  it("acts on the tool's result, not on the reviewer's form fields", async () => {
+    // The denied branch reports back through a `toolCallResult` output mapping
+    // on `RecordReleaseDenied`. Strip just that mapping: the reviewer's
+    // answer is still sitting in `releaseDecision` and
+    // `releaseReviewerComments` where the agent can see it, but the *tool*
+    // now returns nothing. If the agent disputes anyway it is reading the form
+    // behind the tool's back, and the in-loop contract this example
+    // demonstrates is not what makes it work.
+    const mapping =
+      '<zeebe:output source="=&#34;Payment release denied by reviewer. Comments: &#34; + releaseReviewerComments" target="toolCallResult" />';
+    expect(invoicePayment.bpmn).toContain(mapping);
+    const silent = invoicePayment.bpmn.replace(mapping, "");
+
+    await start(VAGUE_OVERAGE, { xml: silent });
+    await completeTask("ReviewPaymentRelease", {
+      releaseDecision: "deny",
+      releaseReviewerComments: "No documentation.",
+    });
+
+    expect(completedCount("NotifyVendorDispute")).toBe(0);
+    expect(completedCount("ReleasePayment")).toBe(0);
   });
 });

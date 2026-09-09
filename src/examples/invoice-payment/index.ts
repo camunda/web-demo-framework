@@ -137,23 +137,36 @@ const SCRIPTED_AGENT = `async (job) => {
       };
     }
 
-    // Approved: the inner flow releases the payment before the agent hears
-    // back, so wait for the receipt rather than treating the reviewer's click
-    // as the end of the story. Denied: read the reviewer's comments rather
-    // than re-proposing the same amount.
-    if (v.paymentReceipt !== undefined) return { completionConditionFulfilled: true };
-    if (v.releaseDecision === "approve") return { activateElements: [] };
-    if (v.disputeNoticeReceipt === undefined) {
+    // The tool has returned. Everything from here is decided from *its
+    // result* — not from the reviewer's raw form fields, which happen to be
+    // visible in the instance too. That is the whole in-loop contract: the
+    // agent learns what the human decided the same way it learns what any
+    // other tool did, so a denial is information it can act on.
+    if (v.disputeNoticeReceipt !== undefined) return { completionConditionFulfilled: true };
+
+    const results = Array.isArray(v.toolCallResults) ? v.toolCallResults : [];
+    const latest = results.length
+      ? String((results[results.length - 1] || {}).content || "")
+      : String(v.toolCallResult || "");
+
+    if (/released/i.test(latest)) return { completionConditionFulfilled: true };
+
+    if (/denied/i.test(latest)) {
       return {
         variables: {
-          disputeReason:
-            "Payment release denied on review: " +
-            String(v.releaseReviewerComments || "no comments given").trim().replace(/\\.$/, "") +
-            ".",
+          // The tool's own words. Rewriting them here would be the agent
+          // narrating a result it was handed, which is the coupling this
+          // example exists to avoid.
+          disputeReason: latest.replace(/\\s*Comments:\\s*$/, "").trim(),
         },
         activateElements: [{ elementId: "NotifyVendorDispute" }],
       };
     }
+
+    // Asked, but nothing came back to reason about. Stopping is the honest
+    // move: an agent that disputed here would be acting on the reviewer's
+    // form fields behind the tool's back, which is exactly the coupling this
+    // example exists to avoid.
     return { completionConditionFulfilled: true };
   }
 
