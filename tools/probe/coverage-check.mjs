@@ -272,15 +272,20 @@ async function runReceiveTaskFixture() {
     const { processIds } = session.deploy(xml);
     session.createInstance(processIds[0], JSON.stringify({ customerId: "PROBE-3" }));
     const snap = session.snapshot();
-    const waited = snap.messageSubscriptions.length > 0 && snap.completedInstances === 0;
-    // "ok" here means "still behaves as documented", i.e. still broken. Flip
-    // this and the coverage-doc row together if the engine starts waiting.
+    const subscriptions = snap.messageSubscriptions.length;
+    const completed = snap.completedInstances;
+    // Assert the recorded failure exactly — zero subscriptions AND immediate
+    // completion — rather than merely "it didn't wait". A loose negative would
+    // stay green if the engine started opening a subscription but completed
+    // anyway, or opened none and left the instance stuck: both are changes
+    // worth seeing.
+    const stillBroken = subscriptions === 0 && completed === 1;
     record(
       name,
-      !waited,
-      waited
-        ? "the receive task now waits on a subscription — engine fixed; update the coverage doc"
-        : `completed immediately with ${snap.messageSubscriptions.length} subscription(s) and no wait`,
+      stillBroken,
+      stillBroken
+        ? "completed immediately with 0 subscription(s) and no wait"
+        : `behaviour changed — ${subscriptions} subscription(s), ${completed} completed instance(s); re-check the engine and update the coverage doc`,
     );
   } finally {
     session.free();
@@ -330,13 +335,19 @@ async function runAdHocInnerFlowFixture() {
       50,
     );
 
-    // "ok" means "still behaves as recorded" for the chained case: still dropped.
+    // The recorded failure is specifically "the activated tool runs, only its
+    // outgoing flow is dropped" — so assert the tool ran too. Checking only
+    // the follow-up's absence would stay green if activation broke entirely.
+    const chainedRan = seen.has("ChainedTool");
+    const followUpRan = seen.has("ChainedFollowUp");
     record(
       "ad-hoc sub-process: chained sequence flow between tools — NOT followed",
-      !seen.has("ChainedFollowUp"),
-      seen.has("ChainedFollowUp")
-        ? "the follow-up now runs — engine fixed; update the coverage doc and drop the sub-process workaround"
-        : "the activated tool ran, its outgoing sequence flow was dropped",
+      chainedRan && !followUpRan,
+      !chainedRan
+        ? "the activated tool itself never ran — this check no longer measures what it claims"
+        : followUpRan
+          ? "the follow-up now runs — engine fixed; update the coverage doc and drop the sub-process workaround"
+          : "the activated tool ran, its outgoing sequence flow was dropped",
     );
     record(
       "ad-hoc sub-process: embedded sub-process as a compound tool",

@@ -64,7 +64,7 @@
           </zeebe:taskHeaders>
         </bpmn:extensionElements>
       </bpmn:serviceTask>
-      <bpmn:subProcess id="PaymentReleaseGate" name="Request payment release">
+      <bpmn:subProcess id="RequestPaymentRelease" name="Request payment release">
         <bpmn:documentation>Call this whenever you have decided an invoice should be paid and you want to actually release the payment. Provide the USD amount to release and your reasoning. This always pauses for a human reviewer - there is no other way to pay an invoice, and every release needs their approval no matter how confident you are. You get back whether they approved or denied it, and at what amount.</bpmn:documentation>
         <bpmn:extensionElements>
           <zeebe:ioMapping>
@@ -72,25 +72,23 @@
             <zeebe:input source="=fromAi(toolCall.reasoning, &#34;Why you believe this amount should be released.&#34;, &#34;string&#34;)" target="agentReleaseReasoning" />
           </zeebe:ioMapping>
         </bpmn:extensionElements>
-        <bpmn:startEvent id="PaymentReleaseGate_Start">
+        <bpmn:startEvent id="RequestPaymentRelease_Start">
           <bpmn:outgoing>Flow_GateToRequest</bpmn:outgoing>
         </bpmn:startEvent>
-        <bpmn:sequenceFlow id="Flow_GateToRequest" sourceRef="PaymentReleaseGate_Start" targetRef="RequestPaymentRelease" />
-      <bpmn:userTask id="RequestPaymentRelease" name="Request payment release">
-        <bpmn:documentation>Call this whenever you have decided an invoice should be paid and you want to actually release the payment. Provide the USD amount to release and your reasoning. This always pauses for a human reviewer - there is no other way to pay an invoice, and every release needs their approval no matter how confident you are. You get back whether they approved or denied it, and at what amount.</bpmn:documentation>
+        <bpmn:sequenceFlow id="Flow_GateToRequest" sourceRef="RequestPaymentRelease_Start" targetRef="ReviewPaymentRelease" />
+      <bpmn:userTask id="ReviewPaymentRelease" name="Review release request">
+        <bpmn:documentation>The human gate inside the agent's own tool loop. The reviewer sees what the agent proposed and why, and either approves the release or denies it — and the denial is handed straight back to the agent as this tool's result.</bpmn:documentation>
         <bpmn:extensionElements>
           <zeebe:userTask />
           <zeebe:formDefinition formId="payment-release-request" />
           <zeebe:ioMapping>
-            <zeebe:input source="=fromAi(toolCall.proposedAmountUSD, &#34;The USD amount you want to release for this invoice.&#34;, &#34;number&#34;)" target="agentProposedAmountUSD" />
-            <zeebe:input source="=fromAi(toolCall.reasoning, &#34;Why you believe this amount should be released.&#34;, &#34;string&#34;)" target="agentReleaseReasoning" />
             <zeebe:input source="=agentProposedAmountUSD" target="approvedAmountUSD" />
           </zeebe:ioMapping>
         </bpmn:extensionElements>
         <bpmn:incoming>Flow_GateToRequest</bpmn:incoming>
         <bpmn:outgoing>Flow_ToReleaseGateway</bpmn:outgoing>
       </bpmn:userTask>
-      <bpmn:sequenceFlow id="Flow_ToReleaseGateway" sourceRef="RequestPaymentRelease" targetRef="Gateway_ReleaseApproved" />
+      <bpmn:sequenceFlow id="Flow_ToReleaseGateway" sourceRef="ReviewPaymentRelease" targetRef="Gateway_ReleaseApproved" />
       <bpmn:exclusiveGateway id="Gateway_ReleaseApproved" name="Release approved?" default="Flow_ReleaseDenied">
         <bpmn:incoming>Flow_ToReleaseGateway</bpmn:incoming>
         <bpmn:outgoing>Flow_ReleaseApproved</bpmn:outgoing>
@@ -212,13 +210,13 @@
       <bpmndi:BPMNShape id="NotifyVendorDispute_di" bpmnElement="NotifyVendorDispute">
         <dc:Bounds x="300" y="240" width="100" height="80" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="PaymentReleaseGate_di" bpmnElement="PaymentReleaseGate" isExpanded="true">
+      <bpmndi:BPMNShape id="RequestPaymentRelease_di" bpmnElement="RequestPaymentRelease" isExpanded="true">
         <dc:Bounds x="450" y="70" width="680" height="270" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="PaymentReleaseGate_Start_di" bpmnElement="PaymentReleaseGate_Start">
+      <bpmndi:BPMNShape id="RequestPaymentRelease_Start_di" bpmnElement="RequestPaymentRelease_Start">
         <dc:Bounds x="482" y="192" width="36" height="36" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="RequestPaymentRelease_di" bpmnElement="RequestPaymentRelease" bioc:stroke="#0d4372" bioc:fill="#bbdefb" color:background-color="#bbdefb" color:border-color="#0d4372">
+      <bpmndi:BPMNShape id="ReviewPaymentRelease_di" bpmnElement="ReviewPaymentRelease" bioc:stroke="#0d4372" bioc:fill="#bbdefb" color:background-color="#bbdefb" color:border-color="#0d4372">
         <dc:Bounds x="570" y="170" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Gateway_ReleaseApproved_di" bpmnElement="Gateway_ReleaseApproved" isMarkerVisible="true">

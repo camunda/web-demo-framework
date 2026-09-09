@@ -142,7 +142,7 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
     expect(reason).toBe("userTasks");
     await assertThatUserTask(engine, {
       instance: byProcessId(PROCESS_ID),
-      elementId: "RequestPaymentRelease",
+      elementId: "ReviewPaymentRelease",
     }).isCreated();
     // The guardrail: nothing has been paid while the reviewer holds the case.
     expect(completedCount("ReleasePayment")).toBe(0);
@@ -151,7 +151,7 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
 
   it("releases the payment only once a reviewer approves, then closes at compliance sign-off", async () => {
     await start(CLEAN_MATCH);
-    await completeTask("RequestPaymentRelease", {
+    await completeTask("ReviewPaymentRelease", {
       approvedAmountUSD: 4200,
       releaseDecision: "approve",
       releaseReviewerComments: "Matches the PO.",
@@ -179,7 +179,7 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
 
   it("hands a denial back to the agent, which disputes instead of paying", async () => {
     await start(VAGUE_OVERAGE);
-    await completeTask("RequestPaymentRelease", {
+    await completeTask("ReviewPaymentRelease", {
       releaseDecision: "deny",
       releaseReviewerComments: "No documentation for the overage.",
     });

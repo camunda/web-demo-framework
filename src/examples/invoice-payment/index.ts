@@ -16,13 +16,14 @@ import complianceSignoffForm from "./compliance-signoff.form.json";
  *
  * Two different human gates, on purpose:
  *
- * - **In-loop.** `RequestPaymentRelease` is a user task that is itself one of
- *   the agent's tools. The agent asks for a release the same way it calls any
- *   other tool, and gets the reviewer's answer back as that tool's result — so
- *   a denial is something it can reason about and respond to, not an exception
- *   thrown at it. `ReleasePayment` has exactly one incoming flow, from the
- *   approved branch of `Gateway_ReleaseApproved`: money cannot move on any
- *   other path, whatever the model decides or is talked into.
+ * - **In-loop.** `RequestPaymentRelease` is a sub-process the agent calls as
+ *   one of its tools, and the first thing inside it is a user task. The agent
+ *   asks for a release the same way it calls any other tool, and gets the
+ *   reviewer's answer back as that tool's result — so a denial is something it
+ *   can reason about and respond to, not an exception thrown at it.
+ *   `ReleasePayment` has exactly one incoming flow, from the approved branch
+ *   of `Gateway_ReleaseApproved`: money cannot move on any other path,
+ *   whatever the model decides or is talked into.
  * - **Post-hoc.** `HumanTask_ComplianceSignoff` sits outside the agent
  *   entirely and only ever sees `caseOutcome`/`caseSummary` — two values the
  *   agent's output mapping derives from what actually happened
@@ -70,10 +71,14 @@ const SCRIPTED_AGENT = `async (job) => {
   const invoiceUSD =
     currency === "USD" ? Number(v.invoiceAmount) : Number(v.convertedAmountUSD);
   const overage = poAmount > 0 ? (invoiceUSD - poAmount) / poAmount : 0;
+  const pct = (overage * 100).toFixed(1);
   // The prompt's "the invoice notes give a reason for the extra amount". Note
   // it only asks whether a reason was given, not whether it's a good one —
   // that judgement belongs to the reviewer the next tool call pauses for.
   const documented = notes.trim().length > 0;
+  // "Within 2% of the PO amount" is symmetric, so a small underage is a clean
+  // match too — the prompt's later "an invoice amount below the PO" case is
+  // about underages that fall outside this band.
   const withinTolerance = Math.abs(overage) <= 0.02;
   const documentedOverage = overage > 0.02 && overage <= 0.1 && documented;
 
@@ -83,7 +88,7 @@ const SCRIPTED_AGENT = `async (job) => {
     if (v.releaseDecision === undefined) {
       const reasoning = withinTolerance
         ? "Invoice matches the PO within 2%."
-        : "Invoice is " + (overage * 100).toFixed(1) + "% over the PO, and the notes document why.";
+        : "Invoice is " + pct + "% over the PO, and the notes document why.";
       return {
         variables: {
           proposedAmountUSD: invoiceUSD,
@@ -95,7 +100,7 @@ const SCRIPTED_AGENT = `async (job) => {
           agentReleaseReasoning: reasoning,
           approvedAmountUSD: invoiceUSD,
         },
-        activateElements: [{ elementId: "PaymentReleaseGate" }],
+        activateElements: [{ elementId: "RequestPaymentRelease" }],
       };
     }
 
@@ -119,18 +124,19 @@ const SCRIPTED_AGENT = `async (job) => {
     return { completionConditionFulfilled: true };
   }
 
-  // Outside policy — an undocumented overage, more than 10% over, or an
-  // invoice under the PO. No release is proposed at all.
+  // Outside policy — no release is proposed at all. The vendor is told which
+  // rule the invoice actually failed: the notice goes to a real counterparty,
+  // so "no documented reason" had better not be sent for an invoice that came
+  // with one, or for one billed under the PO.
   if (v.disputeNoticeReceipt === undefined) {
+    const failure =
+      overage < 0
+        ? "is " + pct.replace("-", "") + "% below PO " + String(v.poNumber)
+        : overage > 0.1
+          ? "is " + pct + "% over PO " + String(v.poNumber) + ", beyond the 10% ceiling"
+          : "is " + pct + "% over PO " + String(v.poNumber) + " with no reason given in the notes";
     return {
-      variables: {
-        disputeReason:
-          "Invoice is " +
-          (overage * 100).toFixed(1) +
-          "% against PO " +
-          String(v.poNumber) +
-          " with no documented reason in the notes.",
-      },
+      variables: { disputeReason: "Invoice " + failure + "." },
       activateElements: [{ elementId: "NotifyVendorDispute" }],
     };
   }
