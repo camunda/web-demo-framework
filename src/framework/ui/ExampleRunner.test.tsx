@@ -136,6 +136,32 @@ describe("ExampleRunner — a process only a message can start", () => {
     expect(app.trace().join("\n")).toContain("withdrawn by monitoring");
     expect(app.status()).toBe("Completed");
   }, 30_000);
+
+  it("tells two boundary events on the same activity apart", async () => {
+    // The engine reports both subscriptions against `Triage`, so resolving by
+    // the attached activity alone binds both buttons to whichever subscription
+    // comes first. Asserting only one direction would pass or fail on that
+    // ordering — check both, so one of them is wrong however they're ordered.
+    const fire = async (label: string) => {
+      const app = await renderExample(messageStartFixture);
+      await app.run();
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await app.settle();
+      const trace = app.trace().join("\n");
+      cleanup();
+      return trace;
+    };
+
+    const withdrawn = await fire("🚫 The alert is withdrawn");
+    expect(withdrawn).toContain('published "alert-withdrawn"');
+    expect(withdrawn).toContain("withdrawn by monitoring");
+    expect(withdrawn).not.toContain("alert-escalated");
+
+    const escalated = await fire("🔺 The alert is escalated");
+    expect(escalated).toContain('published "alert-escalated"');
+    expect(escalated).toContain("escalated to tier-2");
+    expect(escalated).not.toContain("alert-withdrawn");
+  }, 40_000);
 });
 
 describe("ExampleRunner — when the agent really does give up early", () => {

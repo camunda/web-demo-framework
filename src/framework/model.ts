@@ -131,14 +131,25 @@ export interface ProcessSpec {
    */
   startMessage?: StartMessageSpec;
   /**
-   * Boundary event id → the id of the activity it is attached to.
+   * Every boundary event in this process, with the activity it is attached to.
    *
    * The engine reports an open boundary subscription against the *attached
    * activity*, not the boundary event, so this is what turns "fire
    * `Boundary_SecondAlert`" — which is how a person thinks about it — into the
-   * subscription actually on offer.
+   * subscription actually on offer. `messageName` matters when an activity
+   * carries more than one message boundary: the host alone doesn't tell them
+   * apart.
    */
-  boundaryEventHosts: Record<string, string>;
+  boundaryEvents: BoundaryEventSpec[];
+}
+
+/** A boundary event, and what it is attached to. */
+export interface BoundaryEventSpec {
+  elementId: string;
+  /** The activity's id — what an open subscription is reported against. */
+  attachedTo: string;
+  /** Set for a message boundary event: the `<bpmn:message>` name it waits on. */
+  messageName?: string;
 }
 
 /**
@@ -183,8 +194,8 @@ export interface ModelInfo {
   startFormId?: string;
   /** The primary process's message start event, if it has one. */
   startMessage?: StartMessageSpec;
-  /** Boundary event id → attached activity id, across every process. */
-  boundaryEventHosts: Record<string, string>;
+  /** Every boundary event across every process, with its attached activity. */
+  boundaryEvents: BoundaryEventSpec[];
 }
 
 export interface ParseModelOptions {
@@ -504,13 +515,18 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     : undefined;
   const startMessage = startEvent ? startMessageOf(startEvent) : undefined;
 
-  const boundaryEventHosts: Record<string, string> = {};
+  const boundaryEvents: BoundaryEventSpec[] = [];
   for (const el of Array.from(
     process.getElementsByTagNameNS(BPMN_NS, "boundaryEvent"),
   )) {
     const id = el.getAttribute("id");
     const attachedTo = el.getAttribute("attachedToRef");
-    if (id && attachedTo) boundaryEventHosts[id] = attachedTo;
+    if (!id || !attachedTo) continue;
+    boundaryEvents.push({
+      elementId: id,
+      attachedTo,
+      messageName: messageNameOf(el),
+    });
   }
 
   return {
@@ -521,8 +537,22 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     userTasks,
     startFormId,
     startMessage,
-    boundaryEventHosts,
+    boundaryEvents,
   };
+}
+
+/** The `<bpmn:message>` name an event references, if it references one. */
+function messageNameOf(event: Element): string | undefined {
+  const def = Array.from(event.children).find(
+    (el) => el.namespaceURI === BPMN_NS && el.localName === "messageEventDefinition",
+  );
+  const ref = def?.getAttribute("messageRef");
+  if (!ref) return undefined;
+  return (
+    Array.from(event.ownerDocument.getElementsByTagNameNS(BPMN_NS, "message"))
+      .find((m) => m.getAttribute("id") === ref)
+      ?.getAttribute("name") ?? undefined
+  );
 }
 
 /**
@@ -646,9 +676,6 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
     userTasks: primary.userTasks,
     startFormId: primary.startFormId,
     startMessage: primary.startMessage,
-    boundaryEventHosts: Object.assign(
-      {},
-      ...processes.map((p) => p.boundaryEventHosts),
-    ),
+    boundaryEvents: processes.flatMap((p) => p.boundaryEvents),
   };
 }

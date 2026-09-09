@@ -62,6 +62,29 @@ function isBoundarySubscription(sub: { kind: string }): boolean {
   return sub.kind.toLowerCase().includes("boundary");
 }
 
+/**
+ * The user tasks a human can actually act on right now.
+ *
+ * `state === "Created"` is not enough on its own: an interrupting boundary
+ * event cancels the activity it is attached to, but the cancelled task can
+ * still be reported `Created` indefinitely. Cross-check against the
+ * instance's own active elements, which is what the engine will actually
+ * accept a completion for — otherwise the run stops on a task that no longer
+ * exists, and the page offers its form.
+ */
+function openUserTasksOf(snapshot: Snapshot): Snapshot["userTasks"] {
+  const activeByInstance = new Map(
+    snapshot.instances
+      .filter((i) => !i.completed)
+      .map((i) => [i.key, new Set(i.activeElements.map((el) => el.elementId))]),
+  );
+  return snapshot.userTasks.filter(
+    (t) =>
+      t.state === "Created" &&
+      activeByInstance.get(t.instanceKey)?.has(t.elementId),
+  );
+}
+
 // Both the live diagram (bpmn-js, via `./RuntimeDiagram`) and the code
 // editor (Monaco) are multi-MB dependencies that most of a first paint never
 // needs to touch. Loading them via `React.lazy()` keeps them out of the
@@ -405,22 +428,10 @@ export function ExampleRunner({
     });
   }, []);
 
-  const openUserTask = useMemo(() => {
-    const snap = run.snapshot;
-    if (!snap) return null;
-    // Scoped to instances still running. An interrupting boundary event
-    // cancels the activity it is attached to, but the cancelled task can
-    // still be reported `Created` — so without this the page keeps offering
-    // a form for a task that no longer exists, on a finished instance.
-    const live = new Set(
-      snap.instances.filter((i) => !i.completed).map((i) => i.key),
-    );
-    return (
-      snap.userTasks.find(
-        (t) => t.state === "Created" && live.has(t.instanceKey),
-      ) ?? null
-    );
-  }, [run.snapshot]);
+  const openUserTask = useMemo(
+    () => (run.snapshot ? (openUserTasksOf(run.snapshot)[0] ?? null) : null),
+    [run.snapshot],
+  );
 
   // A run now drives itself onward after a human task (see `submitUserTask`),
   // so the *next* task can open while these still hold the last one's answers.
@@ -552,7 +563,7 @@ export function ExampleRunner({
         snap = round?.snapshot ?? snap;
         const vars = snap.instances[0]?.variables;
         if (vars) setDisplayVars({ ...vars });
-        if (snap.userTasks.some((t) => t.state === "Created")) {
+        if (openUserTasksOf(snap).length > 0) {
           trace({
             kind: "human",
             text: "⏸ waiting for a human — complete the task below to continue",
@@ -587,7 +598,7 @@ export function ExampleRunner({
           // because nothing else can progress would cancel the activity it is
           // attached to every single run, which is the opposite of what the
           // model says. Those are the reader's to fire, via
-          // `HandlerDef.manualControl`'s `kind: "message"` action.
+          // `ExampleDef.messageEvents`.
           const pendingMessage = snap.messageSubscriptions.find(
             (m) => !isBoundarySubscription(m),
           );
@@ -1177,14 +1188,21 @@ export function ExampleRunner({
     if (!declared?.length || !run.snapshot) return [];
     return declared.flatMap((event) => {
       // A boundary event's subscription is reported against the activity it is
-      // attached to, so accept either id — an example names the event.
-      const host = model.boundaryEventHosts[event.elementId];
-      const sub = run.snapshot!.messageSubscriptions.find(
-        (m) => m.elementId === event.elementId || m.elementId === host,
+      // attached to, so an example names the event and this resolves it. Match
+      // the message name too: one activity can carry several message
+      // boundaries, and the host alone would bind every button to whichever
+      // subscription came first.
+      const spec = model.boundaryEvents.find((b) => b.elementId === event.elementId);
+      const sub = run.snapshot!.messageSubscriptions.find((m) =>
+        m.elementId === event.elementId
+          ? true
+          : !!spec &&
+            m.elementId === spec.attachedTo &&
+            (!spec.messageName || m.messageName === spec.messageName),
       );
       return sub ? [{ event, sub }] : [];
     });
-  }, [example.messageEvents, run.snapshot, model.boundaryEventHosts]);
+  }, [example.messageEvents, run.snapshot, model.boundaryEvents]);
 
   /** Publish one, then keep driving — the interrupt is mid-run, not a restart. */
   const publishMessageEvent = useCallback(

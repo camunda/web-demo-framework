@@ -339,7 +339,10 @@ export const invoicePayment: ExampleDef = {
       },
     },
     {
-      label: "Vague justification — 7% over, no reason given",
+      // Not "no reason given": the note is non-empty, so the policy treats it
+      // as documented and the agent still asks. Whether "additional items" is
+      // a good enough reason is the reviewer's call — which is the point.
+      label: "Vague justification — 7% over, reason too thin",
       variables: {
         ...SCENARIO_CLEAN_MATCH,
         invoiceNumber: "INV-10277",

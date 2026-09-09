@@ -23,6 +23,11 @@ const BPMN = `<?xml version="1.0" encoding="UTF-8"?>
       <zeebe:subscription correlationKey="=caseId" />
     </bpmn:extensionElements>
   </bpmn:message>
+  <bpmn:message id="Message_Escalate" name="alert-escalated">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=caseId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
   <bpmn:process id="message-start-fixture" name="Message Start Fixture" isExecutable="true">
     <bpmn:startEvent id="StartEvent_Alert" name="Alert raised">
       <bpmn:messageEventDefinition id="MED_Alert" messageRef="Message_Alert" />
@@ -40,6 +45,22 @@ const BPMN = `<?xml version="1.0" encoding="UTF-8"?>
       <bpmn:messageEventDefinition id="MED_Cancel" messageRef="Message_Cancel" />
       <bpmn:outgoing>Flow_ToWithdrawn</bpmn:outgoing>
     </bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="Boundary_Escalated" name="Escalated" attachedToRef="Triage">
+      <bpmn:messageEventDefinition id="MED_Escalate" messageRef="Message_Escalate" />
+      <bpmn:outgoing>Flow_ToEscalated</bpmn:outgoing>
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_ToEscalated" sourceRef="Boundary_Escalated" targetRef="RecordEscalation" />
+    <bpmn:serviceTask id="RecordEscalation" name="Record the escalation">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="fixture.record-escalation" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToEscalated</bpmn:incoming>
+      <bpmn:outgoing>Flow_EscalationToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_EscalationToEnd" sourceRef="RecordEscalation" targetRef="EndEvent_Escalated" />
+    <bpmn:endEvent id="EndEvent_Escalated" name="Escalated">
+      <bpmn:incoming>Flow_EscalationToEnd</bpmn:incoming>
+    </bpmn:endEvent>
     <bpmn:sequenceFlow id="Flow_ToResolved" sourceRef="Triage" targetRef="EndEvent_Resolved" />
     <bpmn:sequenceFlow id="Flow_ToWithdrawn" sourceRef="Boundary_Withdrawn" targetRef="RecordWithdrawal" />
     <bpmn:serviceTask id="RecordWithdrawal" name="Record the withdrawal">
@@ -77,6 +98,24 @@ const BPMN = `<?xml version="1.0" encoding="UTF-8"?>
       <bpmndi:BPMNShape id="RecordWithdrawal_di" bpmnElement="RecordWithdrawal">
         <dc:Bounds x="410" y="198" width="100" height="80" />
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Boundary_Escalated_di" bpmnElement="Boundary_Escalated">
+        <dc:Bounds x="262" y="140" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="RecordEscalation_di" bpmnElement="RecordEscalation">
+        <dc:Bounds x="410" y="318" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_Escalated_di" bpmnElement="EndEvent_Escalated">
+        <dc:Bounds x="560" y="340" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_ToEscalated_di" bpmnElement="Flow_ToEscalated">
+        <di:waypoint x="280" y="176" />
+        <di:waypoint x="280" y="358" />
+        <di:waypoint x="410" y="358" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_EscalationToEnd_di" bpmnElement="Flow_EscalationToEnd">
+        <di:waypoint x="510" y="358" />
+        <di:waypoint x="560" y="358" />
+      </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_ToTriage_di" bpmnElement="Flow_ToTriage">
         <di:waypoint x="196" y="118" />
         <di:waypoint x="250" y="118" />
@@ -105,6 +144,12 @@ const RECORD_WITHDRAWAL = `async (job, { text, trace }) => {
   return { withdrawnBy: by };
 }`;
 
+const RECORD_ESCALATION = `async (job, { text, trace }) => {
+  const to = text("escalatedTo", "(nobody)");
+  trace("escalated to " + to);
+  return { escalatedTo: to };
+}`;
+
 export const messageStartFixture: ExampleDef = {
   id: "message-start-fixture",
   title: "Message start fixture",
@@ -118,12 +163,25 @@ export const messageStartFixture: ExampleDef = {
       standsInFor: "job worker — record the withdrawal",
       source: RECORD_WITHDRAWAL,
     },
+    {
+      elementId: "RecordEscalation",
+      standsInFor: "job worker — record the escalation",
+      source: RECORD_ESCALATION,
+    },
   ],
+  // Two message boundaries on the *same* activity: the engine reports both
+  // subscriptions against `Triage`, so resolving by host alone would bind
+  // both buttons to whichever came first.
   messageEvents: [
     {
       elementId: "Boundary_Withdrawn",
-      label: "🚫 The alert is withdrawn",
+      label: "\u{1F6AB} The alert is withdrawn",
       variables: { withdrawnBy: "monitoring" },
+    },
+    {
+      elementId: "Boundary_Escalated",
+      label: "\u{1F53A} The alert is escalated",
+      variables: { escalatedTo: "tier-2" },
     },
   ],
 };
