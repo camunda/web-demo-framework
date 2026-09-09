@@ -85,7 +85,25 @@ const SCRIPTED_AGENT = `async (job) => {
 
   const invoiceUSD =
     currency === "USD" ? Number(v.invoiceAmount) : Number(v.convertedAmountUSD);
-  const overage = poAmount > 0 ? (invoiceUSD - poAmount) / poAmount : 0;
+
+  // Nothing can be judged against a PO of zero or less, and a "0% overage"
+  // fallback would read as an exact match and send it to the release path.
+  if (!(poAmount > 0) || !(invoiceUSD > 0)) {
+    if (v.disputeNoticeReceipt !== undefined) return { completionConditionFulfilled: true };
+    return {
+      variables: {
+        disputeReason:
+          "Cannot assess this invoice: PO amount " +
+          String(v.poAmount) +
+          " and invoice amount " +
+          String(v.invoiceAmount) +
+          " must both be greater than zero.",
+      },
+      activateElements: [{ elementId: "NotifyVendorDispute" }],
+    };
+  }
+
+  const overage = (invoiceUSD - poAmount) / poAmount;
   const pct = (overage * 100).toFixed(1);
   // The prompt's "the invoice notes give a reason for the extra amount". Note
   // it only asks whether a reason was given, not whether it's a good one —
@@ -192,6 +210,15 @@ const RELEASE_PAYMENT = `async (job, { num, text, sleep }) => {
   const amount = num("approvedAmountUSD");
   const vendor = text("vendorName", "the vendor");
 
+  // The diagram guarantees a human approved *a* release; it cannot guarantee
+  // the number they left in the box makes sense. A payment rail would reject
+  // this, so this stand-in does too.
+  if (!(amount > 0)) {
+    throw new Error(
+      "Refusing to release " + JSON.stringify(amount) + " USD — the approved amount must be positive."
+    );
+  }
+
   await sleep(300);
 
   return {
@@ -222,6 +249,13 @@ const RECORD_RELEASE_DENIED = `async (job, { text, trace }) => {
   trace("reviewer denied the release");
 
   return {
+    // Provisional: the prompt lets the agent stop here without disputing, and
+    // that path reaches the compliance reviewer with nothing else to report.
+    // NotifyVendorDispute overwrites both if the agent does go on to dispute.
+    caseOutcome: "held",
+    caseSummary:
+      "Release denied on review; no payment made and no dispute filed. Comments: " +
+      (comments || "none given"),
     toolCallResult: "Payment release denied by reviewer. Comments: " + comments,
   };
 }`;

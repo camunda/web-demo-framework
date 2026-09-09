@@ -10,7 +10,7 @@
       "id": "Field_ComplianceHeading"
     },
     {
-      "text": "**Vendor:** {{vendorName}}\n\n**Invoice number:** {{invoiceNumber}}\n\n**PO number:** {{poNumber}}\n\n**PO amount:** {{poAmount}} USD\n\n**Invoice amount:** {{invoiceAmount}} {{invoiceCurrency}}\n\n**Payment release decision:** {{releaseDecision}}\n\n**Approved amount:** {{approvedAmountUSD}} USD\n\n**Release reviewer comments:** {{releaseReviewerComments}}\n\n**Final outcome:** {{caseOutcome}}\n\n**Details:** {{caseSummary}}",
+      "text": "**Vendor:** {{vendorName}}\n\n**Invoice number:** {{invoiceNumber}}\n\n**PO number:** {{poNumber}}\n\n**PO amount:** {{poAmount}} USD\n\n**Invoice amount:** {{invoiceAmount}} {{invoiceCurrency}}\n\n**Payment release decision:** {{releaseDecision}}\n\n**Amount put to the reviewer:** {{approvedAmountUSD}} USD\n\n**Release reviewer comments:** {{releaseReviewerComments}}\n\n**Final outcome:** {{caseOutcome}}\n\n**Details:** {{caseSummary}}",
       "type": "text",
       "layout": {
         "row": "Row_findings",
@@ -21,8 +21,14 @@
     {
       "label": "Compliance decision",
       "values": [
-        { "label": "Confirm - case closed", "value": "confirm" },
-        { "label": "Escalate for audit", "value": "escalate" }
+        {
+          "label": "Confirm - case closed",
+          "value": "confirm"
+        },
+        {
+          "label": "Escalate for audit",
+          "value": "escalate"
+        }
       ],
       "type": "radio",
       "layout": {

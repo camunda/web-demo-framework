@@ -234,6 +234,19 @@ export function ExampleRunner({
   );
   const model = draft.model;
 
+  /**
+   * The agent host this page presents: its prompts, its tools, its brain
+   * picker, its source tab.
+   *
+   * `model.agent` is only the *primary* process's first host, so a diagram
+   * whose agent lives in a called process has none — and every gate keyed on
+   * it would hide the agent that is about to run, telling the reader "no agent
+   * in this model" while the scripted source drives one. Falls back to the
+   * first host found anywhere. (Which host *runs* is not this decision:
+   * `beginRun` registers a handler for every one of them.)
+   */
+  const displayAgent = model.agent ?? model.agents[0] ?? null;
+
   // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
   // not `example.bpmn` directly — so what runs and what's shown is exactly
   // what the diagnostics above are about.
@@ -273,7 +286,7 @@ export function ExampleRunner({
   );
 
   const [activeTab, setActiveTab] = useState<string>(
-    model.agent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
+    displayAgent ? AGENT_TAB : (example.handlers[0]?.elementId ?? ""),
   );
   // Which preset the segmented picker shows as chosen. Derived from the live
   // payload rather than held as state, so editing the start form deselects a
@@ -461,14 +474,14 @@ export function ExampleRunner({
    */
   const unrunTools = useMemo(() => {
     const required = example.requiredTools;
-    if (!model.agent || !run.snapshot || !required?.length) return [];
+    if (!displayAgent || !run.snapshot || !required?.length) return [];
     const completed = new Map(
       run.snapshot.elementStats.map((s) => [s.elementId, s.completed]),
     );
-    return model.agent.tools.filter(
+    return displayAgent.tools.filter(
       (t) => required.includes(t.elementId) && (completed.get(t.elementId) ?? 0) === 0,
     );
-  }, [model.agent, run.snapshot, example.requiredTools]);
+  }, [displayAgent, run.snapshot, example.requiredTools]);
 
   /**
    * True while the open human task is one of the agent's own tools (or sits
@@ -476,17 +489,17 @@ export function ExampleRunner({
    * nothing about its tool use can be judged yet.
    */
   const openUserTaskIsAgentTool = useMemo(() => {
-    if (!openUserTask || !model.agent) return false;
-    const toolIds = new Set(model.agent.tools.map((t) => t.elementId));
+    if (!openUserTask || !displayAgent) return false;
+    const toolIds = new Set(displayAgent.tools.map((t) => t.elementId));
     if (toolIds.has(openUserTask.elementId)) return true;
     // A compound tool's inner elements are tools of that tool, not of the
     // host, so they never appear in `agent.tools` — match them by the host's
     // own completion instead: an agent still running hasn't finished.
     const hostCompleted =
-      run.snapshot?.elementStats.find((s) => s.elementId === model.agent!.elementId)
+      run.snapshot?.elementStats.find((s) => s.elementId === displayAgent.elementId)
         ?.completed ?? 0;
     return hostCompleted === 0;
-  }, [openUserTask, model.agent, run.snapshot]);
+  }, [openUserTask, displayAgent, run.snapshot]);
   const openUserTaskSpec = openUserTask
     ? model.userTasks.find((u) => u.elementId === openUserTask.elementId)
     : undefined;
@@ -886,7 +899,7 @@ export function ExampleRunner({
     trace({
       kind: "start",
       text: `Starting "${pid}" — ${
-        model.agent
+        displayAgent
           ? brain.kind === "scripted" || !brain.chat
             ? "scripted brain"
             : `live brain (${brain.modelInUse ?? brain.kind})`
@@ -907,6 +920,18 @@ export function ExampleRunner({
         elementId: model.startMessage.elementId,
       });
       snap = run.correlateMessage(messageName, key, JSON.stringify(seed));
+      // Publishing a start message that matches nothing is a legitimate
+      // outcome, not an error — an unreadable correlation expression resolves
+      // to a key no subscription has (see `resolveCorrelationKey`). It leaves
+      // a snapshot with no instance at all, so say so rather than letting the
+      // run look merely paused.
+      if (snap && snap.instances.length === 0) {
+        trace({
+          kind: "error",
+          text: `▶ nothing started — no start subscription matched key "${key}". Fix the input or the correlation key and press Run again.`,
+          elementId: model.startMessage.elementId,
+        });
+      }
     } else {
       snap = run.createInstance(pid, JSON.stringify(seed));
     }
@@ -939,8 +964,17 @@ export function ExampleRunner({
    * `redeploy` and only becomes non-null once `createInstance` runs, and
    * `reset()` (Reset) nulls it again — so this same check is what makes
    * Reset return the page to its pre-run state.
+   *
+   * An instance has to actually exist, not just a snapshot: publishing a start
+   * message that correlates with nothing leaves a snapshot holding no
+   * instances, and treating that as resumable would make every subsequent Run
+   * drive an empty snapshot instead of republishing — a dead end only Reset
+   * could clear.
    */
-  const canResume = !!run.snapshot && run.snapshot.completedInstances < 1;
+  const canResume =
+    !!run.snapshot &&
+    run.snapshot.instances.length > 0 &&
+    run.snapshot.completedInstances < 1;
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
@@ -1321,21 +1355,21 @@ export function ExampleRunner({
         )}
       </div>
 
-      {!compact && (model.agent || example.imageInput) && (
+      {!compact && (displayAgent || example.imageInput) && (
         <CollapsibleCard
           sectionId="brain"
           className="brain-card"
           data-tour={TOUR_ANCHOR.brainPanel}
           title="Agent brain"
           description={
-            model.agent
-              ? `What drives “${model.agent.label}”. The model recommends; the process governs.`
+            displayAgent
+              ? `What drives “${displayAgent.label}”. The model recommends; the process governs.`
               : "What reads the image. The model recommends; the process governs."
           }
         >
           <BrainPanel
             brain={brain}
-            showText={!!model.agent}
+            showText={!!displayAgent}
             showVision={!!example.imageInput}
           />
         </CollapsibleCard>
@@ -1530,7 +1564,7 @@ export function ExampleRunner({
             elementStats={run.snapshot?.elementStats}
             incidents={run.snapshot?.incidents}
             labelFor={elementLabels}
-            hasAgent={!!model.agent}
+            hasAgent={!!displayAgent}
             variables={
               <div className="vars-block" data-tour={TOUR_ANCHOR.variablesPanel}>
                 <div className="vars-head">Instance variables</div>
@@ -1564,7 +1598,7 @@ export function ExampleRunner({
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
                   <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
-                  {model.agent && (
+                  {displayAgent && (
                     <TabsTrigger value={AGENT_TAB}>
                       agent (scripted)
                     </TabsTrigger>
@@ -1601,10 +1635,10 @@ export function ExampleRunner({
                   <ModelEditor value={bpmn} onChange={setBpmn} />
                 </TabsContent>
 
-                {model.agent && (
+                {displayAgent && (
                   <TabsContent value={AGENT_TAB}>
                     <div className="editor-meta">
-                      <strong>{model.agent.label}</strong>
+                      <strong>{displayAgent.label}</strong>
                       <code>
                         {brain.kind === "scripted" || !brain.chat
                           ? "in use"
@@ -1684,7 +1718,7 @@ export function ExampleRunner({
             </Suspense>
           </CollapsibleCard>
 
-          {model.agent && (
+          {displayAgent && (
             <CollapsibleCard
               sectionId="tools"
               defaultOpen={false}
@@ -1697,7 +1731,7 @@ export function ExampleRunner({
               }
             >
               <ul className="tool-list">
-                {model.agent.tools.map((t) => (
+                {displayAgent.tools.map((t) => (
                   <li key={t.elementId}>
                     <code>{t.elementId}</code>
                     <span> — {t.documentation || t.label}</span>

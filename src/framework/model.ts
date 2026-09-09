@@ -549,7 +549,7 @@ export function resolveCorrelationKey(
   const expr = expression.trim().replace(/^=/, "").trim();
 
   const literal = expr.match(/^"((?:[^"\\]|\\.)*)"$/);
-  if (literal) return literal[1].replace(/\\"/g, '"');
+  if (literal) return unescapeFeelString(literal[1]);
 
   if (/^[A-Za-z_$][\w$]*$/.test(expr)) {
     const value = variables[expr];
@@ -557,6 +557,29 @@ export function resolveCorrelationKey(
   }
 
   return expr;
+}
+
+/**
+ * The escape sequences a FEEL string literal can carry. The engine evaluates
+ * the literal, so a key published in its still-escaped form simply wouldn't
+ * correlate — a backslash or a tab in a correlation key is unusual, but
+ * failing to start with no explanation is not a good way to find that out.
+ */
+function unescapeFeelString(literal: string): string {
+  return literal.replace(/\\(["'\\/nrt]|u[0-9a-fA-F]{4})/g, (_match, escape: string) => {
+    switch (escape[0]) {
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      case "u":
+        return String.fromCharCode(parseInt(escape.slice(1), 16));
+      default:
+        return escape;
+    }
+  });
 }
 
 export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo {

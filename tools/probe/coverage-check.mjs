@@ -245,12 +245,21 @@ async function runMessageBoundaryFixture() {
     const snap = session.correlateMessage("probe-cancel", "PROBE-9", "{}");
     const interrupted = snap.takenSequenceFlows.some((f) => f.from === "MessageBoundary");
     const tookHappyPath = snap.takenSequenceFlows.some((f) => f.from === "LongWork");
+    // `ExampleRunner` tells a boundary subscription apart from a wait state by
+    // looking for "boundary" in `kind`, and refuses to auto-correlate the
+    // former. If an engine bump renames or drops that discriminator while
+    // boundary routing still works, every ordinary run would start firing
+    // interrupting boundaries on its own — so the contract is asserted, not
+    // merely printed.
+    const discriminated = kind.toLowerCase().includes("boundary");
     record(
       name,
-      interrupted && !tookHappyPath,
-      interrupted
-        ? `routed through the boundary (subscription kind: "${kind}")`
-        : "the boundary path was not taken",
+      interrupted && !tookHappyPath && discriminated,
+      !discriminated
+        ? `routing works but the subscription kind is "${kind}" — no longer identifies a boundary, and ExampleRunner's isBoundarySubscription depends on that`
+        : interrupted
+          ? `routed through the boundary (subscription kind: "${kind}")`
+          : "the boundary path was not taken",
     );
   } finally {
     session.free();
@@ -311,7 +320,7 @@ async function runAdHocInnerFlowFixture() {
     const { processIds } = session.deploy(xml);
     session.createInstance(processIds[0], "{}");
     let turn = 0;
-    await driveToQuiescence(
+    const { snapshot } = await driveToQuiescence(
       session,
       {
         "probe-chained-tool": worker,
@@ -349,12 +358,20 @@ async function runAdHocInnerFlowFixture() {
           ? "the follow-up now runs — engine fixed; update the coverage doc and drop the sub-process workaround"
           : "the activated tool ran, its outgoing sequence flow was dropped",
     );
+    // Both inner workers running isn't the claim — the workaround relies on
+    // the compound tool *finishing* and handing control back, so a run that
+    // ran both tasks and then stalled or incidented has to fail this.
+    const finishedCleanly =
+      snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+    const compoundDrove = seen.has("CompoundInner") && seen.has("CompoundFollowUp");
     record(
       "ad-hoc sub-process: embedded sub-process as a compound tool",
-      seen.has("CompoundInner") && seen.has("CompoundFollowUp"),
-      seen.has("CompoundFollowUp")
-        ? "the compound tool's whole inner flow was driven"
-        : `only ${[...seen].join(", ") || "nothing"} ran`,
+      compoundDrove && finishedCleanly,
+      !compoundDrove
+        ? `only ${[...seen].join(", ") || "nothing"} ran`
+        : finishedCleanly
+          ? "the compound tool's whole inner flow was driven, and the instance completed"
+          : `inner flow ran but the instance did not complete cleanly: ${JSON.stringify(snapshot.incidents)}`,
     );
   } finally {
     session.free();

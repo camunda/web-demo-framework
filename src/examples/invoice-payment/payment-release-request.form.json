@@ -29,14 +29,21 @@
       "id": "Field_ApprovedAmount",
       "key": "approvedAmountUSD",
       "validate": {
-        "required": true
+        "required": true,
+        "min": 0.01
       }
     },
     {
       "label": "Your decision",
       "values": [
-        { "label": "Approve release", "value": "approve" },
-        { "label": "Deny release", "value": "deny" }
+        {
+          "label": "Approve release",
+          "value": "approve"
+        },
+        {
+          "label": "Deny release",
+          "value": "deny"
+        }
       ],
       "type": "radio",
       "layout": {

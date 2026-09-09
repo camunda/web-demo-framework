@@ -480,6 +480,15 @@ describe("resolveCorrelationKey", () => {
     expect(resolveCorrelationKey('="fixed-key"', {})).toBe("fixed-key");
   });
 
+  it("decodes every escape a FEEL literal can carry, not just the quote", () => {
+    // The engine evaluates the literal, so a key still carrying `\\t` would
+    // simply never correlate.
+    expect(resolveCorrelationKey('="a\\tb"', {})).toBe("a\tb");
+    expect(resolveCorrelationKey('="a\\\\b"', {})).toBe("a\\b");
+    expect(resolveCorrelationKey('="a\\nb"', {})).toBe("a\nb");
+    expect(resolveCorrelationKey('="say \\"hi\\""', {})).toBe('say "hi"');
+  });
+
   it("stringifies a non-string variable rather than dropping it", () => {
     expect(resolveCorrelationKey("=orderId", { orderId: 42 })).toBe("42");
   });
