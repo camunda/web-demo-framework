@@ -1,4 +1,5 @@
 import type { ExampleDef } from "../../framework/types";
+import meta from "./meta";
 import { createTemplateMap, templateNameFromPath } from "../../framework/templates";
 import { complianceTour } from "./tour";
 import bpmn from "./model.bpmn?raw";
@@ -204,16 +205,7 @@ const NOTIFY_EXPORT_TEAM = `async (job, { sleep }) => {
 }`;
 
 export const seedExportCompliance: ExampleDef = {
-  id: "seed-export-compliance",
-  title: "Seed export compliance agent",
-  blurb:
-    "An AI agent picks its own tools to check a shipment, then a gateway routes on its decision — cleared shipments notify the export team, flagged ones go to a human. The LLM recommends; the BPMN process governs.",
-  hero: {
-    headline: "The LLM *recommends*. The process *governs*.",
-    lede: "An agentic ad-hoc sub-process chooses its own compliance checks, but the gateway after it — not the model — decides whether a shipment ships or goes to a human.",
-    tagline: "Anatomy of an enterprise agent",
-  },
-  docsUrl: "https://camunda.com/blog/agentic-ai/",
+  ...meta,
   bpmn,
   forms: {
     "seed-export-shipment-ready": shipmentReadyForm,
@@ -267,5 +259,5 @@ export const seedExportCompliance: ExampleDef = {
       standsInFor: "REST connector — httpbin.io",
       source: NOTIFY_EXPORT_TEAM,
     },
-  ],
+  ]
 };

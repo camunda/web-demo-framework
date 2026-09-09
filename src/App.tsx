@@ -1,13 +1,13 @@
 import { AppHeader, Button } from "@camunda/design-system";
-import { Fragment } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ExampleRunner } from "./framework/ui/ExampleRunner";
-import { EXAMPLES } from "./examples";
+import { EXAMPLES, loadExample } from "./examples";
 import { useRoute } from "./framework/useRoute";
 import { examplePath, navigate } from "./framework/routing";
 import { readDeepLinkState } from "./framework/deepLink";
 import { readTourParam } from "./framework/tour";
 import { useEmbedHeightReporter } from "./framework/embedHeight";
-import type { ExampleHero } from "./framework/types";
+import type { ExampleDef, ExampleHero } from "./framework/types";
 
 /** The hero shown for an example that doesn't supply one of its own. */
 const DEFAULT_HERO: ExampleHero = {
@@ -62,6 +62,33 @@ export function App() {
 
   const activeId = route.kind === "example" ? route.id : EXAMPLES[0].id;
   const example = EXAMPLES.find((e) => e.id === activeId) ?? EXAMPLES[0];
+
+  // The card copy is already here; the model, forms and handler source are
+  // fetched only for the example actually being opened (see `loadExample`).
+  // One slot, tagged with the id it belongs to: a load can't half-replace an
+  // earlier one, and the tag keeps the previous example's outcome off the new
+  // example's page for the commit before this effect runs.
+  const [loaded, setLoaded] = useState<
+    { id: string; def: ExampleDef } | { id: string; error: string } | null
+  >(null);
+  useEffect(() => {
+    let cancelled = false;
+    const id = example.id;
+    loadExample(id)
+      .then((def) => {
+        if (!cancelled) setLoaded({ id, def });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setLoaded({ id, error: e instanceof Error ? e.message : String(e) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [example.id]);
+
+  const active = loaded?.id === example.id ? loaded : null;
+
   // Split the gallery nav by `group` — existing scenario examples (no
   // `group`, or `group: "scenario"`) render exactly as before; `learn-bpmn`
   // examples get their own visibly-labelled section.
@@ -147,14 +174,22 @@ export function App() {
         )}
       </div>
       {/* Keyed so switching examples remounts with fresh editor/run state. */}
-      <ExampleRunner
-        key={example.id}
-        example={example}
-        compact={compact}
-        autostart={autostart}
-        initialBrainKind={initialBrainKind}
-        initialTourId={initialTourId}
-      />
+      {active && "error" in active ? (
+        <p className="example-load-error" role="alert">
+          Couldn't load “{example.title}” — {active.error}
+        </p>
+      ) : active ? (
+        <ExampleRunner
+          key={active.def.id}
+          example={active.def}
+          compact={compact}
+          autostart={autostart}
+          initialBrainKind={initialBrainKind}
+          initialTourId={initialTourId}
+        />
+      ) : (
+        <p className="form-fallback">Loading {example.title}…</p>
+      )}
     </>
   );
 

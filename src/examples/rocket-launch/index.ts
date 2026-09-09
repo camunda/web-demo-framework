@@ -1,4 +1,5 @@
 import type { ExampleDef } from "../../framework/types";
+import meta from "./meta";
 import bpmn from "./model.bpmn?raw";
 
 /**
@@ -44,10 +45,7 @@ const LAUNCH_ROCKET = `async (job, { text, num, sleep, trace }) => {
 }`;
 
 export const rocketLaunch: ExampleDef = {
-  id: "rocket-launch",
-  title: "Rocket launch",
-  blurb:
-    "The getting-started rocket launch, boiled down to one service task: launch. The smallest possible example, and the smallest possible test of the framework's extensibility.",
+  ...meta,
   bpmn,
   seed: { missionName: "Apollo 11", destination: "the Moon", fuelLevel: 100 },
   scenarios: [
@@ -66,5 +64,5 @@ export const rocketLaunch: ExampleDef = {
       standsInFor: "job worker — launch-rocket",
       source: LAUNCH_ROCKET,
     },
-  ],
+  ]
 };

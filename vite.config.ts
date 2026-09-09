@@ -252,6 +252,13 @@ export default defineConfig({
           if (facadeId.includes("/framework/ui/ModelEditor.tsx")) {
             return "assets/vendor-modeler-[hash].js";
           }
+          // One chunk per example manifest (see `loadExample`). Named after
+          // the folder because every one of them is `index.ts`, so the default
+          // would give fifteen indistinguishable `index-[hash].js` files.
+          const example = facadeId.match(/\/src\/examples\/([^/]+)\/index\.ts$/);
+          if (example) {
+            return `assets/example-${example[1]}-[hash].js`;
+          }
           return "assets/[name]-[hash].js";
         },
       },

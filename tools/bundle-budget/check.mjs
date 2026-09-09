@@ -33,15 +33,21 @@ const manifestPath = path.join(distDir, ".vite", "manifest.json");
  * #8 adds a separate embed bundle, split this into two real entries here.
  *
  * The initial-JS budget dropped from 300 to 240 when `@bpmn-io/form-js-viewer`
- * moved behind a `lazy()` boundary (actual: ~204 kB). A budget left at the old
- * ceiling would let that 96 kB of headroom be spent again without anyone
- * noticing — which is how it went over in the first place. ~36 kB of slack is
- * deliberate: enough for ordinary feature work, not enough to absorb another
- * multi-hundred-kB dependency landing on the eager path.
+ * moved behind a `lazy()` boundary, then from 240 to 215 when example payloads
+ * did (`src/examples/index.ts` — the gallery imports `meta.ts` eagerly and the
+ * manifest on demand, actual: ~202 kB). A budget left at the old ceiling would
+ * let that headroom be spent again without anyone noticing — which is how it
+ * went over in the first place. ~13 kB of slack is deliberate: enough for
+ * ordinary feature work, not enough to absorb another multi-hundred-kB
+ * dependency landing on the eager path.
+ *
+ * Note what is *not* in here any more: adding an example. Its model, forms and
+ * handler source are fetched only when that example is opened, so a new one
+ * costs the initial bundle nothing and this number should not move.
  */
 const BUDGETS_KB = {
-  "gallery-initial-js": 240,
-  "embed-initial-js": 240,
+  "gallery-initial-js": 215,
+  "embed-initial-js": 215,
   "monaco-on-demand": 950,
   "webllm-on-demand": 2200,
   // The engine's worker bundle — a second copy of WebLLM, fetched only when a

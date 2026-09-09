@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseModel } from "../framework/model";
 import { createTemplateMap, substituteTemplates } from "../framework/templates";
-import { EXAMPLES } from "./index";
+import { EXAMPLES, loadExample } from "./index";
 
 /**
  * Every example model, as raw XML. `import.meta.glob` with `eager` so this
@@ -53,9 +53,10 @@ describe("example models", () => {
    * Only element ids the prompt actually mentions are checked, so ordinary
    * prose is left alone.
    */
-  it.each(EXAMPLES.map((e) => [e.id, e] as const))(
+  it.each(EXAMPLES.map((e) => e.id))(
     "%s prompts only name callable tools",
-    (_id, example) => {
+    async (id) => {
+      const example = await loadExample(id);
       const { result: xml } = substituteTemplates(
         example.bpmn,
         createTemplateMap(example.templates),
@@ -79,4 +80,28 @@ describe("example models", () => {
       }
     },
   );
+
+  /**
+   * The gallery reads `meta.ts` and the runner reads `index.ts`, so a card
+   * could advertise one thing and the page open another. Nothing else would
+   * catch that: both halves typecheck fine while disagreeing.
+   */
+  it.each(EXAMPLES.map((e) => e.id))("%s's card matches its manifest", async (id) => {
+    const meta = EXAMPLES.find((e) => e.id === id)!;
+    const { bpmn: _bpmn, ...def } = await loadExample(id);
+
+    for (const key of ["id", "title", "blurb", "hero", "docsUrl", "group"] as const) {
+      expect(def[key], `${id}.${key} differs between meta.ts and index.ts`).toEqual(
+        meta[key],
+      );
+    }
+  });
+
+  it("offers every example's manifest to the lazy loader", async () => {
+    // A card with no loadable manifest is a dead tile: it renders, routes, and
+    // then fails only once someone clicks it.
+    await expect(
+      Promise.all(EXAMPLES.map((e) => loadExample(e.id))),
+    ).resolves.toHaveLength(EXAMPLES.length);
+  });
 });

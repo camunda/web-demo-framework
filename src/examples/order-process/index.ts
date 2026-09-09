@@ -1,4 +1,5 @@
 import type { ExampleDef } from "../../framework/types";
+import meta from "./meta";
 import bpmn from "./model.bpmn?raw";
 
 /**
@@ -38,12 +39,7 @@ const SHIP_ITEMS = `async (job, { sleep, trace }) => {
 }`;
 
 export const orderProcess: ExampleDef = {
-  id: "order-process",
-  title: "Order process with service workers",
-  blurb:
-    "The getting-started order process: check inventory, charge payment, ship. No agent and no human step — the same runner, driven entirely by what's in the diagram.",
-  docsUrl:
-    "https://docs.camunda.io/docs/next/guides/getting-started-orchestration-cluster/",
+  ...meta,
   bpmn,
   seed: { item: "camunda-t-shirt", quantity: 3 },
   handlers: [
@@ -62,5 +58,5 @@ export const orderProcess: ExampleDef = {
       standsInFor: "job worker — ship-items",
       source: SHIP_ITEMS,
     },
-  ],
+  ]
 };
