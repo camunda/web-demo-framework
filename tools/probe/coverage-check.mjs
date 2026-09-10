@@ -416,6 +416,17 @@ async function runAdHocBoundaryCancelFixture() {
       activateElements: [{ elementId: "AskHuman", variables: {} }],
     });
 
+    // The bug only appears with a tool actually activated, so a silent
+    // activation regression would otherwise let this check report the gap as
+    // still present while exercising nothing.
+    const armed = session
+      .snapshot()
+      .userTasks.some((t) => t.elementId === "AskHuman" && t.state === "Created");
+    if (!armed) {
+      record(name, false, "the agent's tool never opened, so nothing was there to survive the boundary");
+      return;
+    }
+
     const snap = session.correlateMessage("probe-cancel", "PROBE-11", "{}");
     const fired = snap.takenSequenceFlows.some((f) => f.from === "Interrupt");
     const active = (snap.instances[0]?.activeElements ?? []).map(
@@ -469,11 +480,16 @@ async function runAgentInterruptFixture() {
 
     // Pin the case that is meant to be interrupted, and its open task, *before*
     // publishing. #1156 means the same publish also opens a second instance, so
-    // looking for "an instance that completed" afterwards could find either.
+    // looking for "an instance that completed" afterwards could find either —
+    // and a silent activation regression would leave nothing to cancel, which
+    // the wrapper would then "pass" by completing normally.
     const armed = session.snapshot();
     const caseKey = armed.instances[0]?.key;
     const askHuman = armed.userTasks.find(
-      (t) => t.elementId === "AskHuman" && t.instanceKey === caseKey,
+      (t) =>
+        t.elementId === "AskHuman" &&
+        t.instanceKey === caseKey &&
+        t.state === "Created",
     );
     if (!caseKey || !askHuman) {
       record(
