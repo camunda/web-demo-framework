@@ -39,8 +39,16 @@ export function describeRound(
   flowsThisRound: SequenceFlowDto[],
   labelFor: LabelFor,
   manualJobTypes?: { has(jobType: string): boolean },
+  /**
+   * Whether the instance the *run* started has finished. A run that delegates
+   * (a call activity) has more than one instance, and a child finishing is not
+   * the run finishing — see `rootInstanceOf` in `ExampleRunner`. Omitted for a
+   * single-process run, where the global count says the same thing.
+   */
+  runCompleted?: boolean,
 ): TraceEntry {
   const snap = round.snapshot;
+  const completed = runCompleted ?? snap.completedInstances >= 1;
   // A user task can open in the very same round that also handled jobs (or
   // that stopped on a manually-held job) — check once up front so both
   // branches below can fold it in rather than hiding it behind a generic
@@ -58,7 +66,7 @@ export function describeRound(
     // A round can both handle jobs *and* finish the instance in the same
     // pass — surface that explicitly as "done" rather than a plain "step"
     // entry, so a final round while stepping doesn't hide the completion.
-    if (snap.completedInstances >= 1) {
+    if (completed) {
       return {
         kind: "done",
         text:
@@ -87,7 +95,14 @@ export function describeRound(
 
   switch (round.reason) {
     case "completed":
-      return { kind: "done", text: "✅ process instance completed" };
+      // The engine settles with this reason when an instance finished, which
+      // for a delegating run can be a child while the caller is still going.
+      return completed
+        ? { kind: "done", text: "✅ process instance completed" }
+        : {
+            kind: "step",
+            text: "⏭ a delegated process finished — the calling process is still running",
+          };
     case "userTasks":
       return { kind: "human", text: humanWaitingText };
     case "timers":

@@ -6,6 +6,7 @@ import rocketLaunchMeta from "./rocket-launch/meta";
 import orderProcessBoundaryEventsMeta from "./order-process-boundary-events/meta";
 import plateRecognitionMeta from "./plate-recognition/meta";
 import invoicePaymentMeta from "./invoice-payment/meta";
+import bankSupportMeta from "./bank-support/meta";
 
 /**
  * The gallery is a list of cards; only the example a reader actually opens
@@ -27,6 +28,7 @@ const scenarioMeta: ExampleMeta[] = [
   seedExportComplianceMeta,
   loanOriginationMeta,
   invoicePaymentMeta,
+  bankSupportMeta,
   orderProcessMeta,
   orderProcessBoundaryEventsMeta,
   plateRecognitionMeta,

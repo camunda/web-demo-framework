@@ -88,6 +88,46 @@ describe("describeRound", () => {
     expect(entry.text).toMatch(/completed/i);
   });
 
+  /**
+   * A delegating run has more than one instance, and the specialist finishes
+   * long before the process that called it. Calling that "process instance
+   * completed" while the caller is still working contradicts the status badge
+   * and tells the reader the run is over when it isn't.
+   */
+  describe("when the run's own instance has not finished", () => {
+    it("does not call a finished child the end of the run", () => {
+      const round: RoundResult = {
+        snapshot: snap({ completedInstances: 1 }),
+        handled: 0,
+        reason: "completed",
+      };
+      const entry = describeRound(round, [], labelFor, undefined, false);
+      expect(entry.kind).toBe("step");
+      expect(entry.text).toMatch(/delegated process finished/i);
+      expect(entry.text).not.toMatch(/process instance completed/i);
+    });
+
+    it("does not report completion on a round that also handled jobs", () => {
+      const round: RoundResult = {
+        snapshot: snap({ completedInstances: 1 }),
+        handled: 1,
+      };
+      const entry = describeRound(round, [], labelFor, undefined, false);
+      expect(entry.kind).toBe("step");
+      expect(entry.text).not.toMatch(/completed/i);
+    });
+
+    it("still reports completion once the run's own instance finishes", () => {
+      const round: RoundResult = {
+        snapshot: snap({ completedInstances: 2 }),
+        handled: 1,
+      };
+      const entry = describeRound(round, [], labelFor, undefined, true);
+      expect(entry.kind).toBe("done");
+      expect(entry.text).toMatch(/completed/i);
+    });
+  });
+
   it("reports waiting on a human task instead of no-op'ing", () => {
     const round: RoundResult = {
       snapshot: snap(),
