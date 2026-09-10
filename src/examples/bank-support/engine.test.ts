@@ -253,6 +253,23 @@ describe("bank-support on the live engine", () => {
   });
 
   /**
+   * The account agent decides whether to call its tool at all, so a written
+   * form it fails to recognise is not a validation failure — it is a customer
+   * told their IBAN wasn't checked when it never was. Both of these are how
+   * IBANs are actually written down.
+   */
+  it.each([
+    ["lowercase", "Is de89370400440532013000 a valid account number?"],
+    ["printed in groups of four", "Is DE89 3704 0044 0532 0130 00 a valid account number?"],
+  ])("validates an IBAN written %s", async (_label, customerRequest) => {
+    await start({ customerRequest });
+
+    expect(completedCount("ValidateIban")).toBe(1);
+    expect(summarySaw.accountResolution).toMatchObject({ status: "resolved" });
+    expect(completedCount("NotifyCustomer")).toBe(1);
+  });
+
+  /**
    * The orchestrator can decline to delegate — nothing in the message matched a
    * specialist. Closing the case then would mean auto-answering a customer no
    * specialist looked at, so the summary says so and it goes to a human.

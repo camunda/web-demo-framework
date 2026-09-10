@@ -209,7 +209,18 @@ const SCRIPTED_AGENT = `async (job) => {
       };
     }
 
-    const iban = (request.match(/\\b([A-Z]{2}[0-9A-Z]{13,32})\\b/) || [])[1];
+    // Case-insensitive, and tolerant of the four-character grouping IBANs are
+    // conventionally printed in ("DE89 3704 0044 …"). Requiring the canonical
+    // contiguous uppercase form would report "no identifier given" for one
+    // that is plainly there, and the customer would be told it wasn't checked.
+    // The grouped pattern is deliberately strict about group sizes so it stops
+    // at the end of the number instead of swallowing the words after it.
+    const compact = request.match(/\\b([A-Za-z]{2}[0-9A-Za-z]{13,32})\\b/);
+    const grouped = request.match(
+      /\\b([A-Za-z]{2}[0-9]{2}(?:[ -][0-9A-Za-z]{4})+(?:[ -][0-9A-Za-z]{1,3})?)\\b/,
+    );
+    const found = (compact || grouped || [])[1];
+    const iban = found ? found.replace(/[ -]/g, "") : undefined;
     if (!iban) {
       return {
         completionConditionFulfilled: true,

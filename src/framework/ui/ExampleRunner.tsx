@@ -93,6 +93,19 @@ function rootCompleted(snap: Snapshot | null, rootKey: string | null): boolean {
 }
 
 /**
+ * The variables to show on the card: the run's own instance, never a
+ * specialist's, and never the empty set a completed instance reports — which
+ * would blank the card at the moment there is most to read.
+ */
+function displayableVars(
+  snap: Snapshot | null,
+  rootKey: string | null,
+): Record<string, unknown> | null {
+  const vars = rootInstanceOf(snap, rootKey)?.variables;
+  return vars && Object.keys(vars).length > 0 ? vars : null;
+}
+
+/**
  * The user tasks a human can actually act on right now.
  *
  * `state === "Created"` is not enough on its own: an interrupting boundary
@@ -593,10 +606,8 @@ export function ExampleRunner({
         // than let it leak into whichever run is current now.
         if (runSeqRef.current !== seq) return snap;
         snap = round?.snapshot ?? snap;
-        const vars = rootInstanceOf(snap, rootInstanceKeyRef.current)?.variables;
-        // A completed instance reports `variables: {}`; keeping the last
-        // non-empty set means finishing doesn't blank the card.
-        if (vars && Object.keys(vars).length > 0) setDisplayVars({ ...vars });
+        const vars = displayableVars(snap, rootInstanceKeyRef.current);
+        if (vars) setDisplayVars({ ...vars });
         if (openUserTasksOf(snap).length > 0) {
           trace({
             kind: "human",
@@ -656,7 +667,7 @@ export function ExampleRunner({
             );
             if (correlated) {
               snap = correlated;
-              const correlatedVars = snap.instances[0]?.variables;
+              const correlatedVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (correlatedVars) setDisplayVars({ ...correlatedVars });
               await new Promise((r) => setTimeout(r, BEAT));
               continue;
@@ -691,7 +702,7 @@ export function ExampleRunner({
                 text: `📡 broadcasting signal "${sub.signalName}" — every waiting subscription unblocks`,
                 elementId: sub.elementId,
               });
-              const signalVars = snap.instances[0]?.variables;
+              const signalVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (signalVars) setDisplayVars({ ...signalVars });
               await new Promise((r) => setTimeout(r, BEAT));
               continue;
@@ -792,7 +803,7 @@ export function ExampleRunner({
         }
         if (snap) {
           trace({ kind: "vars", text: successText, elementId: job.elementId });
-          const vars = snap.instances[0]?.variables;
+          const vars = displayableVars(snap, rootInstanceKeyRef.current);
           if (vars) setDisplayVars({ ...vars });
           await new Promise((r) => setTimeout(r, BEAT));
           await driveLoop(workersRef.current, agentsRef.current, snap, seq);
@@ -1163,14 +1174,20 @@ export function ExampleRunner({
         });
         return;
       }
-      const vars = round.snapshot.instances[0]?.variables;
+      const vars = displayableVars(round.snapshot, rootInstanceKeyRef.current);
       if (vars) setDisplayVars({ ...vars });
       const flows = newSequenceFlows(
         round.snapshot.takenSequenceFlows,
         prevFlowCount,
       );
       trace(
-        describeRound(round, flows, elementLabels, manualControls),
+        describeRound(
+          round,
+          flows,
+          elementLabels,
+          manualControls,
+          rootCompleted(round.snapshot, rootInstanceKeyRef.current),
+        ),
       );
     } finally {
       if (runSeqRef.current === seq) {
@@ -1275,7 +1292,7 @@ export function ExampleRunner({
           text: `📨 published "${sub.messageName}" (key: ${sub.correlationKey})`,
           elementId,
         });
-        const vars = snap.instances[0]?.variables;
+        const vars = displayableVars(snap, rootInstanceKeyRef.current);
         if (vars) setDisplayVars({ ...vars });
         await new Promise((r) => setTimeout(r, BEAT));
         await driveLoop(workersRef.current, agentsRef.current, snap, seq);
@@ -1304,7 +1321,7 @@ export function ExampleRunner({
     // A completed instance reports `variables: {}`, so read the snapshot over
     // the submission only while there's still an instance carrying state —
     // otherwise completing the last task would blank the card.
-    const vars = snap?.instances[0]?.variables;
+    const vars = displayableVars(snap, rootInstanceKeyRef.current);
     setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
     if (rootCompleted(snap, rootInstanceKeyRef.current)) {
       trace({ kind: "done", text: "✅ process instance completed" });
