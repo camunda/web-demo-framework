@@ -357,3 +357,74 @@ describe("bank-support on the live engine", () => {
     expect(completedCount("NotifyCustomer")).toBe(0);
   });
 });
+
+describe("bank-support — what each specialist is given, and what it refuses", () => {
+  /** The comma before "and also" is optional in practice; the split can't rely on it. */
+  it("splits a two-subject message even without a comma before the conjunction", async () => {
+    await start({
+      customerRequest:
+        "Please validate DE89370400440532013000 for my transfer and also tell me the monthly payment on a $200,000 loan at 6% over 30 years.",
+    });
+
+    expect(String(summarySaw.accountRequest)).not.toMatch(/monthly payment/i);
+    expect(String(summarySaw.loanRequest)).not.toMatch(/IBAN|DE8937/i);
+    expect(completedCount("NotifyCustomer")).toBe(1);
+  });
+
+  /**
+   * `CalculateLoanPayment` refuses a non-positive principal by throwing, which
+   * would surface as an incident. A request for a zero loan is a question for a
+   * human, not a broken demo.
+   */
+  it("declines a zero loan amount instead of raising an incident", async () => {
+    await start({ customerRequest: "What would the monthly payment be on a $0 loan at 6% over 30 years?" });
+
+    expect(session.snapshot().incidents).toEqual([]);
+    expect(completedCount("CalculateLoanPayment")).toBe(0);
+    expect(summarySaw.loanResolution).toMatchObject({ status: "needs-human" });
+  });
+
+  /**
+   * Routing reaches the card specialist on the word "charge" alone, so a bare
+   * number is as likely to be a transaction reference. Looking it up and naming
+   * an issuing bank would be a confident wrong answer.
+   */
+  it("does not treat a bare reference number as a card BIN", async () => {
+    await start({ customerRequest: "I don't recognize charge 123456 on my statement." });
+
+    expect(completedCount("LookupCardBin")).toBe(0);
+    expect(summarySaw.cardResolution).toMatchObject({ status: "needs-human" });
+    expect(completedCount("NotifyCustomer")).toBe(0);
+  });
+
+  it.each([
+    ["a full 16-digit number", "There's a charge on my card 4532015112830366 I don't recognise."],
+    ["one written in groups of four", "There's a charge on my card 4532 0151 1283 0366 I don't recognise."],
+  ])("reads the BIN from %s", async (_label, customerRequest) => {
+    await start({ customerRequest });
+
+    expect(completedCount("LookupCardBin")).toBe(1);
+    expect(summarySaw.cardResolution).toMatchObject({ status: "resolved" });
+  });
+
+  /** The review form offers "Escalate further"; the model has to honour it. */
+  it("routes the reviewer's escalation to its own end state", async () => {
+    await start(scenario("Account question"));
+    const task = session.snapshot().userTasks.find((t) => t.state === "Created");
+    session.completeUserTask(task!.key, JSON.stringify({ reviewDecision: "escalated" }));
+    await dispatchWorkers(session, workers, { agents });
+
+    expect(completedCount("EndEvent_EscalatedFurther")).toBe(1);
+    expect(completedCount("EndEvent_ResolvedManually")).toBe(0);
+  });
+
+  it("routes the reviewer's resolution to the manual end state", async () => {
+    await start(scenario("Account question"));
+    const task = session.snapshot().userTasks.find((t) => t.state === "Created");
+    session.completeUserTask(task!.key, JSON.stringify({ reviewDecision: "resolved" }));
+    await dispatchWorkers(session, workers, { agents });
+
+    expect(completedCount("EndEvent_ResolvedManually")).toBe(1);
+    expect(completedCount("EndEvent_EscalatedFurther")).toBe(0);
+  });
+});

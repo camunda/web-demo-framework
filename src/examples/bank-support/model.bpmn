@@ -157,9 +157,21 @@
       <bpmn:incoming>Flow_Escalate</bpmn:incoming>
       <bpmn:outgoing>Flow_ToEndManual</bpmn:outgoing>
     </bpmn:userTask>
-    <bpmn:sequenceFlow id="Flow_ToEndManual" sourceRef="ReviewEscalatedCase" targetRef="EndEvent_ResolvedManually" />
+    <bpmn:sequenceFlow id="Flow_ToReviewOutcome" sourceRef="ReviewEscalatedCase" targetRef="Gateway_ReviewOutcome" />
+    <bpmn:exclusiveGateway id="Gateway_ReviewOutcome" name="Reviewer decision?" default="Flow_ToEndManual">
+      <bpmn:incoming>Flow_ToReviewOutcome</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndEscalated</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToEndManual</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_ToEndEscalated" name="escalate further" sourceRef="Gateway_ReviewOutcome" targetRef="EndEvent_EscalatedFurther">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=reviewDecision = "escalated"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ToEndManual" name="resolved" sourceRef="Gateway_ReviewOutcome" targetRef="EndEvent_ResolvedManually" />
     <bpmn:endEvent id="EndEvent_ResolvedManually" name="Case resolved manually">
       <bpmn:incoming>Flow_ToEndManual</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndEvent_EscalatedFurther" name="Escalated to a specialist team">
+      <bpmn:incoming>Flow_ToEndEscalated</bpmn:incoming>
     </bpmn:endEvent>
     <bpmn:textAnnotation id="TextAnnotation_MoreSpecialists">
       <bpmn:text>Each specialist is a separate process, so adding one is a deploy — not a change to this model.</bpmn:text>
@@ -177,7 +189,7 @@
         <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" retries="3" />
         <zeebe:ioMapping>
           <zeebe:input source="openaiCompatible" target="provider.type" />
-          <zeebe:input source="=&#34;You are the Loan Support Agent for Camunda Bank. You only handle loan-related requests: mortgages, personal loans, interest rates, terms, and monthly payment estimates.&#10;&#10;Always invoke tools through the actual tool-calling mechanism - never describe or simulate a tool call in plain text, and never invent numbers the customer did not provide.&#10;&#10;1. Extract the loan amount, the annual interest rate, and the term in years from the customer's message.&#10;2. If the amount, rate, or term is missing, or the term is longer than 40 years, or the amount is above 2000000, skip straight to step 4 with status 'needs-human'.&#10;3. Otherwise, call CalculateLoanPayment with the extracted amount, rate, and the term converted to months (years times 12).&#10;4. Once you've reached a conclusion, stop calling tools and give your final answer: 'status' must be 'resolved' if you were able to fully answer the loan question yourself, or 'needs-human' if the case needs a loan specialist (for example because information was missing, the term exceeds 40 years, or the amount exceeds 2000000). Always fill in 'summary' with a short explanation, including the calculated monthly payment if you computed one. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
+          <zeebe:input source="=&#34;You are the Loan Support Agent for Camunda Bank. You only handle loan-related requests: mortgages, personal loans, interest rates, terms, and monthly payment estimates.&#10;&#10;Always invoke tools through the actual tool-calling mechanism - never describe or simulate a tool call in plain text, and never invent numbers the customer did not provide.&#10;&#10;1. Extract the loan amount, the annual interest rate, and the term in years from the customer's message. Only treat a number as the loan amount if the customer marked it as money (a currency symbol or code) - an unmarked run of digits in a banking message is as likely to be an account number.&#10;2. If the amount, rate, or term is missing, or the amount is not a positive number, or the term is longer than 40 years, or the amount is above 2000000, skip straight to step 4 with status 'needs-human'.&#10;3. Otherwise, call CalculateLoanPayment with the extracted amount, rate, and the term converted to months (years times 12).&#10;4. Once you've reached a conclusion, stop calling tools and give your final answer: 'status' must be 'resolved' if you were able to fully answer the loan question yourself, or 'needs-human' if the case needs a loan specialist (for example because information was missing, the term exceeds 40 years, or the amount exceeds 2000000). Always fill in 'summary' with a short explanation, including the calculated monthly payment if you computed one. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
           <zeebe:input source="=&#34;Customer request: &#34; + customerRequest" target="data.userPrompt.prompt" />
           <zeebe:input target="agentContext" />
           <zeebe:input source="json" target="data.response.format.type" />
@@ -222,7 +234,7 @@
         <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" retries="3" />
         <zeebe:ioMapping>
           <zeebe:input source="openaiCompatible" target="provider.type" />
-          <zeebe:input source="=&#34;You are the Account Support Agent for Camunda Bank. You only handle account and IBAN related requests: validating account numbers, checking IBAN details, and confirming bank identifiers.&#10;&#10;Always invoke tools through the actual tool-calling mechanism - never describe or simulate a tool call in plain text, and never invent account data the customer did not provide.&#10;&#10;1. Extract the IBAN or account identifier from the customer's message.&#10;2. If no identifier was provided at all, skip straight to step 4 with status 'needs-human'.&#10;3. Otherwise, call ValidateIban with the identifier to check whether it is valid.&#10;4. Once you've reached a conclusion, stop calling tools and give your final answer: 'status' must be 'resolved' if the identifier was checked and confirmed valid, or 'needs-human' if it failed validation or none was provided. Always fill in 'summary' with a short explanation. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
+          <zeebe:input source="=&#34;You are the Account Support Agent for Camunda Bank. You only handle account and IBAN related requests: validating account numbers, checking IBAN details, and confirming bank identifiers.&#10;&#10;Always invoke tools through the actual tool-calling mechanism - never describe or simulate a tool call in plain text, and never invent account data the customer did not provide.&#10;&#10;1. Extract the IBAN from the customer's message. You can only validate IBANs; a domestic account number, sort code or routing number is not something this tool can check.&#10;2. If no IBAN was provided, skip straight to step 4 with status 'needs-human' and say that only IBANs can be validated.&#10;3. Otherwise, call ValidateIban with the identifier to check whether it is valid.&#10;4. Once you've reached a conclusion, stop calling tools and give your final answer: 'status' must be 'resolved' if the identifier was checked and confirmed valid, or 'needs-human' if it failed validation or none was provided. Always fill in 'summary' with a short explanation. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
           <zeebe:input source="=&#34;Customer request: &#34; + customerRequest" target="data.userPrompt.prompt" />
           <zeebe:input target="agentContext" />
           <zeebe:input source="json" target="data.response.format.type" />
@@ -265,7 +277,7 @@
         <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" retries="3" />
         <zeebe:ioMapping>
           <zeebe:input source="openaiCompatible" target="provider.type" />
-          <zeebe:input source="=&#34;You are the Card Support Agent for Camunda Bank. You only handle card related requests: identifying which bank or network issued a card from its number, and flagging unrecognized charges.&#10;&#10;Always invoke tools through the actual tool-calling mechanism - never describe or simulate a tool call in plain text, and never invent card data the customer did not provide.&#10;&#10;1. Extract the first 6 to 8 digits of the card number mentioned by the customer (the bank identification number).&#10;2. If the customer did not provide any digits of a card number, skip straight to step 4 with status 'needs-human'.&#10;3. Otherwise, call LookupCardBin with those digits. The lookup succeeding counts as resolved even if no specific issuing bank is found - just say so in your summary.&#10;4. Once you've reached a conclusion, stop calling tools and give your final answer: 'status' must be 'resolved' if you attempted the lookup, or 'needs-human' if no card number digits were provided at all. Always fill in 'summary' with a short explanation of what the lookup found. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
+          <zeebe:input source="=&#34;You are the Card Support Agent for Camunda Bank. You only handle card related requests: identifying which bank or network issued a card from its number, and flagging unrecognized charges.&#10;&#10;Always invoke tools through the actual tool-calling mechanism - never describe or simulate a tool call in plain text, and never invent card data the customer did not provide.&#10;&#10;1. Extract the first 6 to 8 digits of the card number mentioned by the customer (the bank identification number). Only use digits the customer identified as part of a card number - a bare transaction or reference number is not a BIN.&#10;2. If the customer did not provide any digits of a card number, skip straight to step 4 with status 'needs-human'.&#10;3. Otherwise, call LookupCardBin with those digits. The lookup succeeding counts as resolved even if no specific issuing bank is found - just say so in your summary.&#10;4. Once you've reached a conclusion, stop calling tools and give your final answer: 'status' must be 'resolved' if you attempted the lookup, or 'needs-human' if no card number digits were provided at all. Always fill in 'summary' with a short explanation of what the lookup found. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
           <zeebe:input source="=&#34;Customer request: &#34; + customerRequest" target="data.userPrompt.prompt" />
           <zeebe:input target="agentContext" />
           <zeebe:input source="json" target="data.response.format.type" />
@@ -338,8 +350,14 @@
       <bpmndi:BPMNShape id="ReviewEscalatedCase_di" bpmnElement="ReviewEscalatedCase">
         <dc:Bounds x="1010" y="240" width="100" height="80" />
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ReviewOutcome_di" bpmnElement="Gateway_ReviewOutcome" isMarkerVisible="true">
+        <dc:Bounds x="1155" y="255" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_EscalatedFurther_di" bpmnElement="EndEvent_EscalatedFurther">
+        <dc:Bounds x="1262" y="352" width="36" height="36" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="EndEvent_ResolvedManually_di" bpmnElement="EndEvent_ResolvedManually">
-        <dc:Bounds x="1172" y="262" width="36" height="36" />
+        <dc:Bounds x="1262" y="262" width="36" height="36" />
         <bpmndi:BPMNLabel>
           <dc:Bounds x="1150" y="305" width="82" height="40" />
         </bpmndi:BPMNLabel>
@@ -378,9 +396,18 @@
         <di:waypoint x="1110" y="160" />
         <di:waypoint x="1172" y="160" />
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Flow_ToEndManual_di" bpmnElement="Flow_ToEndManual">
+      <bpmndi:BPMNEdge id="Flow_ToReviewOutcome_di" bpmnElement="Flow_ToReviewOutcome">
         <di:waypoint x="1110" y="280" />
-        <di:waypoint x="1172" y="280" />
+        <di:waypoint x="1155" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndManual_di" bpmnElement="Flow_ToEndManual">
+        <di:waypoint x="1205" y="280" />
+        <di:waypoint x="1262" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndEscalated_di" bpmnElement="Flow_ToEndEscalated">
+        <di:waypoint x="1180" y="305" />
+        <di:waypoint x="1180" y="370" />
+        <di:waypoint x="1262" y="370" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Association_MoreSpecialists_di" bpmnElement="Association_MoreSpecialists">
         <di:waypoint x="490" y="260" />

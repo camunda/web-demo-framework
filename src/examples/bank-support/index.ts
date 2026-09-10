@@ -104,10 +104,11 @@ const SCRIPTED_AGENT = `async (job) => {
     // specialist that only needed one line of it.
     //
     // Clauses, not sentences: a customer writing in about two things usually
-    // writes one sentence joined by "and also", which is exactly what the
-    // two-specialist case below looks like.
+    // writes one sentence joined by "and also". The comma before it is
+    // optional in practice, so splitting on the conjunction itself is what
+    // keeps a two-subject message from reaching both specialists whole.
     const clauses = request
-      .split(/(?<=[.?!;])\\s+|,\\s*(?=and\\b|also\\b|plus\\b)/i)
+      .split(/(?<=[.?!;])\\s+|,?\\s+(?=(?:and\\s+)?(?:also|plus)\\b|and\\b)/i)
       .map((c) => c.trim())
       .filter(Boolean);
 
@@ -185,6 +186,20 @@ const SCRIPTED_AGENT = `async (job) => {
         },
       };
     }
+    // A zero or negative principal is not a loan. Passing it on would raise an
+    // incident in CalculateLoanPayment, which refuses to quote one — an
+    // incident being a broken demo rather than the answer the customer needs.
+    if (!(loanAmount > 0) || !Number.isFinite(loanAmount)) {
+      return {
+        completionConditionFulfilled: true,
+        variables: {
+          status: "needs-human",
+          summary:
+            "A loan amount of " + loanAmount +
+            " is not something I can quote on, so a loan specialist should take this.",
+        },
+      };
+    }
 
     return {
       variables: {
@@ -226,7 +241,8 @@ const SCRIPTED_AGENT = `async (job) => {
         completionConditionFulfilled: true,
         variables: {
           status: "needs-human",
-          summary: "No account identifier was given, so there is nothing to validate.",
+          summary:
+            "I can only validate IBANs, and this request doesn't contain one, so an account specialist should take it.",
         },
       };
     }
@@ -244,8 +260,20 @@ const SCRIPTED_AGENT = `async (job) => {
       };
     }
 
-    const bin = (request.match(/\\b(\\d{6,8})\\b/) || [])[1];
-    if (!bin) {
+    // Only digits the customer identified as a card number. Routing gets here
+    // on "charge" alone, so a bare number in "I don't recognize charge 123456"
+    // is as likely to be a transaction reference — looking that up and
+    // reporting an issuing bank for it would be a confident wrong answer.
+    //
+    // The digits are matched with optional separators and then trimmed to the
+    // BIN, so a full 16-digit number, or one written in groups of four, is
+    // read the same way as the first six alone.
+    const cardContext = /card|\\bbin\\b|first (?:six|6|eight|8) digits|issuer|issued/i;
+    const digits = cardContext.test(request)
+      ? (request.match(/\\b(\\d{4}(?:[ -]?\\d{2,4}){0,3}|\\d{6,19})\\b/) || [])[1]
+      : undefined;
+    const bin = digits ? digits.replace(/[ -]/g, "").slice(0, 8) : undefined;
+    if (!bin || bin.length < 6) {
       return {
         completionConditionFulfilled: true,
         variables: {
