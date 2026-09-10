@@ -1,0 +1,40 @@
+{
+  "components": [
+    {
+      "text": "# Support case needs review\n\nOne or more specialist agents couldn't fully resolve this case on their own. Check the details below, then record your decision.",
+      "type": "text",
+      "layout": { "row": "Row_heading", "columns": null },
+      "id": "Field_Heading"
+    },
+    {
+      "text": "**Customer message:** {{customerRequest}}\n\n**Specialist findings:**\n\n{{combinedSummary}}",
+      "type": "text",
+      "layout": { "row": "Row_findings", "columns": null },
+      "id": "Field_Findings"
+    },
+    {
+      "label": "Reviewer decision",
+      "type": "radio",
+      "layout": { "row": "Row_decision", "columns": null },
+      "id": "Field_ReviewDecision",
+      "key": "reviewDecision",
+      "validate": { "required": true },
+      "values": [
+        { "label": "Resolved by human", "value": "resolved" },
+        { "label": "Escalate further", "value": "escalated" }
+      ]
+    },
+    {
+      "label": "Reviewer comments",
+      "type": "textarea",
+      "layout": { "row": "Row_comments", "columns": null },
+      "id": "Field_ReviewComments",
+      "key": "reviewComments"
+    }
+  ],
+  "type": "default",
+  "id": "bank-support-review",
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "schemaVersion": 19
+}

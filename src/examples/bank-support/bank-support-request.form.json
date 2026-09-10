@@ -1,0 +1,24 @@
+{
+  "components": [
+    {
+      "text": "# Customer support request",
+      "type": "text",
+      "layout": { "row": "Row_heading", "columns": null },
+      "id": "Field_Heading"
+    },
+    {
+      "label": "Customer request",
+      "description": "What the customer wrote in. The orchestrator reads this to decide which specialist agent(s) to call.",
+      "type": "textarea",
+      "layout": { "row": "Row_customer_request", "columns": null },
+      "id": "Field_CustomerRequest",
+      "key": "customerRequest",
+      "validate": { "required": true }
+    }
+  ],
+  "type": "default",
+  "id": "bank-support-request",
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "schemaVersion": 19
+}

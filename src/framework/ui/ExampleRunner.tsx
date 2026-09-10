@@ -63,6 +63,36 @@ function isBoundarySubscription(sub: { kind: string }): boolean {
 }
 
 /**
+ * The instance this run started, if it is still in the snapshot.
+ *
+ * A call activity gives the run more than one instance, and the specialist it
+ * calls finishes long before the process that called it. `completedInstances`
+ * counts *any* of them, so keying the run's own lifecycle off it ends the run
+ * at the first child to finish — mid-delegation, with the parent still holding
+ * work. Everything about "is this run over" therefore asks about this one
+ * instance.
+ */
+function rootInstanceOf(
+  snap: Snapshot | null,
+  rootKey: string | null,
+): Snapshot["instances"][number] | undefined {
+  if (!snap) return undefined;
+  // Before `beginRun` has recorded a key (and for every single-process
+  // example, where the two are the same thing) the first instance is it.
+  if (!rootKey) return snap.instances[0];
+  return snap.instances.find((i) => i.key === rootKey);
+}
+
+function rootCompleted(snap: Snapshot | null, rootKey: string | null): boolean {
+  if (!snap) return false;
+  const root = rootInstanceOf(snap, rootKey);
+  // No key yet and nothing to look at: fall back to the old global count so a
+  // run that completes before `beginRun` returns is still seen as finished.
+  if (!root) return snap.completedInstances >= 1;
+  return root.state === "Completed";
+}
+
+/**
  * The user tasks a human can actually act on right now.
  *
  * `state === "Created"` is not enough on its own: an interrupting boundary
@@ -398,6 +428,8 @@ export function ExampleRunner({
   // instead of rebuilding it.
   const workersRef = useRef<Record<string, JobHandler>>({});
   const agentsRef = useRef<Record<string, AgentHandler>>({});
+  /** The instance this run started — see `rootInstanceOf`. */
+  const rootInstanceKeyRef = useRef<string | null>(null);
 
   /** Element id -> human label, for the trace timeline and its engine-view panels. */
   const elementLabels = useMemo(() => {
@@ -549,7 +581,7 @@ export function ExampleRunner({
       while (
         runSeqRef.current === seq &&
         snap &&
-        snap.completedInstances < 1 &&
+        !rootCompleted(snap, rootInstanceKeyRef.current) &&
         guard++ < 80
       ) {
         const round = await run.stepWorkers(workers, { agents });
@@ -561,8 +593,10 @@ export function ExampleRunner({
         // than let it leak into whichever run is current now.
         if (runSeqRef.current !== seq) return snap;
         snap = round?.snapshot ?? snap;
-        const vars = snap.instances[0]?.variables;
-        if (vars) setDisplayVars({ ...vars });
+        const vars = rootInstanceOf(snap, rootInstanceKeyRef.current)?.variables;
+        // A completed instance reports `variables: {}`; keeping the last
+        // non-empty set means finishing doesn't blank the card.
+        if (vars && Object.keys(vars).length > 0) setDisplayVars({ ...vars });
         if (openUserTasksOf(snap).length > 0) {
           trace({
             kind: "human",
@@ -716,7 +750,7 @@ export function ExampleRunner({
       // but falling out of the loop lands here directly — without this a run
       // superseded by Reset still appends its outcome to the cleared log.
       if (runSeqRef.current !== seq) return snap;
-      if (snap && snap.completedInstances >= 1)
+      if (rootCompleted(snap, rootInstanceKeyRef.current))
         trace({ kind: "done", text: "✅ process instance completed" });
       else if (snap && snap.incidentElementIds.length > 0)
         trace({
@@ -948,6 +982,9 @@ export function ExampleRunner({
     // Stash the picked image against the instance just created, so
     // `helpers.vision`/`helpers.image` can resolve it during the run.
     const instanceKey = snap?.instances[0]?.key;
+    // Whatever this run started is its root — every later "is it finished"
+    // question is about this instance, not about any child it delegates to.
+    rootInstanceKeyRef.current = instanceKey ?? null;
     if (example.imageInput && imageSelection && instanceKey)
       run.setRunImage(instanceKey, imageSelection);
     return { workers, agents, snap };
@@ -983,7 +1020,7 @@ export function ExampleRunner({
   const canResume =
     !!run.snapshot &&
     run.snapshot.instances.length > 0 &&
-    run.snapshot.completedInstances < 1;
+    !rootCompleted(run.snapshot, rootInstanceKeyRef.current);
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
@@ -1113,7 +1150,7 @@ export function ExampleRunner({
         snap = prepared.snap;
       }
 
-      if (!snap || snap.completedInstances >= 1) return;
+      if (!snap || rootCompleted(snap, rootInstanceKeyRef.current)) return;
 
       // `takenSequenceFlows` only appends — the flows this one round takes
       // are exactly what lands past this length (see `newSequenceFlows`).
@@ -1174,6 +1211,9 @@ export function ExampleRunner({
     }
     setLog([]);
     setDisplayVars({});
+    // The next run creates its own instance; leaving the old key here would
+    // make `canResume` ask about an instance the engine no longer has.
+    rootInstanceKeyRef.current = null;
   }, [run]);
 
   /**
@@ -1266,7 +1306,7 @@ export function ExampleRunner({
     // otherwise completing the last task would blank the card.
     const vars = snap?.instances[0]?.variables;
     setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
-    if (snap && snap.completedInstances >= 1) {
+    if (rootCompleted(snap, rootInstanceKeyRef.current)) {
       trace({ kind: "done", text: "✅ process instance completed" });
       return;
     }
@@ -1302,7 +1342,7 @@ export function ExampleRunner({
       return <Badge variant="danger">Incident</Badge>;
     if (openUserTask)
       return <Badge variant="warning">Waiting for a human</Badge>;
-    if ((run.snapshot?.completedInstances ?? 0) >= 1)
+    if (rootCompleted(run.snapshot, rootInstanceKeyRef.current))
       return <Badge variant="success">Completed</Badge>;
     // An incomplete run that has quiesced short of completion — via Step, or
     // via Run stopping on a wait state (timer/message/signal). Reset still
@@ -1474,7 +1514,7 @@ export function ExampleRunner({
             stepping ||
             draft.hasErrors ||
             needsStartForm ||
-            (run.snapshot?.completedInstances ?? 0) >= 1
+            rootCompleted(run.snapshot, rootInstanceKeyRef.current)
           }
         >
           ⏭ Step
