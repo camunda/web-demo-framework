@@ -39,6 +39,41 @@ describe("example models", () => {
   );
 
   /**
+   * A sequence flow says where it goes; the elements at each end say which
+   * flows they own. Both have to agree, and only the flow's own `sourceRef`
+   * and `targetRef` are load-bearing here — this engine ignores the
+   * `<incoming>`/`<outgoing>` children entirely.
+   *
+   * That is what makes the mismatch worth a test: inserting an element
+   * mid-chain by hand and forgetting to repoint its neighbour's `<outgoing>`
+   * runs perfectly, and only misleads the next reader, bpmn-js, or Web Modeler.
+   */
+  it.each(Object.keys(models))("%s declares its sequence flows on both ends", (path) => {
+    const doc = new DOMParser().parseFromString(models[path], "application/xml");
+    const NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    const declared = (elementId: string, tag: "incoming" | "outgoing") => {
+      const el = Array.from(doc.getElementsByTagNameNS(NS, "*")).find(
+        (e) => e.getAttribute("id") === elementId,
+      );
+      return Array.from(el?.getElementsByTagNameNS(NS, tag) ?? []).map(
+        (c) => c.textContent?.trim(),
+      );
+    };
+
+    const wrong: string[] = [];
+    for (const flow of Array.from(doc.getElementsByTagNameNS(NS, "sequenceFlow"))) {
+      const id = flow.getAttribute("id")!;
+      const from = flow.getAttribute("sourceRef")!;
+      const to = flow.getAttribute("targetRef")!;
+      if (!declared(from, "outgoing").includes(id))
+        wrong.push(`${id}: ${from} does not declare it as outgoing`);
+      if (!declared(to, "incoming").includes(id))
+        wrong.push(`${id}: ${to} does not declare it as incoming`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  /**
    * A prompt that names a tool the agent can't call costs a live brain real
    * turns: `makeLiveAgent` resolves a tool call against `spec.tools` and
    * nothing else, so "call RequestPaymentRelease" is useless if what's

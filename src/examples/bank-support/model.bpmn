@@ -155,7 +155,7 @@
         <zeebe:formDefinition formId="bank-support-review" />
       </bpmn:extensionElements>
       <bpmn:incoming>Flow_Escalate</bpmn:incoming>
-      <bpmn:outgoing>Flow_ToEndManual</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToReviewOutcome</bpmn:outgoing>
     </bpmn:userTask>
     <bpmn:sequenceFlow id="Flow_ToReviewOutcome" sourceRef="ReviewEscalatedCase" targetRef="Gateway_ReviewOutcome" />
     <bpmn:exclusiveGateway id="Gateway_ReviewOutcome" name="Reviewer decision?" default="Flow_ToEndManual">
