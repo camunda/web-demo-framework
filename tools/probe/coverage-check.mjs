@@ -392,6 +392,156 @@ async function runAdHocInnerFlowFixture() {
   }
 }
 
+/**
+ * An interrupting boundary event on an ad-hoc sub-process fires, but leaves the
+ * tool the agent had activated — and the ad-hoc `#innerInstance` — running, so
+ * the instance never completes (Magikcraft/nano-bpm#1155). The same boundary on
+ * a plain sub-process wrapper tears the whole scope down, which is the
+ * workaround; `runAgentInterruptFixture` below asserts that half still works.
+ */
+async function runAdHocBoundaryCancelFixture() {
+  const name =
+    "ad-hoc sub-process: interrupting boundary — does NOT cancel an activated tool (#1155)";
+  const xml = readFileSync(path.join(fixturesDir, "adhoc-boundary-cancel.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], JSON.stringify({ customerId: "PROBE-11" }));
+    const jobs = session.activateJobs("probe-agent", 1, 1000, "coverage-check");
+    if (jobs.length === 0) {
+      record(name, false, "the ad-hoc sub-process never offered an agent job");
+      return;
+    }
+    session.completeAgentJob(jobs[0].key, {
+      activateElements: [{ elementId: "AskHuman", variables: {} }],
+    });
+
+    // The bug only appears with a tool actually activated, so a silent
+    // activation regression would otherwise let this check report the gap as
+    // still present while exercising nothing.
+    const armed = session
+      .snapshot()
+      .userTasks.some((t) => t.elementId === "AskHuman" && t.state === "Created");
+    if (!armed) {
+      record(name, false, "the agent's tool never opened, so nothing was there to survive the boundary");
+      return;
+    }
+
+    const snap = session.correlateMessage("probe-cancel", "PROBE-11", "{}");
+    const fired = snap.takenSequenceFlows.some((f) => f.from === "Interrupt");
+    const active = (snap.instances[0]?.activeElements ?? []).map(
+      (e) => e.elementId ?? e,
+    );
+    // The recorded failure is specific: the boundary *does* fire, and what
+    // survives it is the inner scope. Asserting only "did not complete" would
+    // stay green if the boundary stopped firing at all, which is a different
+    // and worse bug.
+    const stillBroken =
+      fired && active.includes("AskHuman") && snap.completedInstances === 0;
+    record(
+      name,
+      stillBroken,
+      !fired
+        ? "the boundary did not fire at all — this check no longer measures what it claims"
+        : stillBroken
+          ? `boundary fired but left ${JSON.stringify(active)} active; instance never completes`
+          : `behaviour changed — active after: ${JSON.stringify(active)}, completed: ${snap.completedInstances}. If it now cancels cleanly, #1155 is fixed: drop the sub-process wrapper from the event-driven agent example`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
+ * The event-driven agent's premise: one message name, subscribed to by both a
+ * message start event and an interrupting boundary on the running case. Zeebe
+ * correlates a published message once and prefers the open subscription; this
+ * engine satisfies both, interrupting the case *and* opening a duplicate
+ * (Magikcraft/nano-bpm#1156). That is what parks the example.
+ */
+async function runAgentInterruptFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "agent-interrupt.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    session.deploy(xml);
+    session.correlateMessage(
+      "probe-alert",
+      "PROBE-12",
+      JSON.stringify({ customerId: "PROBE-12" }),
+    );
+    const jobs = session.activateJobs("probe-agent", 1, 1000, "coverage-check");
+    if (jobs.length === 0) {
+      record("event-driven agent fixture", false, "no agent job after the start message");
+      return;
+    }
+    session.completeAgentJob(jobs[0].key, {
+      activateElements: [{ elementId: "AskHuman", variables: {} }],
+    });
+
+    // Pin the case that is meant to be interrupted, and its open task, *before*
+    // publishing. #1156 means the same publish also opens a second instance, so
+    // looking for "an instance that completed" afterwards could find either —
+    // and a silent activation regression would leave nothing to cancel, which
+    // the wrapper would then "pass" by completing normally.
+    const armed = session.snapshot();
+    const caseKey = armed.instances[0]?.key;
+    const askHuman = armed.userTasks.find(
+      (t) =>
+        t.elementId === "AskHuman" &&
+        t.instanceKey === caseKey &&
+        t.state === "Created",
+    );
+    if (!caseKey || !askHuman) {
+      record(
+        "sub-process wrapper: interrupting boundary cancels the agent inside it (#1155 workaround)",
+        false,
+        "the agent's user task never opened, so there was nothing to cancel",
+      );
+      return;
+    }
+
+    const snap = session.correlateMessage(
+      "probe-alert",
+      "PROBE-12",
+      JSON.stringify({ customerId: "PROBE-12" }),
+    );
+    const fired = snap.takenSequenceFlows.some((f) => f.from === "SecondAlert");
+    const interrupted = snap.instances.find((i) => i.key === caseKey);
+    const active = (interrupted?.activeElements ?? []).map((e) => e.elementId ?? e);
+    // "Cancelled" by the definition `ExampleRunner.openUserTasksOf` uses: gone
+    // from the instance's active elements. Asserting on the task's own `state`
+    // would fail — the engine still reports it `Created` after the instance has
+    // completed, which is the reporting wart noted on #1155.
+    const taskState =
+      snap.userTasks.find((t) => t.key === askHuman.key)?.state ?? "(gone)";
+    const cancelled =
+      fired && interrupted?.state === "Completed" && active.length === 0;
+    record(
+      "sub-process wrapper: interrupting boundary cancels the agent inside it (#1155 workaround)",
+      cancelled,
+      !fired
+        ? "the boundary did not fire — this check no longer measures what it claims"
+        : cancelled
+          ? `the boundary tore down the ad-hoc sub-process and its open user task (which the engine still reports as "${taskState}" — #1155)`
+          : `the wrapped agent was not cancelled: instance ${interrupted?.state ?? "(gone)"}, still active ${JSON.stringify(active)}`,
+    );
+
+    // One publish, two subscriptions satisfied. Counting instances is the whole
+    // assertion: the boundary firing is already covered above, so what is left
+    // to detect is the duplicate case the same call opened.
+    const duplicated = snap.instances.length === 2;
+    record(
+      "message start event + open boundary subscription — one publish hits BOTH (#1156)",
+      duplicated,
+      duplicated
+        ? "the follow-up interrupted the open case and started a second instance from the same publish"
+        : `behaviour changed — ${snap.instances.length} instance(s). If correlation now prefers the open subscription, #1156 is fixed: the event-driven agent example can be un-parked`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
@@ -406,6 +556,8 @@ async function main() {
   await runMessageBoundaryFixture();
   await runReceiveTaskFixture();
   await runAdHocInnerFlowFixture();
+  await runAdHocBoundaryCancelFixture();
+  await runAgentInterruptFixture();
 
   console.log("\nSummary:");
   for (const r of results) console.log(`  ${r.ok ? "✅" : "❌"} ${r.name}`);

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The event-driven agent shape: one message (`probe-alert`, correlation key
+  `customerId`) both starts the process and, while the agent runs, is subscribed
+  to by an interrupting boundary event.
+
+  The agent sits inside a plain sub-process and the boundary is attached to that
+  wrapper, not to the ad-hoc sub-process itself — the workaround for
+  Magikcraft/nano-bpm#1155 (see adhoc-boundary-cancel.bpmn for the shape that
+  hangs). So the cancellation half of this fixture passes.
+
+  What still fails is correlation: publishing the message a second time for a
+  customer whose case is already open fires the boundary *and* starts a second
+  instance from the same publish — Magikcraft/nano-bpm#1156. Zeebe correlates a
+  message once, preferring the open subscription.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeAgentInterrupt" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="Message_Alert" name="probe-alert">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=customerId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="probe-agent-interrupt" isExecutable="true">
+    <bpmn:startEvent id="Start" name="Alert received">
+      <bpmn:outgoing>Flow_ToCase</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MsgDef_Start" messageRef="Message_Alert" />
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToCase" sourceRef="Start" targetRef="Case" />
+    <bpmn:subProcess id="Case" name="Investigation">
+      <bpmn:incoming>Flow_ToCase</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndNormal</bpmn:outgoing>
+      <bpmn:startEvent id="CaseStart">
+        <bpmn:outgoing>Flow_ToAgent</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:sequenceFlow id="Flow_ToAgent" sourceRef="CaseStart" targetRef="Agent" />
+      <bpmn:adHocSubProcess id="Agent" name="Investigation agent">
+        <bpmn:extensionElements>
+          <zeebe:adHoc outputCollection="toolCallResults" outputElement="=toolCallResult" />
+          <zeebe:taskDefinition type="probe-agent" />
+        </bpmn:extensionElements>
+        <bpmn:incoming>Flow_ToAgent</bpmn:incoming>
+        <bpmn:outgoing>Flow_ToCaseEnd</bpmn:outgoing>
+        <bpmn:userTask id="AskHuman" name="Ask a human">
+          <bpmn:extensionElements>
+            <zeebe:userTask />
+          </bpmn:extensionElements>
+        </bpmn:userTask>
+      </bpmn:adHocSubProcess>
+      <bpmn:sequenceFlow id="Flow_ToCaseEnd" sourceRef="Agent" targetRef="CaseEnd" />
+      <bpmn:endEvent id="CaseEnd">
+        <bpmn:incoming>Flow_ToCaseEnd</bpmn:incoming>
+      </bpmn:endEvent>
+    </bpmn:subProcess>
+    <bpmn:boundaryEvent id="SecondAlert" name="Second alert" attachedToRef="Case">
+      <bpmn:outgoing>Flow_ToEndInterrupted</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MsgDef_SecondAlert" messageRef="Message_Alert" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_ToEndNormal" sourceRef="Case" targetRef="EndNormal" />
+    <bpmn:sequenceFlow id="Flow_ToEndInterrupted" sourceRef="SecondAlert" targetRef="EndInterrupted" />
+    <bpmn:endEvent id="EndNormal">
+      <bpmn:incoming>Flow_ToEndNormal</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndInterrupted">
+      <bpmn:incoming>Flow_ToEndInterrupted</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

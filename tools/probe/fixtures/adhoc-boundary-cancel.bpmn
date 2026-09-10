@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  An interrupting message boundary attached directly to an ad-hoc sub-process,
+  with one of the agent's tools activated when the message arrives.
+
+  The boundary fires and takes its outgoing flow, but the activated tool and
+  the ad-hoc `#innerInstance` survive the cancellation, so the instance never
+  completes — Magikcraft/nano-bpm#1155. Compare agent-interrupt.bpmn, where the
+  same boundary on a plain sub-process wrapper tears the whole scope down.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeAdHocBoundaryCancel" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="Message_Cancel" name="probe-cancel">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=customerId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="probe-adhoc-boundary-cancel" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>Flow_ToAgent</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToAgent" sourceRef="Start" targetRef="Agent" />
+    <bpmn:adHocSubProcess id="Agent" name="Agent">
+      <bpmn:extensionElements>
+        <zeebe:adHoc outputCollection="toolCallResults" outputElement="=toolCallResult" />
+        <zeebe:taskDefinition type="probe-agent" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToAgent</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndNormal</bpmn:outgoing>
+      <bpmn:userTask id="AskHuman" name="Ask a human">
+        <bpmn:extensionElements>
+          <zeebe:userTask />
+        </bpmn:extensionElements>
+      </bpmn:userTask>
+    </bpmn:adHocSubProcess>
+    <bpmn:boundaryEvent id="Interrupt" name="Interrupt" attachedToRef="Agent">
+      <bpmn:outgoing>Flow_ToEndInterrupted</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MsgDef_Interrupt" messageRef="Message_Cancel" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_ToEndNormal" sourceRef="Agent" targetRef="EndNormal" />
+    <bpmn:sequenceFlow id="Flow_ToEndInterrupted" sourceRef="Interrupt" targetRef="EndInterrupted" />
+    <bpmn:endEvent id="EndNormal">
+      <bpmn:incoming>Flow_ToEndNormal</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="EndInterrupted">
+      <bpmn:incoming>Flow_ToEndInterrupted</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
