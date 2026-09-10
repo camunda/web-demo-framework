@@ -467,19 +467,47 @@ async function runAgentInterruptFixture() {
       activateElements: [{ elementId: "AskHuman", variables: {} }],
     });
 
+    // Pin the case that is meant to be interrupted, and its open task, *before*
+    // publishing. #1156 means the same publish also opens a second instance, so
+    // looking for "an instance that completed" afterwards could find either.
+    const armed = session.snapshot();
+    const caseKey = armed.instances[0]?.key;
+    const askHuman = armed.userTasks.find(
+      (t) => t.elementId === "AskHuman" && t.instanceKey === caseKey,
+    );
+    if (!caseKey || !askHuman) {
+      record(
+        "sub-process wrapper: interrupting boundary cancels the agent inside it (#1155 workaround)",
+        false,
+        "the agent's user task never opened, so there was nothing to cancel",
+      );
+      return;
+    }
+
     const snap = session.correlateMessage(
       "probe-alert",
       "PROBE-12",
       JSON.stringify({ customerId: "PROBE-12" }),
     );
-    const first = snap.instances.find((i) => i.state === "Completed");
-    const cancelled = !!first && (first.activeElements ?? []).length === 0;
+    const fired = snap.takenSequenceFlows.some((f) => f.from === "SecondAlert");
+    const interrupted = snap.instances.find((i) => i.key === caseKey);
+    const active = (interrupted?.activeElements ?? []).map((e) => e.elementId ?? e);
+    // "Cancelled" by the definition `ExampleRunner.openUserTasksOf` uses: gone
+    // from the instance's active elements. Asserting on the task's own `state`
+    // would fail — the engine still reports it `Created` after the instance has
+    // completed, which is the reporting wart noted on #1155.
+    const taskState =
+      snap.userTasks.find((t) => t.key === askHuman.key)?.state ?? "(gone)";
+    const cancelled =
+      fired && interrupted?.state === "Completed" && active.length === 0;
     record(
       "sub-process wrapper: interrupting boundary cancels the agent inside it (#1155 workaround)",
       cancelled,
-      cancelled
-        ? "the wrapper's cancellation tore down the ad-hoc sub-process and its open user task"
-        : `the wrapped agent was not cancelled cleanly: ${JSON.stringify(snap.instances.map((i) => ({ state: i.state, active: i.activeElements })))}`,
+      !fired
+        ? "the boundary did not fire — this check no longer measures what it claims"
+        : cancelled
+          ? `the boundary tore down the ad-hoc sub-process and its open user task (which the engine still reports as "${taskState}" — #1155)`
+          : `the wrapped agent was not cancelled: instance ${interrupted?.state ?? "(gone)"}, still active ${JSON.stringify(active)}`,
     );
 
     // One publish, two subscriptions satisfied. Counting instances is the whole
