@@ -114,7 +114,7 @@ const SCRIPTED_AGENT = `async (job) => {
 
     const portionFor = (re) => clauses.filter((c) => re.test(c.toLowerCase())).join(" ");
 
-    const loanRequest = portionFor(/loan|mortgage|refinanc|interest rate|monthly payment|repayment/);
+    const loanRequest = portionFor(/loan|mortgage|refinanc|borrow|interest rate|monthly payment|repayment/);
     const accountRequest = portionFor(/iban|account number|sort code|routing number|bank details/);
     const cardRequest = portionFor(/\\bcard\\b|charge|\\bbin\\b|first six digits|issuer|issued it/);
 
@@ -156,13 +156,46 @@ const SCRIPTED_AGENT = `async (job) => {
     // words. Nothing is inferred — a missing figure is a reason to ask a
     // human, not to pick a plausible default.
     //
-    // The amount must be marked as money. An unmarked run of digits in a
-    // banking message is at least as likely to be an account number as an
-    // amount, and reading one as the other quotes a loan nobody asked for.
-    const amount = (request.match(/(?:\\$|USD\\s?|EUR\\s?|£)\\s?([\\d,]+(?:\\.\\d+)?)/i) || [])[1];
+    // The amount must be marked as money, either side of the number: an
+    // unmarked run of digits in a banking message is at least as likely to be
+    // an account number, and reading one as the other quotes a loan nobody
+    // asked for.
+    const MONEY = /(?:[$£€¥]|\\b(?:USD|EUR|GBP)\\b)\\s?([\\d,]+(?:\\.\\d+)?)|([\\d,]+(?:\\.\\d+)?)\\s?(?:[$£€¥]|\\b(?:USD|EUR|GBP)\\b)/gi;
+    const amounts = [];
+    for (const m of request.matchAll(MONEY)) {
+      amounts.push({ value: Number((m[1] ?? m[2]).replace(/,/g, "")), at: m.index ?? 0, text: m[0] });
+    }
+
+    // More than one sum, and only one of them is the thing being borrowed.
+    // "a $1,500 monthly payment for a $200,000 loan" quotes on 1,500 if you
+    // take the first, which reads as a plausible answer and is the wrong loan.
+    // A sum the customer describes as a payment is not the principal.
+    const isPayment = (a) =>
+      /^[\\s,]*(?:a\\s+)?(?:monthly|per month|a month|repayment|instal)/i.test(
+        request.slice(a.at + a.text.length),
+      );
+    const candidates = amounts.filter((a) => !isPayment(a));
+    // Still more than one, and nothing in the sentence says which: say so
+    // rather than pick. A wrong quote is worse than no quote, and a human can
+    // read the sentence in a second.
+    const ambiguous = candidates.length > 1;
+
+    const loanAmount = candidates.length === 1 ? candidates[0].value : undefined;
     const rate = (request.match(/([\\d.]+)\\s?%/) || [])[1];
     const years = (request.match(/(\\d+)[\\s-]*year/) || [])[1];
-    const loanAmount = amount ? Number(amount.replace(/,/g, "")) : undefined;
+
+    if (ambiguous) {
+      return {
+        completionConditionFulfilled: true,
+        variables: {
+          status: "needs-human",
+          summary:
+            "This request mentions more than one amount (" +
+            candidates.map((a) => a.text).join(", ") +
+            ") and I can't tell which is the loan, so a loan specialist should take it.",
+        },
+      };
+    }
 
     // Step 2's guard rails, stated as thresholds rather than judgement so the
     // same case always lands the same way.
@@ -404,7 +437,14 @@ const LOOKUP_CARD_BIN = `async (job, { text, sleep, trace }) => {
  */
 const RECORD_LOAN_RESOLUTION = `async (job, { num, text }) => {
   const v = job.variables;
-  if (v.status) return {};
+  // Kept only if it is actually an answer: a status the gateway understands
+  // and a summary the reviewer can read. A half-filled response would
+  // otherwise pass straight through to the customer as "undefined".
+  const usable =
+    (v.status === "resolved" || v.status === "needs-human") &&
+    typeof v.summary === "string" &&
+    v.summary.trim() !== "";
+  if (usable) return {};
 
   if (v.monthlyPayment === undefined) {
     return {
@@ -423,7 +463,14 @@ const RECORD_LOAN_RESOLUTION = `async (job, { num, text }) => {
 
 const RECORD_ACCOUNT_RESOLUTION = `async (job, { text }) => {
   const v = job.variables;
-  if (v.status) return {};
+  // Kept only if it is actually an answer: a status the gateway understands
+  // and a summary the reviewer can read. A half-filled response would
+  // otherwise pass straight through to the customer as "undefined".
+  const usable =
+    (v.status === "resolved" || v.status === "needs-human") &&
+    typeof v.summary === "string" &&
+    v.summary.trim() !== "";
+  if (usable) return {};
 
   if (v.ibanValid === undefined) {
     return {
@@ -440,7 +487,14 @@ const RECORD_ACCOUNT_RESOLUTION = `async (job, { text }) => {
 
 const RECORD_CARD_RESOLUTION = `async (job, { text }) => {
   const v = job.variables;
-  if (v.status) return {};
+  // Kept only if it is actually an answer: a status the gateway understands
+  // and a summary the reviewer can read. A half-filled response would
+  // otherwise pass straight through to the customer as "undefined".
+  const usable =
+    (v.status === "resolved" || v.status === "needs-human") &&
+    typeof v.summary === "string" &&
+    v.summary.trim() !== "";
+  if (usable) return {};
 
   if (v.cardInfo === undefined) {
     return {

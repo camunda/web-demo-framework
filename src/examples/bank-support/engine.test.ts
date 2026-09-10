@@ -427,4 +427,69 @@ describe("bank-support — what each specialist is given, and what it refuses", 
     expect(completedCount("EndEvent_ResolvedManually")).toBe(1);
     expect(completedCount("EndEvent_EscalatedFurther")).toBe(0);
   });
+
+  /** The currency marker can be a symbol or a code, and can follow the number. */
+  it.each([
+    ["a euro symbol", "What's the monthly payment on a €200,000 loan at 6% over 30 years?"],
+    ["a trailing code", "What's the monthly payment on a 200,000 GBP loan at 6% over 30 years?"],
+  ])("reads a loan amount marked with %s", async (_label, customerRequest) => {
+    await start({ customerRequest });
+
+    expect(completedCount("CalculateLoanPayment")).toBe(1);
+    expect(summarySaw.loanResolution).toMatchObject({ status: "resolved" });
+  });
+
+  /**
+   * Taking the first currency-marked number quotes on the monthly payment
+   * here, which reads as a perfectly plausible answer and is the wrong loan.
+   */
+  it("picks the principal, not the first sum in the sentence", async () => {
+    await start({
+      customerRequest:
+        "I can afford a $1,500 monthly payment for a $200,000 loan at 6% over 30 years - what would it actually be?",
+    });
+
+    const summary = String((summarySaw.loanResolution as { summary: string }).summary);
+    expect(summary).toContain("200000");
+    expect(summary).not.toContain("1500");
+  });
+
+  it("declines to guess when two sums could both be the loan", async () => {
+    await start({
+      customerRequest: "Could I borrow $200,000 or $300,000 at 6% over 30 years?",
+    });
+
+    expect(completedCount("CalculateLoanPayment")).toBe(0);
+    expect(summarySaw.loanResolution).toMatchObject({ status: "needs-human" });
+    expect(completedCount("NotifyCustomer")).toBe(0);
+  });
+
+  /**
+   * A live agent can report a status without the summary its prompt asks for.
+   * Passing that through auto-notifies the customer with "undefined" as the
+   * explanation, which is worse than escalating.
+   */
+  it("derives a summary when the agent gives a status but no words", async () => {
+    summarySaw = {};
+    session.reset();
+    session.deploy(bankSupport.bpmn);
+    session.createInstance(ORCHESTRATOR, JSON.stringify(scenario("Loan question")));
+    const scripted = compile(bankSupport.scriptedAgent!);
+    const halfAnswering: Record<string, AgentHandler> = {};
+    for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
+      halfAnswering[jobType] = async (job) => {
+        const r = (await scripted(job, helpersFor(job.variables))) as AgentResult;
+        if (job.elementId === "CustomerSupportOrchestrator") return r;
+        return r.completionConditionFulfilled
+          ? { completionConditionFulfilled: true, variables: { status: "resolved" } }
+          : r;
+      };
+    }
+    await dispatchWorkers(session, workers, { agents: halfAnswering });
+
+    const resolution = summarySaw.loanResolution as { status: string; summary: string };
+    expect(resolution.status).toBe("resolved");
+    expect(String(resolution.summary)).toMatch(/monthly payment/i);
+    expect(String(summarySaw.combinedSummary ?? "")).not.toMatch(/undefined/);
+  });
 });
