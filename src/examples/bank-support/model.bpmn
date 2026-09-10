@@ -200,9 +200,15 @@
         </bpmn:extensionElements>
       </bpmn:serviceTask>
     </bpmn:adHocSubProcess>
-    <bpmn:sequenceFlow id="Loan_FlowToEnd" sourceRef="LoanSupportAgent" targetRef="Loan_EndEvent" />
-    <bpmn:endEvent id="Loan_EndEvent" name="Loan case handled">
+    <bpmn:sequenceFlow id="Loan_FlowToEnd" sourceRef="LoanSupportAgent" targetRef="RecordLoanResolution" />
+    <bpmn:scriptTask id="RecordLoanResolution" name="Record loan resolution">
+      <bpmn:documentation>Guarantees this specialist returns a well-formed status and summary to whoever called it, whether or not the model produced the structured answer its prompt asks for.</bpmn:documentation>
       <bpmn:incoming>Loan_FlowToEnd</bpmn:incoming>
+      <bpmn:outgoing>Loan_FlowToRealEnd</bpmn:outgoing>
+    </bpmn:scriptTask>
+    <bpmn:sequenceFlow id="Loan_FlowToRealEnd" sourceRef="RecordLoanResolution" targetRef="Loan_EndEvent" />
+    <bpmn:endEvent id="Loan_EndEvent" name="Loan case handled">
+      <bpmn:incoming>Loan_FlowToRealEnd</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
   <bpmn:process id="bank-support-account-agent" name="Bank Support Account Agent" isExecutable="true">
@@ -237,9 +243,15 @@
         </bpmn:extensionElements>
       </bpmn:serviceTask>
     </bpmn:adHocSubProcess>
-    <bpmn:sequenceFlow id="Account_FlowToEnd" sourceRef="AccountSupportAgent" targetRef="Account_EndEvent" />
-    <bpmn:endEvent id="Account_EndEvent" name="Account case handled">
+    <bpmn:sequenceFlow id="Account_FlowToEnd" sourceRef="AccountSupportAgent" targetRef="RecordAccountResolution" />
+    <bpmn:scriptTask id="RecordAccountResolution" name="Record account resolution">
+      <bpmn:documentation>Guarantees this specialist returns a well-formed status and summary to whoever called it, whether or not the model produced the structured answer its prompt asks for.</bpmn:documentation>
       <bpmn:incoming>Account_FlowToEnd</bpmn:incoming>
+      <bpmn:outgoing>Account_FlowToRealEnd</bpmn:outgoing>
+    </bpmn:scriptTask>
+    <bpmn:sequenceFlow id="Account_FlowToRealEnd" sourceRef="RecordAccountResolution" targetRef="Account_EndEvent" />
+    <bpmn:endEvent id="Account_EndEvent" name="Account case handled">
+      <bpmn:incoming>Account_FlowToRealEnd</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
   <bpmn:process id="bank-support-card-agent" name="Bank Support Card Agent" isExecutable="true">
@@ -274,9 +286,15 @@
         </bpmn:extensionElements>
       </bpmn:serviceTask>
     </bpmn:adHocSubProcess>
-    <bpmn:sequenceFlow id="Card_FlowToEnd" sourceRef="CardSupportAgent" targetRef="Card_EndEvent" />
-    <bpmn:endEvent id="Card_EndEvent" name="Card case handled">
+    <bpmn:sequenceFlow id="Card_FlowToEnd" sourceRef="CardSupportAgent" targetRef="RecordCardResolution" />
+    <bpmn:scriptTask id="RecordCardResolution" name="Record card resolution">
+      <bpmn:documentation>Guarantees this specialist returns a well-formed status and summary to whoever called it, whether or not the model produced the structured answer its prompt asks for.</bpmn:documentation>
       <bpmn:incoming>Card_FlowToEnd</bpmn:incoming>
+      <bpmn:outgoing>Card_FlowToRealEnd</bpmn:outgoing>
+    </bpmn:scriptTask>
+    <bpmn:sequenceFlow id="Card_FlowToRealEnd" sourceRef="RecordCardResolution" targetRef="Card_EndEvent" />
+    <bpmn:endEvent id="Card_EndEvent" name="Card case handled">
+      <bpmn:incoming>Card_FlowToRealEnd</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
   <bpmndi:BPMNDiagram id="BPMNDiagram_Orchestrator">
@@ -381,8 +399,11 @@
       <bpmndi:BPMNShape id="CalculateLoanPayment_di" bpmnElement="CalculateLoanPayment">
         <dc:Bounds x="330" y="100" width="100" height="80" />
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="RecordLoanResolution_di" bpmnElement="RecordLoanResolution">
+        <dc:Bounds x="600" y="100" width="100" height="80" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Loan_EndEvent_di" bpmnElement="Loan_EndEvent">
-        <dc:Bounds x="612" y="122" width="36" height="36" />
+        <dc:Bounds x="762" y="122" width="36" height="36" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Loan_FlowToAgent_di" bpmnElement="Loan_FlowToAgent">
         <di:waypoint x="198" y="140" />
@@ -390,7 +411,11 @@
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Loan_FlowToEnd_di" bpmnElement="Loan_FlowToEnd">
         <di:waypoint x="550" y="140" />
-        <di:waypoint x="612" y="140" />
+        <di:waypoint x="600" y="140" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Loan_FlowToRealEnd_di" bpmnElement="Loan_FlowToRealEnd">
+        <di:waypoint x="700" y="140" />
+        <di:waypoint x="762" y="140" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
@@ -405,8 +430,11 @@
       <bpmndi:BPMNShape id="ValidateIban_di" bpmnElement="ValidateIban">
         <dc:Bounds x="330" y="100" width="100" height="80" />
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="RecordAccountResolution_di" bpmnElement="RecordAccountResolution">
+        <dc:Bounds x="600" y="100" width="100" height="80" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Account_EndEvent_di" bpmnElement="Account_EndEvent">
-        <dc:Bounds x="612" y="122" width="36" height="36" />
+        <dc:Bounds x="762" y="122" width="36" height="36" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Account_FlowToAgent_di" bpmnElement="Account_FlowToAgent">
         <di:waypoint x="198" y="140" />
@@ -414,7 +442,11 @@
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Account_FlowToEnd_di" bpmnElement="Account_FlowToEnd">
         <di:waypoint x="550" y="140" />
-        <di:waypoint x="612" y="140" />
+        <di:waypoint x="600" y="140" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Account_FlowToRealEnd_di" bpmnElement="Account_FlowToRealEnd">
+        <di:waypoint x="700" y="140" />
+        <di:waypoint x="762" y="140" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
@@ -429,8 +461,11 @@
       <bpmndi:BPMNShape id="LookupCardBin_di" bpmnElement="LookupCardBin">
         <dc:Bounds x="330" y="100" width="100" height="80" />
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="RecordCardResolution_di" bpmnElement="RecordCardResolution">
+        <dc:Bounds x="600" y="100" width="100" height="80" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Card_EndEvent_di" bpmnElement="Card_EndEvent">
-        <dc:Bounds x="612" y="122" width="36" height="36" />
+        <dc:Bounds x="762" y="122" width="36" height="36" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Card_FlowToAgent_di" bpmnElement="Card_FlowToAgent">
         <di:waypoint x="198" y="140" />
@@ -438,7 +473,11 @@
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Card_FlowToEnd_di" bpmnElement="Card_FlowToEnd">
         <di:waypoint x="550" y="140" />
-        <di:waypoint x="612" y="140" />
+        <di:waypoint x="600" y="140" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Card_FlowToRealEnd_di" bpmnElement="Card_FlowToRealEnd">
+        <di:waypoint x="700" y="140" />
+        <di:waypoint x="762" y="140" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

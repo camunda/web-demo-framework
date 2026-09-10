@@ -836,7 +836,7 @@ export function ExampleRunner({
    * of calling this again (see `canResume` in both callbacks below), so
    * stepping and running always drive the *same* instance.
    */
-  const beginRun = useCallback(async () => {
+  const beginRun = useCallback(async (seq: number) => {
     // The scripted brain's agent code isn't part of the draft's handler
     // resolution (it's the LLM stand-in, not a BPMN element handler), so it's
     // still compiled here, next to the editor, before the engine is touched.
@@ -995,7 +995,11 @@ export function ExampleRunner({
     const instanceKey = snap?.instances[0]?.key;
     // Whatever this run started is its root — every later "is it finished"
     // question is about this instance, not about any child it delegates to.
-    rootInstanceKeyRef.current = instanceKey ?? null;
+    // Only if this call is still the current run, though: `beginRun` awaits,
+    // and a Reset or a newer Start in that window has already cleared or set
+    // the key, so a superseded call writing here would scope `rootCompleted`
+    // and `displayableVars` to an instance nobody is watching.
+    if (runSeqRef.current === seq) rootInstanceKeyRef.current = instanceKey ?? null;
     if (example.imageInput && imageSelection && instanceKey)
       run.setRunImage(instanceKey, imageSelection);
     return { workers, agents, snap };
@@ -1084,7 +1088,7 @@ export function ExampleRunner({
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
         setCompileError(null);
-        const prepared = await beginRun();
+        const prepared = await beginRun(seq);
         if (!prepared) return;
         workers = prepared.workers;
         agents = prepared.agents;
@@ -1154,7 +1158,7 @@ export function ExampleRunner({
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
         setCompileError(null);
-        const prepared = await beginRun();
+        const prepared = await beginRun(seq);
         if (!prepared) return;
         workers = prepared.workers;
         agents = prepared.agents;

@@ -358,6 +358,75 @@ const LOOKUP_CARD_BIN = `async (job, { text, sleep, trace }) => {
   };
 }`;
 
+/**
+ * Each specialist's last step, and the reason a live brain works here at all.
+ *
+ * Upstream, the specialist's answer *is* the agent's structured response: the
+ * AI Agent connector's own output mapping lifts `agent.responseJson.status`
+ * and `.summary` into process variables. This engine does not apply that
+ * mapping, so nothing would set them and every call activity would hand the
+ * orchestrator `{status: null, summary: null}` — every case escalating, however
+ * well the specialist actually did.
+ *
+ * So the agent's own answer is used when it gave one, and otherwise the
+ * outcome is derived from what the tool returned. Deriving it is not a
+ * silent fallback: a specialist that reached no conclusion and ran no tool
+ * still says `needs-human`, which is the honest answer rather than a
+ * manufactured one.
+ */
+const RECORD_LOAN_RESOLUTION = `async (job, { num, text }) => {
+  const v = job.variables;
+  if (v.status) return {};
+
+  if (v.monthlyPayment === undefined) {
+    return {
+      status: "needs-human",
+      summary: "No monthly payment was calculated for this request, so a loan specialist should take it.",
+    };
+  }
+  return {
+    status: "resolved",
+    summary:
+      "Monthly payment on a " + num("loanAmount") + " loan at " +
+      num("annualInterestRatePercent") + "% over " + (num("termInMonths") / 12) +
+      " years is " + num("monthlyPayment") + ".",
+  };
+}`;
+
+const RECORD_ACCOUNT_RESOLUTION = `async (job, { text }) => {
+  const v = job.variables;
+  if (v.status) return {};
+
+  if (v.ibanValid === undefined) {
+    return {
+      status: "needs-human",
+      summary: "No account identifier was validated for this request.",
+    };
+  }
+  return {
+    // The tool's verdict, not a re-reading of the identifier.
+    status: v.ibanValid ? "resolved" : "needs-human",
+    summary: text("toolCallResult", "The account identifier was checked."),
+  };
+}`;
+
+const RECORD_CARD_RESOLUTION = `async (job, { text }) => {
+  const v = job.variables;
+  if (v.status) return {};
+
+  if (v.cardInfo === undefined) {
+    return {
+      status: "needs-human",
+      summary: "No card number digits were available to look up.",
+    };
+  }
+  // A lookup that finds no issuer still answers the customer's question.
+  return {
+    status: "resolved",
+    summary: text("toolCallResult", "The card BIN was looked up."),
+  };
+}`;
+
 const PREPARE_CASE_SUMMARY = `async (job) => {
   // Deterministic aggregation, deliberately downstream of the agent: it reads
   // what each specialist returned through its own call activity, not the
@@ -442,6 +511,21 @@ export const bankSupport: ExampleDef = {
       elementId: "PrepareCaseSummary",
       standsInFor: "script task — combine every specialist's resolution",
       source: PREPARE_CASE_SUMMARY,
+    },
+    {
+      elementId: "RecordLoanResolution",
+      standsInFor: "script task — the specialist's structured answer",
+      source: RECORD_LOAN_RESOLUTION,
+    },
+    {
+      elementId: "RecordAccountResolution",
+      standsInFor: "script task — the specialist's structured answer",
+      source: RECORD_ACCOUNT_RESOLUTION,
+    },
+    {
+      elementId: "RecordCardResolution",
+      standsInFor: "script task — the specialist's structured answer",
+      source: RECORD_CARD_RESOLUTION,
     },
     {
       elementId: "NotifyCustomer",

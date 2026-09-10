@@ -92,6 +92,32 @@ function buildAgents(): Record<string, AgentHandler> {
   return agents;
 }
 
+/**
+ * A stand-in for the live-brain path: the specialists run their tool and then
+ * stop, without the structured `status`/`summary` the scripted agent supplies.
+ * That is what a live brain actually does here — `liveAgent` completes on the
+ * model saying it is done, and this engine does not apply the AI Agent
+ * connector's `agent.responseJson.*` output mapping.
+ */
+function buildAgentsWithNoStructuredAnswer(): Record<string, AgentHandler> {
+  const scripted = compile(bankSupport.scriptedAgent!);
+  const agents: Record<string, AgentHandler> = {};
+  for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
+    agents[jobType] = async (job) => {
+      const result = (await scripted(
+        job,
+        helpersFor(job.variables),
+      )) as AgentResult;
+      if (job.elementId === "CustomerSupportOrchestrator") return result;
+      // Keep the routing, drop the answer.
+      return result.completionConditionFulfilled
+        ? { completionConditionFulfilled: true }
+        : result;
+    };
+  }
+  return agents;
+}
+
 const scenario = (label: string): Record<string, unknown> => {
   const found = bankSupport.scenarios?.find((s) => s.label.startsWith(label));
   if (!found) throw new Error(`no scenario starting "${label}"`);
@@ -118,6 +144,20 @@ async function start(seed: Record<string, unknown>): Promise<string> {
   session.deploy(bankSupport.bpmn);
   session.createInstance(ORCHESTRATOR, JSON.stringify(seed));
   const result = await dispatchWorkers(session, workers, { agents });
+  return result.reason;
+}
+
+/** As `start`, but with agents that give no structured final answer. */
+async function startWithoutStructuredAnswer(
+  seed: Record<string, unknown>,
+): Promise<string> {
+  summarySaw = {};
+  session.reset();
+  session.deploy(bankSupport.bpmn);
+  session.createInstance(ORCHESTRATOR, JSON.stringify(seed));
+  const result = await dispatchWorkers(session, workers, {
+    agents: buildAgentsWithNoStructuredAnswer(),
+  });
   return result.reason;
 }
 
@@ -288,5 +328,32 @@ describe("bank-support on the live engine", () => {
     const vars = liveVariables();
     expect(vars.allResolved).toBe(false);
     expect(String(vars.combinedSummary)).toMatch(/No specialist agent was called/i);
+  });
+
+  /**
+   * The specialist's answer is the agent's structured response upstream, and
+   * this engine doesn't apply the mapping that would deliver it. Without a
+   * deterministic last step in each specialist, every case would escalate on a
+   * live brain however well the specialist did — a failure invisible on the
+   * scripted brain, which supplies the answer itself.
+   */
+  it("still resolves when the agent gives no structured answer", async () => {
+    const reason = await startWithoutStructuredAnswer(scenario("Loan question"));
+
+    expect(completedCount("CalculateLoanPayment")).toBe(1);
+    expect(summarySaw.loanResolution).toMatchObject({ status: "resolved" });
+    expect(
+      String((summarySaw.loanResolution as { summary: string }).summary),
+    ).toMatch(/monthly payment/i);
+    expect(completedCount("NotifyCustomer")).toBe(1);
+    expect(reason).not.toBe("userTasks");
+  });
+
+  it("still escalates a failed check when the agent gives no structured answer", async () => {
+    await startWithoutStructuredAnswer(scenario("Account question"));
+
+    expect(summarySaw.accountResolution).toMatchObject({ status: "needs-human" });
+    expect(openUserTaskIds()).toEqual(["ReviewEscalatedCase"]);
+    expect(completedCount("NotifyCustomer")).toBe(0);
   });
 });
