@@ -177,11 +177,11 @@ export function buildWorkers(
       const onThisElement = listeners.filter((l) => l.elementId === job.elementId);
 
       if (onThisElement.length) {
-        // Two listeners on one element sharing a job type are indistinguishable
-        // from here — `ActivatedJob` carries no event type — so prefer the one
-        // the manifest wrote code for. draft.ts reports the ambiguity up front.
-        const listener = onThisElement.find((l) => byElement[l.key]) ?? onThisElement[0];
-        // Indexing a Record types as always-present; a missing one is the norm.
+        // All of these share this element *and* this job type, so they share a
+        // key and nothing here can tell them apart. draft.ts refuses that model
+        // before Run; taking the first keeps a direct buildWorkers call honest.
+        const listener = onThisElement[0];
+        // Indexing a Record types it as always-present; a missing one is the norm.
         const handler = byElement[listener.key] as ExampleHandler | undefined;
         trace({
           kind: "step",

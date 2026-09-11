@@ -118,7 +118,15 @@ export interface TaskListenerSpec {
   eventType: string;
   /** The job type the engine will offer it under. */
   jobType: string;
-  /** `<elementId>:<eventType>`, the manifest's handle for it. */
+  /**
+   * `<elementId>:<jobType>`, the manifest's handle for it.
+   *
+   * Element and job type, not event type: Camunda allows several listeners on
+   * one `eventType`, distinguished only by their job types, so keying on the
+   * event would collapse them onto one handler. This pair is also exactly what
+   * an activated job carries, so the key a manifest writes is the key the
+   * runner routes on.
+   */
   key: string;
 }
 
@@ -527,7 +535,7 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
       const eventType = listener.getAttribute("eventType") ?? "unknown";
       const jobType = listener.getAttribute("type");
       if (!jobType) continue;
-      taskListeners.push({ elementId, eventType, jobType, key: `${elementId}:${eventType}` });
+      taskListeners.push({ elementId, eventType, jobType, key: `${elementId}:${jobType}` });
     }
   }
 

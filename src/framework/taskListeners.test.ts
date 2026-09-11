@@ -74,7 +74,14 @@ const SHARED_JOB_TYPE = `<?xml version="1.0" encoding="UTF-8"?>
   </bpmn:process>
 </bpmn:definitions>`;
 
-const example = (bpmn: string, handlers: { elementId: string; source: string }[]): ExampleDef => ({
+/** Two listeners on one `eventType`, which Camunda allows — told apart only by job type. */
+const TWO_ON_ONE_EVENT = WITH_LISTENER.replace(
+  '<zeebe:taskListener eventType="creating" type="notify-reviewer" />',
+  '<zeebe:taskListener eventType="creating" type="notify-reviewer" />' +
+    '<zeebe:taskListener eventType="creating" type="log-creation" />',
+);
+
+const example = (bpmn: string, handlers: ExampleDef["handlers"]): ExampleDef => ({
   id: "x",
   title: "x",
   blurb: "x",
@@ -101,7 +108,7 @@ describe("task listeners", () => {
         elementId: "Review",
         eventType: "creating",
         jobType: "notify-reviewer",
-        key: "Review:creating",
+        key: "Review:notify-reviewer",
       },
     ]);
   });
@@ -131,7 +138,7 @@ describe("task listeners", () => {
   it("runs the manifest's code when one is supplied", async () => {
     const model = parseModel(WITH_LISTENER);
     const handler: ExampleHandler = () => ({ notified: true });
-    const workers = buildWorkers(model, { "Review:creating": handler }, () => {});
+    const workers = buildWorkers(model, { "Review:notify-reviewer": handler }, () => {});
 
     await expect(workers["notify-reviewer"](job("Review", "notify-reviewer"))).resolves.toEqual({
       notified: true,
@@ -150,11 +157,11 @@ describe("task listeners", () => {
     const workers = buildWorkers(
       model,
       {
-        "Review:creating": () => {
+        "Review:notify": () => {
           ran.push("review");
           return { a: 1 };
         },
-        "Approve:completing": () => {
+        "Approve:notify": () => {
           ran.push("approve");
           return { b: 2 };
         },
@@ -192,10 +199,12 @@ describe("task listeners", () => {
   describe("through the draft pipeline the runner actually uses", () => {
     it("resolves a listener handler the manifest supplies", () => {
       const draft = buildDraftRunDefinition(
-        example(WITH_LISTENER, [{ elementId: "Review:creating", source: "() => ({ ok: true })" }]),
+        example(WITH_LISTENER, [
+          { elementId: "Review:notify-reviewer", source: "() => ({ ok: true })" },
+        ]),
       );
 
-      expect(Object.keys(draft.handlers)).toContain("Review:creating");
+      expect(Object.keys(draft.handlers)).toContain("Review:notify-reviewer");
       expect(draft.diagnostics).toEqual([]);
       expect(draft.hasErrors).toBe(false);
     });
@@ -232,6 +241,66 @@ describe("task listeners", () => {
       expect(draft.hasErrors).toBe(true);
       expect(draft.diagnostics.map((d) => d.message).join("\n")).toContain(
         'share the job type "notify-reviewer"',
+      );
+    });
+
+    /**
+     * Camunda allows several listeners on one event type, told apart only by
+     * their job types. Keying the manifest on the event would collapse them
+     * onto one handler and silently run one listener's code for both.
+     */
+    it("addresses two listeners on the same event type separately", async () => {
+      const draft = buildDraftRunDefinition(
+        example(TWO_ON_ONE_EVENT, [
+          { elementId: "Review:notify-reviewer", source: "() => ({ notified: true })" },
+          { elementId: "Review:log-creation", source: "() => ({ logged: true })" },
+        ]),
+      );
+
+      expect(draft.diagnostics).toEqual([]);
+      expect(Object.keys(draft.handlers).sort()).toEqual([
+        "Review:log-creation",
+        "Review:notify-reviewer",
+      ]);
+
+      // Handlers off the draft are sandboxed and can't run here, so routing is
+      // proven with plain ones against the same parsed model.
+      const workers = buildWorkers(
+        draft.model,
+        {
+          "Review:notify-reviewer": () => ({ notified: true }),
+          "Review:log-creation": () => ({ logged: true }),
+        },
+        () => {},
+      );
+      await expect(workers["notify-reviewer"](job("Review", "notify-reviewer"))).resolves.toEqual({
+        notified: true,
+      });
+      await expect(workers["log-creation"](job("Review", "log-creation"))).resolves.toEqual({
+        logged: true,
+      });
+    });
+
+    /**
+     * A manual control holds back a whole job type and the engine completes it
+     * by type, so neither end can single out an element. Sharing a type with a
+     * manually controlled task would complete the listener as if it were that
+     * task — refused rather than allowed to run wrong.
+     */
+    it("refuses a listener sharing a job type with a manually controlled task", () => {
+      const draft = buildDraftRunDefinition(
+        example(SHARED_JOB_TYPE, [
+          {
+            elementId: "Archive",
+            source: "() => ({})",
+            manualControl: { label: "Archive", action: { kind: "timer", label: "Time it out" } },
+          },
+        ]),
+      );
+
+      expect(draft.hasErrors).toBe(true);
+      expect(draft.diagnostics.map((d) => d.message).join("\n")).toContain(
+        "which is manually controlled",
       );
     });
   });

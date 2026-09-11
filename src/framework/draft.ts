@@ -156,7 +156,7 @@ export function buildDraftRunDefinition(
     }
   }
 
-  // Task listeners are addressed as `<elementId>:<eventType>` rather than by
+  // Task listeners are addressed as `<elementId>:<jobType>` rather than by
   // element, and — unlike a task — supplying code for one is optional: a model
   // that merely carries a listener still runs, with the listener as a no-op.
   // So a missing source is not a diagnostic here; only one that fails to
@@ -179,9 +179,10 @@ export function buildDraftRunDefinition(
     }
   }
 
-  // Two listeners on one element under one job type cannot be told apart at
-  // run time — `ActivatedJob` carries only `type` and `elementId` — so say so
-  // here rather than let compile.ts guess which one a job meant.
+  // Two listeners on one element under one job type share a key and cannot be
+  // told apart at run time — an activated job carries only `type` and
+  // `elementId` — so say so here rather than let compile.ts guess which one a
+  // job meant. This is also what makes `listener.key` unique.
   const seenListenerJob = new Map<string, TaskListenerSpec>();
   for (const listener of listeners) {
     const slot = `${listener.elementId}\u0000${listener.jobType}`;
@@ -196,6 +197,27 @@ export function buildDraftRunDefinition(
     } else {
       seenListenerJob.set(slot, listener);
     }
+  }
+
+  // A manual control holds a whole job *type* back from the drive loop, and the
+  // engine's manual completion is keyed by type too — neither can single out an
+  // element. So a listener sharing a type with a manually controlled task would
+  // be silently completed as if it were that task, never running its own code.
+  const manuallyControlled = new Set(
+    example.handlers.filter((h) => h.manualControl).map((h) => h.elementId),
+  );
+  const manualJobTypes = new Map(
+    allTasks.filter((t) => manuallyControlled.has(t.elementId)).map((t) => [t.jobType, t]),
+  );
+  for (const listener of listeners) {
+    const task = manualJobTypes.get(listener.jobType);
+    if (!task) continue;
+    diagnostics.push({
+      severity: "error",
+      elementId: listener.elementId,
+      jobType: listener.jobType,
+      message: `The ${listener.eventType} listener on "${listener.elementId}" shares the job type "${listener.jobType}" with "${task.label}" (${task.elementId}), which is manually controlled. Manual control holds back a whole job type, so the listener would be completed as if it were that task. Give the listener its own type.`,
+    });
   }
 
   // Orphaned handlers: source naming an element the current diagram no longer
