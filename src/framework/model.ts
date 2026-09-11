@@ -103,25 +103,6 @@ export interface TaskSpec {
   compound?: boolean;
 }
 
-/**
- * A `zeebe:taskListener` on a user task: code the engine runs at a point in the
- * task's lifecycle rather than as a step in the flow.
- *
- * It has no element of its own, so it cannot be addressed by element id the way
- * every other handler is — hence `key`, which is what a manifest names to
- * supply code for it.
- */
-export interface TaskListenerSpec {
-  /** The user task it is attached to. */
-  elementId: string;
-  /** `creating`, `assigning`, `completing`, … — the lifecycle point. */
-  eventType: string;
-  /** The job type the engine will offer it under. */
-  jobType: string;
-  /** `<elementId>:<eventType>`, the manifest's handle for it. */
-  key: string;
-}
-
 /** A `userTask` — a human step the runner renders a form for. */
 export interface UserTaskSpec {
   elementId: string;
@@ -142,7 +123,6 @@ export interface ProcessSpec {
    */
   agents: AgentSpec[];
   userTasks: UserTaskSpec[];
-  taskListeners: TaskListenerSpec[];
   /** The `formId` bound to the start event, if any. */
   startFormId?: string;
   /**
@@ -210,7 +190,6 @@ export interface ModelInfo {
   /** Every agent host across every process — what a multi-host run needs. */
   agents: AgentSpec[];
   userTasks: UserTaskSpec[];
-  taskListeners: TaskListenerSpec[];
   /** The `formId` bound to the primary process's start event, if any. */
   startFormId?: string;
   /** The primary process's message start event, if it has one. */
@@ -517,20 +496,6 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
 
   const agents = agentHosts.map((host) => agentSpecOf(host, toolsByHost.get(host)!));
 
-  // Listeners are jobs like any other: the engine offers them and waits. With
-  // nothing registered the round settles "unhandledJobs" and the run stops dead
-  // on a job type the reader has no way to answer.
-  const taskListeners: TaskListenerSpec[] = [];
-  for (const el of Array.from(process.getElementsByTagNameNS(BPMN_NS, "userTask"))) {
-    const elementId = el.getAttribute("id") ?? "";
-    for (const listener of zeebeEls(el, "taskListener")) {
-      const eventType = listener.getAttribute("eventType") ?? "unknown";
-      const jobType = listener.getAttribute("type");
-      if (!jobType) continue;
-      taskListeners.push({ elementId, eventType, jobType, key: `${elementId}:${eventType}` });
-    }
-  }
-
   const userTasks: UserTaskSpec[] = Array.from(
     process.getElementsByTagNameNS(BPMN_NS, "userTask"),
   ).map((el) => ({
@@ -570,7 +535,6 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     tasks,
     agents,
     userTasks,
-    taskListeners,
     startFormId,
     startMessage,
     boundaryEvents,
@@ -710,8 +674,6 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
     agent: primary.agents[0] ?? null,
     agents: processes.flatMap((p) => p.agents),
     userTasks: primary.userTasks,
-    // Every process: a listener in a called process is as unhandled as one here.
-    taskListeners: processes.flatMap((p) => p.taskListeners),
     startFormId: primary.startFormId,
     startMessage: primary.startMessage,
     boundaryEvents: processes.flatMap((p) => p.boundaryEvents),

@@ -131,12 +131,6 @@ export function buildWorkers(
   // exist, so the worker map must be able to serve them too.
   const allTasks = model.processes.flatMap((p) => p.tasks);
   const labels = new Map(allTasks.map((t) => [t.elementId, t.label]));
-  // User tasks carry no job type of their own, so they are absent from
-  // `tasks` — but a listener's trace line has to name the task the reader sees.
-  // Callers hand-build a ModelInfo in places, so neither collection is assumed.
-  for (const p of model.processes)
-    for (const ut of p.userTasks ?? [])
-      if (!labels.has(ut.elementId)) labels.set(ut.elementId, ut.label);
 
   for (const task of allTasks) {
     // A compound tool (embedded sub-process / call activity) carries no single
@@ -153,42 +147,6 @@ export function buildWorkers(
       const label = labels.get(job.elementId) ?? job.elementId;
       const turn = turnRef?.current;
       trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
-      const out = await handler(job, helpersFor(job, trace, turn, vision));
-      trace({
-        kind: "vars",
-        text: `  ↳ ${safeStringify(out)}`,
-        elementId: job.elementId,
-        result: out,
-        turn,
-      });
-      return out as Record<string, unknown> | undefined;
-    };
-  }
-
-  // Task listeners. The engine offers these as ordinary jobs, so leaving them
-  // unregistered stops the run on a job type the reader cannot answer — and
-  // unlike every other handler a listener has no element of its own, so a
-  // manifest addresses it as `<elementId>:<eventType>`.
-  //
-  // An unclaimed listener runs as a no-op rather than failing: a model that
-  // carries one should still run, and "this fired and did nothing" is a
-  // truthful thing to show. Supplying code for it is then opt-in.
-  for (const listener of model.taskListeners ?? []) {
-    if (workers[listener.jobType]) continue;
-    workers[listener.jobType] = async (job) => {
-      // Indexing a Record types as always-present; a missing listener handler is the normal case.
-      const handler = byElement[`${job.elementId}:${listener.eventType}`] as
-        | ExampleHandler
-        | undefined;
-      const label = labels.get(job.elementId) ?? job.elementId;
-      const turn = turnRef?.current;
-      trace({
-        kind: "step",
-        text: `🎧 ${label} — ${listener.eventType} listener${handler ? "" : " (no code supplied)"}`,
-        elementId: job.elementId,
-        turn,
-      });
-      if (!handler) return undefined;
       const out = await handler(job, helpersFor(job, trace, turn, vision));
       trace({
         kind: "vars",
