@@ -13,7 +13,7 @@
 //   node tools/probe/coverage-check.mjs
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { createBojtosSession } from "@nanobpm/bojtos-kit";
 import { probe, driveToQuiescence, loadWasm } from "./index.mjs";
@@ -22,6 +22,37 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, "fixtures");
 
 const results = [];
+
+/**
+ * Which construct each check proves, for `tools/audit/construct-coverage.mjs`
+ * to read instead of keeping its own list. A hand-maintained "verified" column
+ * drifts the moment a check is renamed or deleted, and a stale one is worse
+ * than none: it says something has been checked when nothing checks it.
+ *
+ * Validated at the end of every run — a name here that no check records is a
+ * hard error, not a quiet mismatch.
+ */
+export const PROVEN_CONSTRUCTS = {
+  serviceTask: "timer (timeDuration)",
+  startEvent: "timer (timeDuration)",
+  endEvent: "timer (timeDuration)",
+  sequenceFlow: "timer (timeDuration)",
+  timerEventDefinition: "timer (timeDuration)",
+  messageEventDefinition: "message correlation",
+  intermediateCatchEvent: "message correlation",
+  signalEventDefinition: "signal broadcast",
+  multiInstanceLoopCharacteristics: "multi-instance (parallel)",
+  errorEventDefinition: "error boundary event",
+  boundaryEvent: "error boundary event",
+  exclusiveGateway: "exclusive gateway (conditional + default flow)",
+  subProcess: "ad-hoc sub-process: embedded sub-process as a compound tool",
+  adHocSubProcess: "ad-hoc sub-process: embedded sub-process as a compound tool",
+  parallelGateway: "parallel gateway (fork and join)",
+  task: "abstract task and manual task (pass-through)",
+  manualTask: "abstract task and manual task (pass-through)",
+  intermediateThrowEvent: "intermediate throw event (signal)",
+  eventBasedGateway: "event-based gateway (race, loser cancelled)",
+};
 
 function record(name, ok, detail) {
   results.push({ name, ok, detail });
@@ -542,6 +573,125 @@ async function runAgentInterruptFixture() {
   }
 }
 
+
+/**
+ * The constructs `tools/audit/construct-coverage.mjs` found in real Camunda
+ * models that nothing here had ever driven. Each verdict in that audit's
+ * "verified" column points at one of these, so the claim is backed by a run
+ * rather than by a note written after probing once by hand.
+ */
+async function runAuditedConstructsFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "audited-constructs.bpmn"), "utf8");
+
+  // --- parallel gateway: fork, both branches, join ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-parallel", "{}");
+      const ran = new Set();
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-branch": (job) => { ran.add(job.elementId); return {}; } },
+        {},
+        20,
+      );
+      // Both branches, not just one: a fork that ran a single side and still
+      // completed would look identical from the instance count alone.
+      const ok =
+        ran.has("BranchA") && ran.has("BranchB") && snapshot.completedInstances >= 1;
+      record(
+        "parallel gateway (fork and join)",
+        ok,
+        ok
+          ? "both branches ran and the join completed the instance"
+          : `ran ${JSON.stringify([...ran])}, completed ${snapshot.completedInstances}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- bpmn:task / bpmn:manualTask: no implementation, no job, no stall ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-passthrough", "{}");
+      const { snapshot } = await driveToQuiescence(session, {}, {}, 20);
+      const ok = snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+      record(
+        "abstract task and manual task (pass-through)",
+        ok,
+        ok
+          ? "neither offered a job, and the token carried on through both"
+          : `completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- intermediate throw event: carries on rather than waiting ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-throw", "{}");
+      let after = false;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-after-throw": () => { after = true; return {}; } },
+        {},
+        20,
+      );
+      // The element after the throw is the assertion: a throw event treated as
+      // a wait state would park here instead, which is how link events fail.
+      const ok = after && snapshot.completedInstances >= 1;
+      record(
+        "intermediate throw event (signal)",
+        ok,
+        ok
+          ? "the token passed through the throw and finished the process"
+          : `element after the throw ran: ${after}, completed ${snapshot.completedInstances}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- event-based gateway: both arm, first wins, loser is cancelled ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-event-gateway", JSON.stringify({ k: "K1" }));
+      const armed = session.snapshot();
+      const bothArmed = armed.messageSubscriptions.length === 1 && armed.timers.length === 1;
+
+      const snap = session.correlateMessage("probe-race-msg", "K1", "{}");
+      const tookMessage = snap.takenSequenceFlows.some((f) => f.from === "OnMessage");
+      const tookTimer = snap.takenSequenceFlows.some((f) => f.from === "OnTimeout");
+      // "Message won" is only half of it. The timer has to be *gone*, or the
+      // gateway is a parallel split wearing a diamond.
+      const ok =
+        bothArmed && tookMessage && !tookTimer && snap.timers.length === 0 &&
+        snap.completedInstances >= 1;
+      record(
+        "event-based gateway (race, loser cancelled)",
+        ok,
+        !bothArmed
+          ? `both events did not arm: ${armed.messageSubscriptions.length} subscription(s), ${armed.timers.length} timer(s)`
+          : ok
+            ? "message won, the timer was cancelled, and the instance completed once"
+            : `took message: ${tookMessage}, took timer: ${tookTimer}, timers left: ${snap.timers.length}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
@@ -558,11 +708,27 @@ async function main() {
   await runAdHocInnerFlowFixture();
   await runAdHocBoundaryCancelFixture();
   await runAgentInterruptFixture();
+  await runAuditedConstructsFixture();
 
   console.log("\nSummary:");
   for (const r of results) console.log(`  ${r.ok ? "✅" : "❌"} ${r.name}`);
+
+  // The audit downstream trusts this map; a name pointing at a check that no
+  // longer exists would have it report proof that nothing produces.
+  const recorded = new Set(results.map((r) => r.name));
+  const dangling = [...new Set(Object.values(PROVEN_CONSTRUCTS))].filter(
+    (name) => !recorded.has(name),
+  );
+  if (dangling.length) {
+    process.exitCode = 1;
+    console.log(
+      `\n❌ PROVEN_CONSTRUCTS names ${dangling.length} check(s) that did not run: ${dangling.join(", ")}`,
+    );
+  }
 }
 
+// Importable for its PROVEN_CONSTRUCTS map without running the whole suite.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
 main().catch((e) => {
   console.error(e instanceof Error ? (e.stack ?? e.message) : String(e));
   process.exit(1);
