@@ -108,8 +108,7 @@ const EXTENSION_INTENT = {
   userTask: ["by design", "a marker; the framework keys off the element type"],
 
   // Each of these was probed: the engine supports it, so the gap is ours.
-  taskListener: ["GAP", "the engine offers a listener job; nothing registers a worker for it, so the run would stop on an unhandled job type the manifest has no way to answer"],
-  taskListeners: ["GAP", "as taskListener — the container element"],
+  taskListeners: ["by design", "as taskListener — the container element"],
   assignmentDefinition: ["GAP", "the engine reports assignee and candidateGroups on the task; the runner shows neither, so a reader can't see who a task is for"],
   priorityDefinition: ["GAP", "the engine reports priority; the runner ignores it"],
   calledElement: ["GAP", "a call activity's target process is not modelled, so nothing can name what it delegates to"],
