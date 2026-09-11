@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseModel } from "./model";
+import { labelForHandlerKey, parseModel } from "./model";
 import { buildWorkers } from "./compile";
 import { buildDraftRunDefinition } from "./draft";
 import type { ExampleDef, ExampleHandler } from "./types";
@@ -302,6 +302,29 @@ describe("task listeners", () => {
       expect(draft.diagnostics.map((d) => d.message).join("\n")).toContain(
         "which is manually controlled",
       );
+    });
+  });
+
+  /**
+   * A listener key names no element, so the code panel's "find the task with
+   * this id" lookup falls through and the tab is headed with the raw key —
+   * a pseudo-element the diagram doesn't have.
+   */
+  describe("labelForHandlerKey", () => {
+    it("names the task and the lifecycle point for a listener key", () => {
+      const model = parseModel(WITH_LISTENER);
+      expect(labelForHandlerKey(model, "Review:notify-reviewer")).toBe(
+        "Review the case — creating listener",
+      );
+    });
+
+    it("still labels an ordinary element by its task label", () => {
+      const model = parseModel(SHARED_JOB_TYPE);
+      expect(labelForHandlerKey(model, "Archive")).toBe("Archive the case");
+    });
+
+    it("falls back to the key itself when nothing matches", () => {
+      expect(labelForHandlerKey(parseModel(WITH_LISTENER), "Gone")).toBe("Gone");
     });
   });
 });

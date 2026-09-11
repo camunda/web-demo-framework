@@ -36,7 +36,12 @@ export interface DraftRunDefinition {
   resolvedBpmn: string;
   /** The parsed model — every process, agent host, task and diagnostic model.ts found. */
   model: ModelInfo;
-  /** Compiled handlers, keyed by BPMN element id. Only elements that compiled cleanly appear. */
+  /**
+   * Compiled handlers, keyed by BPMN element id — or, for a task listener, by
+   * its `<elementId>:<jobType>` key (see `TaskListenerSpec`). Only entries that
+   * compiled cleanly appear, and a listener with no source is absent by design
+   * rather than by failure.
+   */
   handlers: Record<string, ExampleHandler>;
   /** Resolved form schemas, keyed by `formId`. Only forms that resolved appear. */
   forms: Record<string, FormSchema>;

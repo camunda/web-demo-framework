@@ -725,3 +725,17 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
     boundaryEvents: processes.flatMap((p) => p.boundaryEvents),
   };
 }
+
+/**
+ * The heading a reader should see for a handler key. Most keys are element ids,
+ * but a task listener's is `<elementId>:<jobType>` and names no element — shown
+ * raw it reads as a pseudo-element the diagram doesn't have.
+ */
+export function labelForHandlerKey(model: ModelInfo, key: string): string {
+  const task = model.tasks.find((t) => t.elementId === key);
+  if (task) return task.label;
+  const listener = model.taskListeners.find((l) => l.key === key);
+  if (!listener) return key;
+  const host = model.userTasks.find((u) => u.elementId === listener.elementId);
+  return `${host?.label ?? listener.elementId} — ${listener.eventType} listener`;
+}
