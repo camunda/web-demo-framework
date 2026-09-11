@@ -21,6 +21,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { PROVEN_CONSTRUCTS } from "../probe/coverage-check.mjs";
 
 /**
  * What this repo can actually claim, and on what evidence. Keep the evidence
@@ -28,41 +29,29 @@ import path from "node:path";
  * diagram" is not evidence — every silent-skip bug found so far (receive task,
  * link events, call-activity tools) looked fine in a diagram.
  */
-const CLAIMS = {
-  // Verified by a fixture in tools/probe/coverage-check.mjs.
-  serviceTask: ["verified", "every example"],
-  userTask: ["verified", "invoice-payment, loan-origination"],
-  scriptTask: ["verified", "job typed as its element id"],
-  startEvent: ["verified", "every example"],
-  endEvent: ["verified", "every example"],
-  sequenceFlow: ["verified", "every example"],
-  exclusiveGateway: ["verified", "exclusive-gateway.bpmn"],
-  subProcess: ["verified", "adhoc-inner-flow.bpmn (compound tool)"],
-  adHocSubProcess: ["verified", "adhoc-inner-flow.bpmn"],
-  messageEventDefinition: ["verified", "message.bpmn, message-start.bpmn, message-boundary.bpmn"],
-  timerEventDefinition: ["verified", "timer.bpmn"],
-  signalEventDefinition: ["verified", "signal.bpmn"],
-  errorEventDefinition: ["verified", "error-boundary.bpmn"],
-  boundaryEvent: ["verified", "error-boundary.bpmn, message-boundary.bpmn"],
-  intermediateCatchEvent: ["verified", "message.bpmn, timer.bpmn"],
-  multiInstanceLoopCharacteristics: ["verified", "multi-instance.bpmn"],
-  callActivity: ["verified", "on a sequence flow (bank-support specialists)"],
-  parallelGateway: ["verified", "forks, both branches run, joins, completes"],
-  task: ["verified", "deploys and completes as a pass-through, no job"],
-  manualTask: ["verified", "deploys and completes as a pass-through, no job"],
+/**
+ * Constructs proven to run: taken straight from the checks that prove them,
+ * so this column cannot claim something no longer covered. See
+ * `PROVEN_CONSTRUCTS` in tools/probe/coverage-check.mjs, which fails its own
+ * run if it names a check that doesn't exist.
+ */
+const CLAIMS = Object.fromEntries(
+  Object.entries(PROVEN_CONSTRUCTS).map(([c, check]) => [c, ["verified", check]]),
+);
 
-  // Reproduced and filed. The workaround, if any, is in docs/engine-coverage.md.
+/** Reproduced and filed. Not proofs — pointers to the issue that reproduces. */
+Object.assign(CLAIMS, {
+  callActivity: ["verified", "bank-support: on a sequence flow (no fixture)"],
+  userTask: ["verified", "invoice-payment, loan-origination (no fixture)"],
+  scriptTask: ["verified", "job typed as its element id (no fixture)"],
   receiveTask: ["known-broken", "nano-bpm#1009 — silently skipped, no subscription"],
   linkEventDefinition: ["known-broken", "nano-bpm#1157 — token vanishes, run reports success"],
   businessRuleTask: ["known-broken", "nano-bpm#1158 — no DMN deploy path exists"],
   compensateEventDefinition: ["known-broken", "nano-bpm#886 — fixed upstream, unreleased"],
-
-  // Rejected at deploy: unmodelled, but loudly so. Safer than the silent class
-  // above — a model using one cannot pretend to have run.
   sendTask: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
   inclusiveGateway: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
   escalationEventDefinition: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
-};
+});
 
 /** Constructs a model can carry that say nothing about execution. */
 const COSMETIC = new Set([

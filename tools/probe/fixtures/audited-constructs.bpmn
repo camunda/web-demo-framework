@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The constructs `tools/audit/construct-coverage.mjs` found in real Camunda
+  models that this repo had never checked. Four processes, one per claim, so
+  the audit's "verified" column is backed by something that runs rather than by
+  a note someone typed after probing once.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeAudited" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:signal id="Signal_Probe" name="probe-thrown-signal" />
+  <bpmn:message id="Message_Probe" name="probe-race-msg">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=k" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+
+  <!-- Fork to two branches, run both, join, complete. -->
+  <bpmn:process id="probe-parallel" isExecutable="true">
+    <bpmn:startEvent id="PS"><bpmn:outgoing>pf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="pf1" sourceRef="PS" targetRef="Split" />
+    <bpmn:parallelGateway id="Split">
+      <bpmn:incoming>pf1</bpmn:incoming><bpmn:outgoing>pf2</bpmn:outgoing><bpmn:outgoing>pf3</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="pf2" sourceRef="Split" targetRef="BranchA" />
+    <bpmn:sequenceFlow id="pf3" sourceRef="Split" targetRef="BranchB" />
+    <bpmn:serviceTask id="BranchA">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-branch" /></bpmn:extensionElements>
+      <bpmn:incoming>pf2</bpmn:incoming><bpmn:outgoing>pf4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="BranchB">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-branch" /></bpmn:extensionElements>
+      <bpmn:incoming>pf3</bpmn:incoming><bpmn:outgoing>pf5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="pf4" sourceRef="BranchA" targetRef="Join" />
+    <bpmn:sequenceFlow id="pf5" sourceRef="BranchB" targetRef="Join" />
+    <bpmn:parallelGateway id="Join">
+      <bpmn:incoming>pf4</bpmn:incoming><bpmn:incoming>pf5</bpmn:incoming><bpmn:outgoing>pf6</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:sequenceFlow id="pf6" sourceRef="Join" targetRef="PE" />
+    <bpmn:endEvent id="PE"><bpmn:incoming>pf6</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <!-- Neither carries an implementation: both should pass the token straight on. -->
+  <bpmn:process id="probe-passthrough" isExecutable="true">
+    <bpmn:startEvent id="TS"><bpmn:outgoing>tf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="tf1" sourceRef="TS" targetRef="AbstractTask" />
+    <bpmn:task id="AbstractTask">
+      <bpmn:incoming>tf1</bpmn:incoming><bpmn:outgoing>tf2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:sequenceFlow id="tf2" sourceRef="AbstractTask" targetRef="ManualTask" />
+    <bpmn:manualTask id="ManualTask">
+      <bpmn:incoming>tf2</bpmn:incoming><bpmn:outgoing>tf3</bpmn:outgoing>
+    </bpmn:manualTask>
+    <bpmn:sequenceFlow id="tf3" sourceRef="ManualTask" targetRef="TE" />
+    <bpmn:endEvent id="TE"><bpmn:incoming>tf3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <!-- A throw event is not a wait state: the token must carry on through it. -->
+  <bpmn:process id="probe-throw" isExecutable="true">
+    <bpmn:startEvent id="HS"><bpmn:outgoing>hf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="hf1" sourceRef="HS" targetRef="ThrowSignal" />
+    <bpmn:intermediateThrowEvent id="ThrowSignal">
+      <bpmn:incoming>hf1</bpmn:incoming><bpmn:outgoing>hf2</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="hsed" signalRef="Signal_Probe" />
+    </bpmn:intermediateThrowEvent>
+    <bpmn:sequenceFlow id="hf2" sourceRef="ThrowSignal" targetRef="AfterThrow" />
+    <bpmn:serviceTask id="AfterThrow">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-after-throw" /></bpmn:extensionElements>
+      <bpmn:incoming>hf2</bpmn:incoming><bpmn:outgoing>hf3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="hf3" sourceRef="AfterThrow" targetRef="HE" />
+    <bpmn:endEvent id="HE"><bpmn:incoming>hf3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <!-- Both events arm; the first to arrive wins and the loser is cancelled. -->
+  <bpmn:process id="probe-event-gateway" isExecutable="true">
+    <bpmn:startEvent id="GS"><bpmn:outgoing>gf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="gf1" sourceRef="GS" targetRef="Race" />
+    <bpmn:eventBasedGateway id="Race">
+      <bpmn:incoming>gf1</bpmn:incoming><bpmn:outgoing>gf2</bpmn:outgoing><bpmn:outgoing>gf3</bpmn:outgoing>
+    </bpmn:eventBasedGateway>
+    <bpmn:sequenceFlow id="gf2" sourceRef="Race" targetRef="OnMessage" />
+    <bpmn:intermediateCatchEvent id="OnMessage">
+      <bpmn:incoming>gf2</bpmn:incoming><bpmn:outgoing>gf4</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="gmed" messageRef="Message_Probe" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="gf3" sourceRef="Race" targetRef="OnTimeout" />
+    <bpmn:intermediateCatchEvent id="OnTimeout">
+      <bpmn:incoming>gf3</bpmn:incoming><bpmn:outgoing>gf5</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="gted"><bpmn:timeDuration>PT10M</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="gf4" sourceRef="OnMessage" targetRef="GE" />
+    <bpmn:sequenceFlow id="gf5" sourceRef="OnTimeout" targetRef="GE" />
+    <bpmn:endEvent id="GE"><bpmn:incoming>gf4</bpmn:incoming><bpmn:incoming>gf5</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
