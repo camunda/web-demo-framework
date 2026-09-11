@@ -80,6 +80,68 @@ function bpmnFilesIn(dir) {
   return out;
 }
 
+
+/**
+ * What a model declares that the framework is supposed to act on.
+ *
+ * The construct table above asks whether the *engine* runs a thing. This asks
+ * whether the *framework* notices it. A `zeebe:` extension the parser never
+ * reads is, by definition, something the model asks for and the framework
+ * ignores — silently, since the run still happens without it.
+ *
+ * Which of those matter is a judgement, so it is written down: ignoring a
+ * connector's result expression is deliberate (examples replace connectors with
+ * handlers outright), while ignoring a task listener is a gap that an example
+ * needing one would have to close first.
+ */
+const EXTENSION_INTENT = {
+  taskHeaders: ["by design", "connector result expressions; examples replace the connector with a handler"],
+  script: ["by design", "a scriptTask runs as a job worker instead — see jobTypeOf in model.ts"],
+  ioMapping: ["by design", "the engine applies these; the framework reads only the fromAi inputs"],
+  output: ["by design", "as ioMapping"],
+  properties: ["by design", "connector configuration, replaced wholesale by a handler"],
+  property: ["by design", "as properties"],
+  header: ["by design", "as taskHeaders"],
+  adHoc: ["by design", "agent hosts are found by element type, not by this extension"],
+  loopCharacteristics: ["by design", "the engine drives multi-instance; the framework needs no view of it"],
+  calledDecision: ["by design", "DMN cannot be deployed at all — nano-bpm#1158"],
+  userTask: ["by design", "a marker; the framework keys off the element type"],
+
+  // Each of these was probed: the engine supports it, so the gap is ours.
+  taskListener: ["GAP", "the engine offers a listener job; nothing registers a worker for it, so the run would stop on an unhandled job type the manifest has no way to answer"],
+  taskListeners: ["GAP", "as taskListener — the container element"],
+  assignmentDefinition: ["GAP", "the engine reports assignee and candidateGroups on the task; the runner shows neither, so a reader can't see who a task is for"],
+  priorityDefinition: ["GAP", "the engine reports priority; the runner ignores it"],
+  calledElement: ["GAP", "a call activity's target process is not modelled, so nothing can name what it delegates to"],
+};
+
+/** Read straight from the parser, so this can't claim support that was removed. */
+function extensionsTheParserReads() {
+  const model = readFileSync("src/framework/model.ts", "utf8");
+  return new Set(
+    [...model.matchAll(/(?:ownZeebeEls|zeebeEls)\([a-z]+, "([a-zA-Z]+)"\)/g)].map((m) => m[1]),
+  );
+}
+
+function reportExtensions(used) {
+  const read = extensionsTheParserReads();
+  console.log("\nZeebe extensions the corpus declares:\n");
+  let gaps = 0;
+  for (const name of [...used].sort()) {
+    if (read.has(name)) {
+      console.log(`✅ ${name.padEnd(24)} read by the parser`);
+      continue;
+    }
+    const [verdict, why] = EXTENSION_INTENT[name] ?? ["UNAUDITED", "nobody has decided whether this matters"];
+    if (verdict !== "by design") gaps += 1;
+    console.log(`${verdict === "by design" ? "·" : "❓"} ${name.padEnd(24)} ignored — ${why}`);
+  }
+  // A "by design" note for something now read is stale in the other direction.
+  const stale = Object.keys(EXTENSION_INTENT).filter((n) => read.has(n));
+  if (stale.length) console.log(`\n⚠ now read by the parser, so the note is out of date: ${stale.join(", ")}`);
+  return gaps;
+}
+
 const dirs = process.argv.slice(2);
 if (dirs.length === 0) {
   console.error("usage: node tools/audit/construct-coverage.mjs <dir> [<dir>...]");
@@ -130,9 +192,10 @@ for (const r of rows) {
 }
 
 const unaudited = rows.filter((r) => r.verdict === "UNAUDITED");
-console.log(`\nZeebe extensions in use: ${[...zeebe.keys()].sort().join(", ")}`);
+const extensionGaps = reportExtensions(new Set(zeebe.keys()));
 console.log(
-  `\n${unaudited.length} unaudited construct(s), in ${new Set(unaudited.flatMap((r) => [...r.models])).size} model(s).`,
+  `\n${unaudited.length} unaudited construct(s), in ${new Set(unaudited.flatMap((r) => [...r.models])).size} model(s).` +
+    ` ${extensionGaps} framework-side extension gap(s).`,
 );
 if (unaudited.length) {
   console.log("Probe these before promising an example that needs them:");
