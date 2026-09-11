@@ -93,7 +93,12 @@ export type ExampleHandler = (
 
 /** One editable handler in the example's code panel. */
 export interface HandlerDef {
-  /** The BPMN element this serves. */
+  /**
+   * The BPMN element this serves — or, for a task listener, the
+   * `<elementId>:<jobType>` key from `TaskListenerSpec.key`, since a listener
+   * has no element of its own. `labelForHandlerKey` turns either into the
+   * heading the code panel shows.
+   */
   elementId: string;
   /** What it stands in for on a real cluster, shown above the editor. */
   standsInFor?: string;
@@ -246,7 +251,7 @@ export interface ExampleDef extends ExampleMeta {
    * "Example input".
    */
   scenariosLabel?: string;
-  /** Editable handlers, keyed by element id. */
+  /** Editable handlers, keyed by element id — or a task listener's key (see `HandlerDef`). */
   handlers: HandlerDef[];
   /**
    * The deterministic stand-in for the LLM, as editable source. Used by the
