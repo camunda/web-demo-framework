@@ -1,5 +1,5 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
-import type { ModelInfo } from "./model";
+import type { ModelInfo, TaskListenerSpec } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
 import type { TurnRef } from "./agent/liveAgent";
 import {
@@ -138,66 +138,71 @@ export function buildWorkers(
     for (const ut of p.userTasks ?? [])
       if (!labels.has(ut.elementId)) labels.set(ut.elementId, ut.label);
 
-  for (const task of allTasks) {
+  // Task listeners. The engine offers these as ordinary jobs, so leaving them
+  // unregistered stops the run on a job type the reader cannot answer — and
+  // unlike every other handler a listener has no element of its own, so a
+  // manifest addresses it as `<elementId>:<eventType>`.
+  const listenersByType = new Map<string, TaskListenerSpec[]>();
+  for (const listener of model.taskListeners ?? []) {
+    const shared = listenersByType.get(listener.jobType);
+    if (shared) shared.push(listener);
+    else listenersByType.set(listener.jobType, [listener]);
+  }
+
+  const runHandler = async (job: ActivatedJob, handler: ExampleHandler) => {
+    const turn = turnRef?.current;
+    const out = await handler(job, helpersFor(job, trace, turn, vision));
+    trace({
+      kind: "vars",
+      text: `  ↳ ${safeStringify(out)}`,
+      elementId: job.elementId,
+      result: out,
+      turn,
+    });
+    return out as Record<string, unknown> | undefined;
+  };
+
+  const taskJobTypes = new Set(
     // A compound tool (embedded sub-process / call activity) carries no single
     // job type — its inner flow is engine-driven — so there is nothing to
     // register a job worker against.
-    if (task.compound) continue;
-    if (workers[task.jobType]) continue; // one wrapper per job type
-    workers[task.jobType] = async (job) => {
+    allTasks.filter((t) => !t.compound).map((t) => t.jobType),
+  );
+
+  for (const jobType of new Set([...taskJobTypes, ...listenersByType.keys()])) {
+    const listeners = listenersByType.get(jobType) ?? [];
+    workers[jobType] = async (job) => {
+      const turn = turnRef?.current;
+      const label = labels.get(job.elementId) ?? job.elementId;
+      const onThisElement = listeners.filter((l) => l.elementId === job.elementId);
+
+      if (onThisElement.length) {
+        // Two listeners on one element sharing a job type are indistinguishable
+        // from here — `ActivatedJob` carries no event type — so prefer the one
+        // the manifest wrote code for. draft.ts reports the ambiguity up front.
+        const listener = onThisElement.find((l) => byElement[l.key]) ?? onThisElement[0];
+        // Indexing a Record types as always-present; a missing one is the norm.
+        const handler = byElement[listener.key] as ExampleHandler | undefined;
+        trace({
+          kind: "step",
+          text: `🎧 ${label} — ${listener.eventType} listener${handler ? "" : " (no code supplied)"}`,
+          elementId: job.elementId,
+          turn,
+        });
+        // An unclaimed listener runs as a no-op rather than failing: a model
+        // that carries one should still run, and "this fired and did nothing"
+        // is a truthful thing to show. Supplying code for it is then opt-in.
+        if (!handler) return undefined;
+        return runHandler(job, handler);
+      }
+
       const handler = byElement[job.elementId];
       if (!handler)
         throw new Error(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
-      const label = labels.get(job.elementId) ?? job.elementId;
-      const turn = turnRef?.current;
       trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
-      const out = await handler(job, helpersFor(job, trace, turn, vision));
-      trace({
-        kind: "vars",
-        text: `  ↳ ${safeStringify(out)}`,
-        elementId: job.elementId,
-        result: out,
-        turn,
-      });
-      return out as Record<string, unknown> | undefined;
-    };
-  }
-
-  // Task listeners. The engine offers these as ordinary jobs, so leaving them
-  // unregistered stops the run on a job type the reader cannot answer — and
-  // unlike every other handler a listener has no element of its own, so a
-  // manifest addresses it as `<elementId>:<eventType>`.
-  //
-  // An unclaimed listener runs as a no-op rather than failing: a model that
-  // carries one should still run, and "this fired and did nothing" is a
-  // truthful thing to show. Supplying code for it is then opt-in.
-  for (const listener of model.taskListeners ?? []) {
-    if (workers[listener.jobType]) continue;
-    workers[listener.jobType] = async (job) => {
-      // Indexing a Record types as always-present; a missing one is the norm.
-      const handler = byElement[`${job.elementId}:${listener.eventType}`] as
-        | ExampleHandler
-        | undefined;
-      const label = labels.get(job.elementId) ?? job.elementId;
-      const turn = turnRef?.current;
-      trace({
-        kind: "step",
-        text: `🎧 ${label} — ${listener.eventType} listener${handler ? "" : " (no code supplied)"}`,
-        elementId: job.elementId,
-        turn,
-      });
-      if (!handler) return undefined;
-      const out = await handler(job, helpersFor(job, trace, turn, vision));
-      trace({
-        kind: "vars",
-        text: `  ↳ ${safeStringify(out)}`,
-        elementId: job.elementId,
-        result: out,
-        turn,
-      });
-      return out as Record<string, unknown> | undefined;
+      return runHandler(job, handler);
     };
   }
   return workers;

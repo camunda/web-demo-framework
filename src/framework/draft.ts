@@ -19,7 +19,7 @@
  */
 
 import type { ExampleDef, ExampleHandler } from "./types";
-import { parseModel, type Diagnostic, type ModelInfo } from "./model";
+import { parseModel, type Diagnostic, type ModelInfo, type TaskListenerSpec } from "./model";
 import { compileHandler } from "./compile";
 import { createTemplateMap, substituteTemplates } from "./templates";
 import type { FormSchema } from "./ui/FormRenderer";
@@ -156,9 +156,51 @@ export function buildDraftRunDefinition(
     }
   }
 
+  // Task listeners are addressed as `<elementId>:<eventType>` rather than by
+  // element, and — unlike a task — supplying code for one is optional: a model
+  // that merely carries a listener still runs, with the listener as a no-op.
+  // So a missing source is not a diagnostic here; only one that fails to
+  // compile is.
+  const listeners = model.taskListeners ?? [];
+  for (const listener of listeners) {
+    const source = sources[listener.key] ?? defaultSourceOf.get(listener.key);
+    if (source === undefined) continue;
+    try {
+      handlers[listener.key] = compileHandler(source);
+    } catch (e) {
+      diagnostics.push({
+        severity: "error",
+        elementId: listener.elementId,
+        jobType: listener.jobType,
+        message: `The ${listener.eventType} listener on "${listener.elementId}" (${listener.key}): handler code didn't compile — ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      });
+    }
+  }
+
+  // Two listeners on one element under one job type cannot be told apart at
+  // run time — `ActivatedJob` carries only `type` and `elementId` — so say so
+  // here rather than let compile.ts guess which one a job meant.
+  const seenListenerJob = new Map<string, TaskListenerSpec>();
+  for (const listener of listeners) {
+    const slot = `${listener.elementId}\u0000${listener.jobType}`;
+    const first = seenListenerJob.get(slot);
+    if (first) {
+      diagnostics.push({
+        severity: "error",
+        elementId: listener.elementId,
+        jobType: listener.jobType,
+        message: `The ${first.eventType} and ${listener.eventType} listeners on "${listener.elementId}" share the job type "${listener.jobType}", so a job for one can't be told from the other. Give them distinct types.`,
+      });
+    } else {
+      seenListenerJob.set(slot, listener);
+    }
+  }
+
   // Orphaned handlers: source naming an element the current diagram no longer
   // has (typically after a rename) is otherwise silently inert.
-  const taskIds = new Set(allTasks.map((t) => t.elementId));
+  const taskIds = new Set([...allTasks.map((t) => t.elementId), ...listeners.map((l) => l.key)]);
   const handlerIds = new Set([...defaultSourceOf.keys(), ...Object.keys(sources)]);
   for (const elementId of handlerIds) {
     if (!taskIds.has(elementId)) {
