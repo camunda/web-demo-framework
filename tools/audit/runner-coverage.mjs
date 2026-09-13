@@ -37,18 +37,19 @@ const worker = kit("worker.d.ts");
 // semicolons, which would otherwise truncate the union at the first one.
 const declarations = worker.replace(/\/\*[\s\S]*?\*\//g, "");
 const unionStart = declarations.indexOf("export type SettleReason =");
-const unionEnd = declarations.indexOf(";", unionStart);
-// The delimiter is checked, not assumed: without it `slice(0, -1)` swallows the
-// declarations that follow and their string literals pass for settle reasons.
+// Bounded to its own declaration before looking for the delimiter: searching
+// the whole file just finds the *next* statement's semicolon and quietly reads
+// unrelated string literals in as settle reasons.
+const nextDecl = declarations.indexOf("\nexport ", unionStart + 1);
+const window = declarations.slice(unionStart, nextDecl === -1 ? undefined : nextDecl);
+const unionEnd = window.indexOf(";");
 if (unionStart === -1 || unionEnd === -1) {
   console.error(
     "Could not locate the kit's SettleReason union — its type layout has changed, and this audit is no longer reading it. Fix the parse before trusting the result.",
   );
   process.exit(2);
 }
-const reasons = [
-  ...declarations.slice(unionStart, unionEnd).matchAll(/"([a-zA-Z]+)"/g),
-].map((m) => m[1]);
+const reasons = [...window.slice(0, unionEnd).matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]);
 const summary = src("stepSummary.ts");
 
 if (reasons.length < 2) {
