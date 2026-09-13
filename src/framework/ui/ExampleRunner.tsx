@@ -20,7 +20,7 @@ import {
   TabsTrigger,
 } from "@camunda/design-system";
 import type { AgentSpec } from "../model";
-import { resolveCorrelationKey } from "../model";
+import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
@@ -1752,7 +1752,7 @@ export function ExampleRunner({
           data-tour={TOUR_ANCHOR.codePanel}
           defaultOpen={false}
           title="Code"
-          description="One handler per BPMN element, plus a model tab holding the editable diagram — select an element there to edit its properties. Return variables to merge, or throw to fail the job."
+          description="One handler per BPMN element — plus one per task listener — and a model tab holding the editable diagram: select an element there to edit its properties. Return variables to merge, or throw to fail the job."
         >
           <Suspense
             fallback={
@@ -1769,8 +1769,7 @@ export function ExampleRunner({
                   )}
                   {example.handlers.map((h) => (
                     <TabsTrigger key={h.elementId} value={h.elementId}>
-                      {model.tasks.find((t) => t.elementId === h.elementId)
-                        ?.label ?? h.elementId}
+                      {labelForHandlerKey(model, h.elementId)}
                     </TabsTrigger>
                   ))}
                   {Object.keys(templateSources).map((name) => (
@@ -1824,10 +1823,7 @@ export function ExampleRunner({
                 {example.handlers.map((h) => (
                   <TabsContent key={h.elementId} value={h.elementId}>
                     <div className="editor-meta">
-                      <strong>
-                        {model.tasks.find((t) => t.elementId === h.elementId)
-                          ?.label ?? h.elementId}
-                      </strong>
+                      <strong>{labelForHandlerKey(model, h.elementId)}</strong>
                       <code>{h.standsInFor ?? h.elementId}</code>
                     </div>
                     <div className="editor-wrap">
