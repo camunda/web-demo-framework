@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { labelForHandlerKey, parseModel } from "./model";
+import { labelForHandlerKey, parseModel, type ModelInfo } from "./model";
 import { buildWorkers } from "./compile";
 import { buildDraftRunDefinition } from "./draft";
 import type { ExampleDef, ExampleHandler } from "./types";
@@ -303,6 +303,28 @@ describe("task listeners", () => {
         "which is manually controlled",
       );
     });
+
+    /**
+     * The runner resolves a manual control by finding the task with that id, so
+     * one on a listener key matches nothing and is dropped — the listener would
+     * dispatch normally with no sign the control was ignored.
+     */
+    it("refuses a manual control attached to a listener key", () => {
+      const draft = buildDraftRunDefinition(
+        example(WITH_LISTENER, [
+          {
+            elementId: "Review:notify-reviewer",
+            source: "() => ({})",
+            manualControl: { label: "Notify", action: { kind: "timer", label: "Time it out" } },
+          },
+        ]),
+      );
+
+      expect(draft.hasErrors).toBe(true);
+      expect(draft.diagnostics.map((d) => d.message).join("\n")).toContain(
+        "manual control isn't supported on one",
+      );
+    });
   });
 
   /**
@@ -325,6 +347,16 @@ describe("task listeners", () => {
 
     it("falls back to the key itself when nothing matches", () => {
       expect(labelForHandlerKey(parseModel(WITH_LISTENER), "Gone")).toBe("Gone");
+    });
+
+    /**
+     * `taskListeners` is new, so a hand-built ModelInfo predating it won't have
+     * the field — reading it unguarded throws where every other read of it is
+     * guarded.
+     */
+    it("survives a model built without the newer listener fields", () => {
+      const bare = { tasks: [] } as unknown as ModelInfo;
+      expect(labelForHandlerKey(bare, "Review:notify-reviewer")).toBe("Review:notify-reviewer");
     });
   });
 });

@@ -225,6 +225,19 @@ export function buildDraftRunDefinition(
     });
   }
 
+  // `ExampleRunner` builds its manual-control map by finding the *task* with a
+  // handler's id, so one on a listener key matches nothing and is dropped —
+  // the listener would auto-dispatch with no sign the control was ignored.
+  const listenerKeys = new Set(listeners.map((l) => l.key));
+  for (const h of example.handlers) {
+    if (!h.manualControl || !listenerKeys.has(h.elementId)) continue;
+    diagnostics.push({
+      severity: "error",
+      elementId: h.elementId,
+      message: `"${h.elementId}" is a task listener, and manual control isn't supported on one — it holds back a whole job type rather than a single element, so the control would be silently ignored and the listener dispatched anyway. Remove the manual control.`,
+    });
+  }
+
   // Orphaned handlers: source naming an element the current diagram no longer
   // has (typically after a rename) is otherwise silently inert.
   const taskIds = new Set([...allTasks.map((t) => t.elementId), ...listeners.map((l) => l.key)]);

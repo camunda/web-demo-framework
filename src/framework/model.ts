@@ -734,8 +734,8 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
 export function labelForHandlerKey(model: ModelInfo, key: string): string {
   const task = model.tasks.find((t) => t.elementId === key);
   if (task) return task.label;
-  const listener = model.taskListeners.find((l) => l.key === key);
+  const listener = (model.taskListeners ?? []).find((l) => l.key === key);
   if (!listener) return key;
-  const host = model.userTasks.find((u) => u.elementId === listener.elementId);
+  const host = (model.userTasks ?? []).find((u) => u.elementId === listener.elementId);
   return `${host?.label ?? listener.elementId} — ${listener.eventType} listener`;
 }

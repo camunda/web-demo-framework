@@ -97,7 +97,8 @@ export interface HandlerDef {
    * The BPMN element this serves — or, for a task listener, the
    * `<elementId>:<jobType>` key from `TaskListenerSpec.key`, since a listener
    * has no element of its own. `labelForHandlerKey` turns either into the
-   * heading the code panel shows.
+   * heading the code panel shows. `manualControl` is not supported on a
+   * listener key and is rejected during draft validation.
    */
   elementId: string;
   /** What it stands in for on a real cluster, shown above the editor. */

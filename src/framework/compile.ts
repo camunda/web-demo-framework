@@ -141,7 +141,7 @@ export function buildWorkers(
   // Task listeners. The engine offers these as ordinary jobs, so leaving them
   // unregistered stops the run on a job type the reader cannot answer — and
   // unlike every other handler a listener has no element of its own, so a
-  // manifest addresses it as `<elementId>:<eventType>`.
+  // manifest addresses it as `<elementId>:<jobType>`.
   const listenersByType = new Map<string, TaskListenerSpec[]>();
   for (const listener of model.taskListeners ?? []) {
     const shared = listenersByType.get(listener.jobType);
