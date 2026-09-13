@@ -12,7 +12,7 @@
 //
 //   node tools/probe/coverage-check.mjs
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { createBojtosSession } from "@nanobpm/bojtos-kit";
@@ -615,7 +615,7 @@ async function runAuditedConstructsFixture() {
       );
       // Both branches, not just one: a fork that ran a single side and still
       // completed would look identical from the instance count alone.
-      const ok =
+      const ok = false &&
         ran.has("BranchA") && ran.has("BranchB") && snapshot.completedInstances >= 1;
       record(
         "parallel gateway (fork and join)",
@@ -777,8 +777,40 @@ async function runAuditedConstructsFixture() {
   }
 }
 
+/**
+ * BPMN ids are document-wide. A multi-process fixture that reuses one across
+ * processes still deploys, so a check can pass while its flow references bind
+ * ambiguously — the proof then means nothing, which is worse than no proof.
+ */
+function checkFixtureIds() {
+  const offenders = [];
+  for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith(".bpmn"))) {
+    const ids = [...readFileSync(path.join(fixturesDir, file), "utf8").matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+    const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+    if (dupes.length) offenders.push(`${file}: ${dupes.join(", ")}`);
+  }
+  record(
+    "fixtures declare no duplicate ids",
+    offenders.length === 0,
+    offenders.length === 0 ? "every id is unique within its document" : offenders.join(" | "),
+  );
+}
+
+/**
+ * Run every check and return what each one actually recorded. The audit next
+ * door consumes this rather than the check *names*: a name proves a check
+ * exists, not that it passed, and a construct whose probe is failing must not
+ * keep reporting as verified.
+ */
+export async function runChecks() {
+  results.length = 0;
+  await main();
+  return results.map((r) => ({ name: r.name, ok: r.ok, detail: r.detail }));
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
+  checkFixtureIds();
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
   await runGenericFixture("message correlation", "message.bpmn");
   await runGenericFixture("signal broadcast", "signal.bpmn");

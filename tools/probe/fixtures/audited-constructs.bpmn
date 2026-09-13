@@ -95,18 +95,18 @@
 
   <!-- User task first, so parking is observable before anything drives the run. -->
   <bpmn:process id="probe-humanwork" isExecutable="true">
-    <bpmn:startEvent id="HS"><bpmn:outgoing>hf1</bpmn:outgoing></bpmn:startEvent>
-    <bpmn:sequenceFlow id="hf1" sourceRef="HS" targetRef="Human" />
+    <bpmn:startEvent id="WS"><bpmn:outgoing>wf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="wf1" sourceRef="WS" targetRef="Human" />
     <bpmn:userTask id="Human" name="Do the human bit">
       <bpmn:extensionElements><zeebe:userTask /></bpmn:extensionElements>
-      <bpmn:incoming>hf1</bpmn:incoming><bpmn:outgoing>hf2</bpmn:outgoing>
+      <bpmn:incoming>wf1</bpmn:incoming><bpmn:outgoing>wf2</bpmn:outgoing>
     </bpmn:userTask>
-    <bpmn:sequenceFlow id="hf2" sourceRef="Human" targetRef="Script" />
+    <bpmn:sequenceFlow id="wf2" sourceRef="Human" targetRef="Script" />
     <bpmn:scriptTask id="Script">
-      <bpmn:incoming>hf2</bpmn:incoming><bpmn:outgoing>hf3</bpmn:outgoing>
+      <bpmn:incoming>wf2</bpmn:incoming><bpmn:outgoing>wf3</bpmn:outgoing>
     </bpmn:scriptTask>
-    <bpmn:sequenceFlow id="hf3" sourceRef="Script" targetRef="HE" />
-    <bpmn:endEvent id="HE"><bpmn:incoming>hf3</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="wf3" sourceRef="Script" targetRef="WE" />
+    <bpmn:endEvent id="WE"><bpmn:incoming>wf3</bpmn:incoming></bpmn:endEvent>
   </bpmn:process>
 
   <!-- Call activity on a sequence flow, and the process it calls. -->

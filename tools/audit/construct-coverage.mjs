@@ -23,7 +23,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
-import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS } from "../probe/coverage-check.mjs";
+import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS, runChecks } from "../probe/coverage-check.mjs";
 
 /**
  * What this repo can actually claim, and on what evidence. Keep the evidence
@@ -37,14 +37,28 @@ import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS } from "../probe/coverage-check.m
  * `PROVEN_CONSTRUCTS` in tools/probe/coverage-check.mjs, which fails its own
  * run if it names a check that doesn't exist.
  */
-const CLAIMS = Object.fromEntries(
-  Object.entries(PROVEN_CONSTRUCTS).map(([c, check]) => [c, ["verified", check]]),
-);
+/**
+ * Constructs proven to run: taken from the checks that prove them *and* from
+ * what those checks recorded on this run. A name only says a check exists;
+ * running them is the only way to know it still passes, so the audit boots the
+ * engine rather than trusting a label.
+ */
+const probeResults = new Map((await runChecks()).map((r) => [r.name, r]));
+const passed = (check) => probeResults.get(check)?.ok === true;
+
+const CLAIMS = {};
+for (const [construct, check] of Object.entries(PROVEN_CONSTRUCTS)) {
+  CLAIMS[construct] = passed(check)
+    ? ["verified", check]
+    : ["FAILING-PROBE", `${check} — this check did not pass on this run`];
+}
 
 // Proven for one variant only — also taken from the checks, so the qualifier
 // can't drift from what actually ran.
 for (const [c, p] of Object.entries(PARTIAL_CONSTRUCTS)) {
-  CLAIMS[c] = ["partial", `${p.check} — unproven: ${p.unproven}`];
+  CLAIMS[c] = passed(p.check)
+    ? ["partial", `${p.check} — unproven: ${p.unproven}`]
+    : ["FAILING-PROBE", `${p.check} — this check did not pass on this run`];
 }
 
 /**
@@ -115,7 +129,6 @@ const EXTENSION_INTENT = {
   loopCharacteristics: ["by design", "the engine drives multi-instance; the framework needs no view of it"],
   calledDecision: ["by design", "DMN cannot be deployed at all — nano-bpm#1158"],
   userTask: ["by design", "a marker; the framework keys off the element type"],
-  taskListeners: ["by design", "the container element; the parser reads its taskListener children"],
 
   // Each of these was probed: the engine supports it, so the gap is ours.
   assignmentDefinition: ["GAP", "the engine reports assignee and candidateGroups on the task; the runner shows neither, so a reader can't see who a task is for"],
@@ -131,12 +144,15 @@ function extensionsTheParserReads() {
   );
 }
 
+/** Container elements, covered when the parser reads what they contain. */
+const CONTAINERS = { taskListeners: "taskListener" };
+
 function reportExtensions(used) {
   const read = extensionsTheParserReads();
   console.log("\nZeebe extensions the corpus declares:\n");
   let gaps = 0;
   for (const name of [...used].sort()) {
-    if (read.has(name)) {
+    if (read.has(name) || read.has(CONTAINERS[name])) {
       console.log(`✅ ${name.padEnd(24)} read by the parser`);
       continue;
     }
@@ -188,11 +204,12 @@ const rows = [...bpmn.entries()]
   .sort((a, b) => {
     const rank = {
       UNAUDITED: 0,
-      "silently-wrong": 1,
-      partial: 2,
-      "raises-incident": 3,
-      "rejected-at-deploy": 4,
-      verified: 5,
+      "FAILING-PROBE": 1,
+      "silently-wrong": 2,
+      partial: 3,
+      "raises-incident": 4,
+      "rejected-at-deploy": 5,
+      verified: 6,
     };
     return rank[a.verdict] - rank[b.verdict] || b.count - a.count;
   });
@@ -200,6 +217,7 @@ const rows = [...bpmn.entries()]
 const icon = {
   verified: "✅",
   partial: "◑",
+  "FAILING-PROBE": "🔥",
   "silently-wrong": "❌",
   "raises-incident": "💥",
   "rejected-at-deploy": "⛔",

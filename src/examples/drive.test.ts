@@ -4,11 +4,11 @@ import {
   dispatchWorkers,
   type AgentHandler,
   type AgentResult,
-  type JobHandler,
-  type JobResult,
+  type Snapshot,
   type ReadModelBojtosSession,
 } from "@nanobpm/bojtos-kit";
 import { resolveCorrelationKey } from "../framework/model";
+import { buildWorkers } from "../framework/compile";
 import { buildDraftRunDefinition } from "../framework/draft";
 import {
   makeImageAccessor,
@@ -123,6 +123,28 @@ function formPayload(example: ExampleDef, bpmn: string, elementId: string): stri
   return JSON.stringify(values);
 }
 
+/**
+ * Element ids each instance still has active. Keyed by instance and skipping
+ * finished ones: a `Created` task left behind by an interrupted child can match
+ * an identically-named active element in another instance, and completing it is
+ * a move the runner would never offer. `openUserTasksOf` filters the same way.
+ */
+function openUserTasks(snap: Snapshot) {
+  const active = new Map<string, Set<string>>();
+  for (const i of snap.instances) {
+    if (i.completed || i.state !== "Active") continue;
+    active.set(
+      i.key,
+      new Set(
+        (i.activeElements ?? []).map((e) => (typeof e === "string" ? e : e.elementId)),
+      ),
+    );
+  }
+  return snap.userTasks.filter(
+    (t) => t.state === "Created" && active.get(t.instanceKey)?.has(t.elementId),
+  );
+}
+
 /** The reader's moves, in the order the runner would offer them. */
 async function readerCanAct(
   session: ReadModelBojtosSession,
@@ -131,18 +153,7 @@ async function readerCanAct(
   manualJobTypes: Set<string>,
 ): Promise<boolean> {
   const snap = session.snapshot();
-  // Only tasks on an element the instance still has active. The engine can
-  // leave an interrupted task reported as `Created` after a boundary event, and
-  // completing one of those is a move no reader is offered — `openUserTasksOf`
-  // filters the same way.
-  const active = new Set(
-    snap.instances.flatMap((i) =>
-      (i.activeElements ?? []).map((e) => (typeof e === "string" ? e : e.elementId)),
-    ),
-  );
-  const open = snap.userTasks.filter(
-    (t) => t.state === "Created" && active.has(t.elementId),
-  );
+  const open = openUserTasks(snap);
   if (open.length > 0) {
     session.completeUserTask(open[0].key, formPayload(example, bpmn, open[0].elementId));
     return true;
@@ -193,7 +204,6 @@ describe("every example goes somewhere", () => {
     const draft = buildDraftRunDefinition(example);
     const bpmn = draft.resolvedBpmn;
     const model = draft.model;
-    const byElement = new Map(example.handlers.map((h) => [h.elementId, compile(h.source)]));
     const vision = visionFor(example);
 
     // Job types the example holds back for a reader choice. The runner deletes
@@ -207,17 +217,17 @@ describe("every example goes somewhere", () => {
       allTasks.filter((t) => manualElementIds.has(t.elementId)).map((t) => t.jobType),
     );
 
-    const workers: Record<string, JobHandler> = {};
-    for (const task of allTasks) {
-      if (task.compound || !byElement.has(task.elementId)) continue;
-      if (manualJobTypes.has(task.jobType)) continue;
-      workers[task.jobType] = (job) => {
-        const fn = byElement.get(job.elementId)!;
-        return fn(job, helpersFor(job.variables, job.instanceKey, vision)) as
-          | JobResult
-          | Promise<JobResult>;
-      };
-    }
+    // The runner's own worker builder, so the sweep routes exactly what it
+    // routes — including task listeners, which are separate job entries and
+    // would otherwise settle the round as `unhandledJobs`.
+    const workers = buildWorkers(
+      model,
+      Object.fromEntries(example.handlers.map((h) => [h.elementId, compile(h.source)])),
+      () => {},
+      undefined,
+      vision,
+    );
+    for (const jobType of manualJobTypes) delete workers[jobType];
 
     const agents: Record<string, AgentHandler> = {};
     if (example.scriptedAgent) {
@@ -256,10 +266,13 @@ describe("every example goes somewhere", () => {
     const root =
       snap.instances.find((i) => i.key === rootKey) ??
       snap.instances.find((i) => i.processId === model.processId);
+    // No instance at all means the run never started — a vacuous pass, not a
+    // clean one, since every "nothing is stuck" check below would hold.
+    expect(root, "the example never started an instance").toBeDefined();
     const stalled =
       root?.state === "Active" &&
       snap.incidents.length === 0 &&
-      snap.userTasks.every((t) => t.state !== "Created") &&
+      openUserTasks(snap).length === 0 &&
       snap.timers.length === 0 &&
       snap.messageSubscriptions.length === 0 &&
       snap.signalSubscriptions.length === 0;
