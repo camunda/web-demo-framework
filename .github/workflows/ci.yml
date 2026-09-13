@@ -25,6 +25,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Engine coverage check
+        run: npm run coverage-check
+
       - name: Build
         run: npm run build
 

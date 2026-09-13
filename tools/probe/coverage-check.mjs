@@ -615,7 +615,7 @@ async function runAuditedConstructsFixture() {
       );
       // Both branches, not just one: a fork that ran a single side and still
       // completed would look identical from the instance count alone.
-      const ok = false &&
+      const ok =
         ran.has("BranchA") && ran.has("BranchB") && snapshot.completedInstances >= 1;
       record(
         "parallel gateway (fork and join)",
@@ -801,11 +801,18 @@ function checkFixtureIds() {
  * door consumes this rather than the check *names*: a name proves a check
  * exists, not that it passed, and a construct whose probe is failing must not
  * keep reporting as verified.
+ *
+ * `record` sets `process.exitCode` so the CLI fails CI. A caller embedding
+ * these checks gets the results instead, and decides its own status — this is
+ * a library call, and a report-only tool must stay report-only.
  */
 export async function runChecks() {
+  const before = process.exitCode;
   results.length = 0;
   await main();
-  return results.map((r) => ({ name: r.name, ok: r.ok, detail: r.detail }));
+  const collected = results.map((r) => ({ name: r.name, ok: r.ok, detail: r.detail }));
+  process.exitCode = before;
+  return collected;
 }
 
 async function main() {
