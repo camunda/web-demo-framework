@@ -16,6 +16,7 @@ import {
   type VisionSupport,
 } from "../framework/imageInput";
 import { makeScriptedVisionBrain } from "../framework/brains/vision";
+import { formDefaults, type FormSchema } from "../framework/ui/formSchema";
 import type { ExampleDef, ExampleHandler, HandlerHelpers } from "../framework/types";
 import { loadReadModelWasm } from "../framework/testing/readModelWasm";
 import { EXAMPLES, loadExample } from "./index";
@@ -93,11 +94,14 @@ function helpersFor(
 function formPayload(example: ExampleDef, bpmn: string, elementId: string): string {
   const doc = new DOMParser().parseFromString(bpmn, "application/xml");
   const NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+  const ZEEBE_NS = "http://camunda.org/schema/zeebe/1.0";
   const task = Array.from(doc.getElementsByTagNameNS(NS, "userTask")).find(
     (t) => t.getAttribute("id") === elementId,
   );
+  // By namespace, not by literal prefix — `zeebe:` is conventional, not required,
+  // and `parseModel` resolves the same extension the namespaced way.
   const formId = task
-    ?.getElementsByTagName("zeebe:formDefinition")[0]
+    ?.getElementsByTagNameNS(ZEEBE_NS, "formDefinition")[0]
     ?.getAttribute("formId");
   const schema = formId ? (example.forms?.[formId] as { components?: unknown[] }) : undefined;
   if (!schema?.components) return "{}";
@@ -242,20 +246,35 @@ describe("every example goes somewhere", () => {
 
     session.reset();
     session.deploy(bpmn);
+    // What the runner would actually start with: the seed plus the start form's
+    // own defaults. An example whose required start value comes from a
+    // `defaultValue` is otherwise driven with input no reader could submit.
+    const startSchema = model.startFormId
+      ? (example.forms?.[model.startFormId] as FormSchema | undefined)
+      : undefined;
+    const seed = JSON.stringify({
+      ...example.seed,
+      ...(startSchema ? formDefaults(startSchema) : {}),
+    });
     let started;
     if (model.startMessage) {
       const { messageName, correlationKey } = model.startMessage;
       // The same resolution the runner uses — a start subscription can be any
       // FEEL expression, not just a bare variable name.
       const key = resolveCorrelationKey(correlationKey, example.seed);
-      started = session.correlateMessage(messageName, key, JSON.stringify(example.seed));
+      started = session.correlateMessage(messageName, key, seed);
     } else {
-      started = session.createInstance(model.processId, JSON.stringify(example.seed));
+      started = session.createInstance(model.processId, seed);
     }
-    // The root is the instance that was created, not `instances[0]`: a call
-    // activity's child can complete first and take that slot, so position would
-    // have this inspect a finished child and miss a stalled caller.
-    const rootKey = started?.created;
+    // The instance this start produced, read off the returned snapshot rather
+    // than by position: a call activity's child can complete first and take
+    // `instances[0]`, which would have this inspect a finished child and miss a
+    // stalled caller. Only the root exists at this point, so its processId
+    // identifies it on both start paths — `created` is documented only for
+    // `createInstance`.
+    const rootKey =
+      started.instances.find((i) => i.processId === model.processId)?.key ?? started.created;
+    expect(rootKey, "the example never started an instance").toBeDefined();
 
     for (let round = 0; round < 40; round += 1) {
       await dispatchWorkers(session, workers, { agents });
@@ -263,12 +282,7 @@ describe("every example goes somewhere", () => {
     }
 
     const snap = session.snapshot();
-    const root =
-      snap.instances.find((i) => i.key === rootKey) ??
-      snap.instances.find((i) => i.processId === model.processId);
-    // No instance at all means the run never started — a vacuous pass, not a
-    // clean one, since every "nothing is stuck" check below would hold.
-    expect(root, "the example never started an instance").toBeDefined();
+    const root = snap.instances.find((i) => i.key === rootKey);
     const stalled =
       root?.state === "Active" &&
       snap.incidents.length === 0 &&

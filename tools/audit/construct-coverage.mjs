@@ -90,6 +90,15 @@ const COSMETIC = new Set([
 const BPMN_TAG = /<bpmn2?:([A-Za-z]+)[\s>/]/g;
 const ZEEBE_TAG = /<zeebe:([A-Za-z]+)[\s>/]/g;
 
+/**
+ * Drop comments and CDATA before counting. A `<bpmn:sendTask>` quoted in a
+ * comment or a FEEL script is not a construct any model executes, and counting
+ * it would rank a gap nothing actually uses.
+ */
+function elementsOnly(xml) {
+  return xml.replace(/<!--[\s\S]*?-->/g, "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+}
+
 function bpmnFilesIn(dir) {
   const out = [];
   const walk = (d) => {
@@ -140,7 +149,11 @@ const EXTENSION_INTENT = {
 function extensionsTheParserReads() {
   const model = readFileSync("src/framework/model.ts", "utf8");
   return new Set(
-    [...model.matchAll(/(?:ownZeebeEls|zeebeEls)\([a-z]+, "([a-zA-Z]+)"\)/g)].map((m) => m[1]),
+    [
+      ...model.matchAll(
+        /(?:ownZeebeEls|zeebeEls)\(\s*[A-Za-z_$][\w$]*\s*,\s*"([A-Za-z]+)"/g,
+      ),
+    ].map((m) => m[1]),
   );
 }
 
@@ -186,7 +199,7 @@ let fileCount = 0;
 for (const dir of dirs) {
   for (const file of bpmnFilesIn(dir)) {
     fileCount += 1;
-    const xml = readFileSync(file, "utf8");
+    const xml = elementsOnly(readFileSync(file, "utf8"));
     // Relative to cwd, not the basename: every example's model is `model.bpmn`,
     // and collapsing them would understate how widely a gap is used.
     const label = path.relative(process.cwd(), file);
