@@ -10,10 +10,12 @@
 //
 //   node tools/audit/construct-coverage.mjs <dir> [<dir>...]
 //
-// Three verdicts, and the third is the point:
+// Five verdicts, and the last two are the point:
 //   verified           — driven for real, here or in coverage-check.mjs
+//   partial            — one variant runs; the others have never been checked
 //   rejected-at-deploy — unmodelled, but it says so; a model can't pretend to run
-//   known-broken       — accepted and then silently wrong. The dangerous class.
+//   raises-incident    — accepted, then fails loudly at run time. Visible, at least.
+//   silently-wrong     — accepted, runs green, does the wrong thing. The dangerous class.
 //   UNAUDITED          — used by real models, and we have never checked
 //
 // Deliberately not a pass/fail gate: it reports, and the interesting number is
@@ -21,7 +23,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
-import { PROVEN_CONSTRUCTS } from "../probe/coverage-check.mjs";
+import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS } from "../probe/coverage-check.mjs";
 
 /**
  * What this repo can actually claim, and on what evidence. Keep the evidence
@@ -39,15 +41,22 @@ const CLAIMS = Object.fromEntries(
   Object.entries(PROVEN_CONSTRUCTS).map(([c, check]) => [c, ["verified", check]]),
 );
 
-/** Reproduced and filed. Not proofs — pointers to the issue that reproduces. */
+// Proven for one variant only — also taken from the checks, so the qualifier
+// can't drift from what actually ran.
+for (const [c, p] of Object.entries(PARTIAL_CONSTRUCTS)) {
+  CLAIMS[c] = ["partial", `${p.check} — unproven: ${p.unproven}`];
+}
+
+/**
+ * Reproduced and filed. Not proofs — pointers to the issue that reproduces.
+ * Nothing is claimed `verified` here: a verified column that anyone can type
+ * into is the stale-proof problem `PROVEN_CONSTRUCTS` exists to prevent.
+ */
 Object.assign(CLAIMS, {
-  callActivity: ["verified", "bank-support: on a sequence flow (no fixture)"],
-  userTask: ["verified", "invoice-payment, loan-origination (no fixture)"],
-  scriptTask: ["verified", "job typed as its element id (no fixture)"],
-  receiveTask: ["known-broken", "nano-bpm#1009 — silently skipped, no subscription"],
-  linkEventDefinition: ["known-broken", "nano-bpm#1157 — token vanishes, run reports success"],
-  businessRuleTask: ["known-broken", "nano-bpm#1158 — no DMN deploy path exists"],
-  compensateEventDefinition: ["known-broken", "nano-bpm#886 — fixed upstream, unreleased"],
+  receiveTask: ["silently-wrong", "nano-bpm#1009 — silently skipped, no subscription"],
+  linkEventDefinition: ["silently-wrong", "nano-bpm#1157 — token vanishes, run reports success"],
+  businessRuleTask: ["raises-incident", "nano-bpm#1158 — no DMN deploy path; fails loudly at run time"],
+  compensateEventDefinition: ["rejected-at-deploy", "nano-bpm#886 — fixed upstream, unreleased"],
   sendTask: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
   inclusiveGateway: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
   escalationEventDefinition: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
@@ -106,10 +115,9 @@ const EXTENSION_INTENT = {
   loopCharacteristics: ["by design", "the engine drives multi-instance; the framework needs no view of it"],
   calledDecision: ["by design", "DMN cannot be deployed at all — nano-bpm#1158"],
   userTask: ["by design", "a marker; the framework keys off the element type"],
+  taskListeners: ["by design", "the container element; the parser reads its taskListener children"],
 
   // Each of these was probed: the engine supports it, so the gap is ours.
-  taskListener: ["GAP", "the engine offers a listener job; nothing registers a worker for it, so the run would stop on an unhandled job type the manifest has no way to answer"],
-  taskListeners: ["GAP", "as taskListener — the container element"],
   assignmentDefinition: ["GAP", "the engine reports assignee and candidateGroups on the task; the runner shows neither, so a reader can't see who a task is for"],
   priorityDefinition: ["GAP", "the engine reports priority; the runner ignores it"],
   calledElement: ["GAP", "a call activity's target process is not modelled, so nothing can name what it delegates to"],
@@ -163,7 +171,9 @@ for (const dir of dirs) {
   for (const file of bpmnFilesIn(dir)) {
     fileCount += 1;
     const xml = readFileSync(file, "utf8");
-    const label = path.basename(file);
+    // Relative to cwd, not the basename: every example's model is `model.bpmn`,
+    // and collapsing them would understate how widely a gap is used.
+    const label = path.relative(process.cwd(), file);
     for (const m of xml.matchAll(BPMN_TAG)) record(bpmn, m[1], label);
     for (const m of xml.matchAll(ZEEBE_TAG)) record(zeebe, m[1], label);
   }
@@ -176,11 +186,25 @@ const rows = [...bpmn.entries()]
     return { name, count, models, verdict, evidence };
   })
   .sort((a, b) => {
-    const rank = { UNAUDITED: 0, "known-broken": 1, "rejected-at-deploy": 2, verified: 3 };
+    const rank = {
+      UNAUDITED: 0,
+      "silently-wrong": 1,
+      partial: 2,
+      "raises-incident": 3,
+      "rejected-at-deploy": 4,
+      verified: 5,
+    };
     return rank[a.verdict] - rank[b.verdict] || b.count - a.count;
   });
 
-const icon = { verified: "✅", "known-broken": "❌", "rejected-at-deploy": "⛔", UNAUDITED: "❓" };
+const icon = {
+  verified: "✅",
+  partial: "◑",
+  "silently-wrong": "❌",
+  "raises-incident": "💥",
+  "rejected-at-deploy": "⛔",
+  UNAUDITED: "❓",
+};
 
 console.log(`Construct coverage — ${fileCount} models across ${dirs.length} corpus dir(s)\n`);
 for (const r of rows) {
@@ -192,12 +216,15 @@ for (const r of rows) {
 }
 
 const unaudited = rows.filter((r) => r.verdict === "UNAUDITED");
+const partial = rows.filter((r) => r.verdict === "partial");
 const extensionGaps = reportExtensions(new Set(zeebe.keys()));
 console.log(
   `\n${unaudited.length} unaudited construct(s), in ${new Set(unaudited.flatMap((r) => [...r.models])).size} model(s).` +
+    ` ${partial.length} proven for one variant only.` +
     ` ${extensionGaps} framework-side extension gap(s).`,
 );
-if (unaudited.length) {
+if (unaudited.length || partial.length) {
   console.log("Probe these before promising an example that needs them:");
   for (const r of unaudited) console.log(`  - ${r.name}`);
+  for (const r of partial) console.log(`  - ${r.name} (${r.evidence})`);
 }

@@ -58,24 +58,58 @@ for (const reason of reasons) {
 
 // ── 2. Every wait state in a snapshot has a way out ─────────────────────────
 //
-// Each of these is a queue the engine parks work in. The runner has to do
-// something with each one: resolve it, or offer the reader a control that does.
-// `decisionInstances` is listed because it is a surface we have never read —
-// the audit's job is to say so rather than let it stay invisible.
+// The fields come from the kit's own `Snapshot`, not a list kept here: a bump
+// that adds a queue has to be classified before this audit will pass, rather
+// than going unnoticed while the report still reads clean.
 const runner = src("ui/ExampleRunner.tsx");
-const WAIT_STATES = {
-  userTasks: "openUserTasksOf",
+const types = kit("types.d.ts");
+const snapStart = types.indexOf("export interface Snapshot {");
+const snapBody = types.slice(snapStart, types.indexOf("\n}", snapStart)).replace(/\/\*[\s\S]*?\*\//g, "");
+const snapshotArrays = [...snapBody.matchAll(/^\s+([a-zA-Z]+)\??:\s*([^;]+);/gm)]
+  .filter((m) => m[2].trim().endsWith("[]"))
+  .map((m) => m[1]);
+
+if (snapshotArrays.length < 5) {
+  console.error(
+    `Only parsed ${snapshotArrays.length} array field(s) from the kit's Snapshot — its type layout has changed, and this audit is no longer reading it. Fix the parse before trusting the result.`,
+  );
+  process.exit(2);
+}
+
+/** Queues that hold work, and the runner call that clears each one. */
+const RESOLUTIONS = {
+  jobs: "stepWorkers",
+  userTasks: "completeUserTask",
   timers: "advanceTime",
   messageSubscriptions: "correlateMessage",
   signalSubscriptions: "broadcastSignal",
-  incidents: "incidentElementIds",
+  // The kit offers `resolveIncident`/`updateRetries`, so this one is ours: the
+  // runner paints the element red via `incidentElementIds` and stops there.
+  incidents: null,
   decisionInstances: null,
 };
 
+/** Fields that report what happened rather than park work waiting on someone. */
+const REPORTING = new Set([
+  "instances",
+  "elementStats",
+  "takenSequenceFlows",
+  "activeElementIds",
+  "incidentElementIds",
+]);
+
 console.log("");
-for (const [field, handler] of Object.entries(WAIT_STATES)) {
+for (const field of snapshotArrays) {
+  if (REPORTING.has(field)) continue;
+  if (!(field in RESOLUTIONS)) {
+    report(false, `snapshot.${field}`, "new since this audit was written — classify it as a wait state or as reporting");
+    continue;
+  }
+  const handler = RESOLUTIONS[field];
   if (!handler) {
-    report(false, `snapshot.${field}`, "never read by the runner — no affordance at all");
+    report(false, `snapshot.${field}`, field === "incidents"
+      ? "no way out in the runner — the kit exposes resolveIncident/updateRetries, but nothing surfaces them"
+      : "no way out — the runner offers the reader nothing that clears it");
     continue;
   }
   report(runner.includes(handler), `snapshot.${field}`, runner.includes(handler) ? `via ${handler}` : "no resolution path");

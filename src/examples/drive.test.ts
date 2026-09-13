@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createBojtosSession,
   dispatchWorkers,
@@ -8,7 +8,14 @@ import {
   type JobResult,
   type ReadModelBojtosSession,
 } from "@nanobpm/bojtos-kit";
-import { parseModel } from "../framework/model";
+import { resolveCorrelationKey } from "../framework/model";
+import { buildDraftRunDefinition } from "../framework/draft";
+import {
+  makeImageAccessor,
+  makeVisionAccessor,
+  type VisionSupport,
+} from "../framework/imageInput";
+import { makeScriptedVisionBrain } from "../framework/brains/vision";
 import type { ExampleDef, ExampleHandler, HandlerHelpers } from "../framework/types";
 import { loadReadModelWasm } from "../framework/testing/readModelWasm";
 import { EXAMPLES, loadExample } from "./index";
@@ -35,7 +42,27 @@ function compile(source: string): ExampleHandler {
   return new Function(`"use strict"; return (${source});`)() as ExampleHandler;
 }
 
-function helpersFor(variables: Record<string, unknown>): HandlerHelpers {
+/**
+ * The runner gives an `imageInput` example a scripted-vision reader built from
+ * its own `scriptedVision` ground truth. Without it `helpers.vision` resolves
+ * to nothing and plate-recognition always takes its manual-entry branch — the
+ * sweep would then drive a path no reader with an image ever sees.
+ */
+function visionFor(example: ExampleDef): VisionSupport | undefined {
+  if (!example.imageInput) return undefined;
+  const first = example.imageInput.seedImages[0];
+  return {
+    read: makeScriptedVisionBrain(example.scriptedVision).read,
+    live: false,
+    resolve: () => (first ? { imageId: first.id } : undefined),
+  };
+}
+
+function helpersFor(
+  variables: Record<string, unknown>,
+  instanceKey: string,
+  vision?: VisionSupport,
+): HandlerHelpers {
   return {
     sleep: () => Promise.resolve(),
     trace: () => {},
@@ -48,6 +75,12 @@ function helpersFor(variables: Record<string, unknown>): HandlerHelpers {
       const n = typeof v === "number" ? v : Number(v);
       return Number.isFinite(n) ? n : fallback;
     },
+    ...(vision
+      ? {
+          vision: makeVisionAccessor(vision, instanceKey),
+          image: makeImageAccessor(vision, instanceKey),
+        }
+      : {}),
   };
 }
 
@@ -91,14 +124,34 @@ function formPayload(example: ExampleDef, bpmn: string, elementId: string): stri
 }
 
 /** The reader's moves, in the order the runner would offer them. */
-function readerCanAct(
+async function readerCanAct(
   session: ReadModelBojtosSession,
   example: ExampleDef,
-): boolean {
+  bpmn: string,
+  manualJobTypes: Set<string>,
+): Promise<boolean> {
   const snap = session.snapshot();
-  const open = snap.userTasks.filter((t) => t.state === "Created");
+  // Only tasks on an element the instance still has active. The engine can
+  // leave an interrupted task reported as `Created` after a boundary event, and
+  // completing one of those is a move no reader is offered — `openUserTasksOf`
+  // filters the same way.
+  const active = new Set(
+    snap.instances.flatMap((i) =>
+      (i.activeElements ?? []).map((e) => (typeof e === "string" ? e : e.elementId)),
+    ),
+  );
+  const open = snap.userTasks.filter(
+    (t) => t.state === "Created" && active.has(t.elementId),
+  );
   if (open.length > 0) {
-    session.completeUserTask(open[0].key, formPayload(example, example.bpmn, open[0].elementId));
+    session.completeUserTask(open[0].key, formPayload(example, bpmn, open[0].elementId));
+    return true;
+  }
+  // A held-back job waits for the reader to press "Complete normally"; the
+  // drive loop never dispatches it on its own.
+  const held = snap.jobs.find((j) => j.state === "Created" && manualJobTypes.has(j.jobType));
+  if (held) {
+    await dispatchWorkers(session, { [held.jobType]: () => ({}) }, {});
     return true;
   }
   if (snap.timers.length > 0) {
@@ -127,18 +180,42 @@ beforeAll(async () => {
   session = await createBojtosSession({ variant: "readmodel", wasm: loadReadModelWasm() });
 }, 30_000);
 
+afterAll(() => {
+  session?.free();
+});
+
 describe("every example goes somewhere", () => {
   it.each(EXAMPLES.map((e) => e.id))("%s", async (id) => {
     const example: ExampleDef = await loadExample(id);
-    const model = parseModel(example.bpmn);
+    // The runner deploys `draft.resolvedBpmn`, not `example.bpmn`: prompts and
+    // other `{{name}}` templates are substituted before the model is parsed.
+    // Driving the unsubstituted XML tests a model no reader ever runs.
+    const draft = buildDraftRunDefinition(example);
+    const bpmn = draft.resolvedBpmn;
+    const model = draft.model;
     const byElement = new Map(example.handlers.map((h) => [h.elementId, compile(h.source)]));
+    const vision = visionFor(example);
+
+    // Job types the example holds back for a reader choice. The runner deletes
+    // these from its worker map, so registering one here would auto-complete a
+    // job that is supposed to be waiting.
+    const allTasks = model.processes.flatMap((p) => p.tasks);
+    const manualElementIds = new Set(
+      example.handlers.filter((h) => h.manualControl).map((h) => h.elementId),
+    );
+    const manualJobTypes = new Set(
+      allTasks.filter((t) => manualElementIds.has(t.elementId)).map((t) => t.jobType),
+    );
 
     const workers: Record<string, JobHandler> = {};
-    for (const task of model.processes.flatMap((p) => p.tasks)) {
+    for (const task of allTasks) {
       if (task.compound || !byElement.has(task.elementId)) continue;
+      if (manualJobTypes.has(task.jobType)) continue;
       workers[task.jobType] = (job) => {
         const fn = byElement.get(job.elementId)!;
-        return fn(job, helpersFor(job.variables)) as JobResult | Promise<JobResult>;
+        return fn(job, helpersFor(job.variables, job.instanceKey, vision)) as
+          | JobResult
+          | Promise<JobResult>;
       };
     }
 
@@ -147,27 +224,38 @@ describe("every example goes somewhere", () => {
       const agent = compile(example.scriptedAgent);
       for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
         agents[jobType] = (job) =>
-          agent(job, helpersFor(job.variables)) as AgentResult | Promise<AgentResult>;
+          agent(job, helpersFor(job.variables, job.instanceKey, vision)) as
+            | AgentResult
+            | Promise<AgentResult>;
       }
     }
 
     session.reset();
-    session.deploy(example.bpmn);
+    session.deploy(bpmn);
+    let started;
     if (model.startMessage) {
       const { messageName, correlationKey } = model.startMessage;
-      const key = String(example.seed[correlationKey.replace(/^=/, "")] ?? "seed");
-      session.correlateMessage(messageName, key, JSON.stringify(example.seed));
+      // The same resolution the runner uses — a start subscription can be any
+      // FEEL expression, not just a bare variable name.
+      const key = resolveCorrelationKey(correlationKey, example.seed);
+      started = session.correlateMessage(messageName, key, JSON.stringify(example.seed));
     } else {
-      session.createInstance(model.processId, JSON.stringify(example.seed));
+      started = session.createInstance(model.processId, JSON.stringify(example.seed));
     }
+    // The root is the instance that was created, not `instances[0]`: a call
+    // activity's child can complete first and take that slot, so position would
+    // have this inspect a finished child and miss a stalled caller.
+    const rootKey = started?.created;
 
     for (let round = 0; round < 40; round += 1) {
       await dispatchWorkers(session, workers, { agents });
-      if (!readerCanAct(session, example)) break;
+      if (!(await readerCanAct(session, example, bpmn, manualJobTypes))) break;
     }
 
     const snap = session.snapshot();
-    const root = snap.instances[0];
+    const root =
+      snap.instances.find((i) => i.key === rootKey) ??
+      snap.instances.find((i) => i.processId === model.processId);
     const stalled =
       root?.state === "Active" &&
       snap.incidents.length === 0 &&

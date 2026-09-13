@@ -92,4 +92,45 @@
     <bpmn:sequenceFlow id="gf5" sourceRef="OnTimeout" targetRef="GE" />
     <bpmn:endEvent id="GE"><bpmn:incoming>gf4</bpmn:incoming><bpmn:incoming>gf5</bpmn:incoming></bpmn:endEvent>
   </bpmn:process>
+
+  <!-- User task first, so parking is observable before anything drives the run. -->
+  <bpmn:process id="probe-humanwork" isExecutable="true">
+    <bpmn:startEvent id="HS"><bpmn:outgoing>hf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="hf1" sourceRef="HS" targetRef="Human" />
+    <bpmn:userTask id="Human" name="Do the human bit">
+      <bpmn:extensionElements><zeebe:userTask /></bpmn:extensionElements>
+      <bpmn:incoming>hf1</bpmn:incoming><bpmn:outgoing>hf2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="hf2" sourceRef="Human" targetRef="Script" />
+    <bpmn:scriptTask id="Script">
+      <bpmn:incoming>hf2</bpmn:incoming><bpmn:outgoing>hf3</bpmn:outgoing>
+    </bpmn:scriptTask>
+    <bpmn:sequenceFlow id="hf3" sourceRef="Script" targetRef="HE" />
+    <bpmn:endEvent id="HE"><bpmn:incoming>hf3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <!-- Call activity on a sequence flow, and the process it calls. -->
+  <bpmn:process id="probe-caller" isExecutable="true">
+    <bpmn:startEvent id="CS"><bpmn:outgoing>cf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="cf1" sourceRef="CS" targetRef="CallIt" />
+    <bpmn:callActivity id="CallIt" name="Call the child">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="probe-called-child" propagateAllChildVariables="true" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>cf1</bpmn:incoming><bpmn:outgoing>cf2</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:sequenceFlow id="cf2" sourceRef="CallIt" targetRef="CE" />
+    <bpmn:endEvent id="CE"><bpmn:incoming>cf2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <bpmn:process id="probe-called-child" isExecutable="true">
+    <bpmn:startEvent id="KS"><bpmn:outgoing>kf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="kf1" sourceRef="KS" targetRef="ChildWork" />
+    <bpmn:serviceTask id="ChildWork">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-child-work" /></bpmn:extensionElements>
+      <bpmn:incoming>kf1</bpmn:incoming><bpmn:outgoing>kf2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="kf2" sourceRef="ChildWork" targetRef="KE" />
+    <bpmn:endEvent id="KE"><bpmn:incoming>kf2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
 </bpmn:definitions>

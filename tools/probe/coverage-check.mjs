@@ -50,8 +50,25 @@ export const PROVEN_CONSTRUCTS = {
   parallelGateway: "parallel gateway (fork and join)",
   task: "abstract task and manual task (pass-through)",
   manualTask: "abstract task and manual task (pass-through)",
-  intermediateThrowEvent: "intermediate throw event (signal)",
   eventBasedGateway: "event-based gateway (race, loser cancelled)",
+  scriptTask: "script task (job typed as its element id)",
+  userTask: "user task (parks until completed)",
+  callActivity: "call activity (on a sequence flow)",
+};
+
+/**
+ * Constructs proven for *one variant only*. An element like
+ * `intermediateThrowEvent` means nothing on its own — a signal throw and a link
+ * throw are different engine paths, and one of them is broken (#1157). Claiming
+ * the element is verified because one variant runs is how a real gap hides
+ * behind a green tick, so these are reported apart from `PROVEN_CONSTRUCTS`.
+ */
+export const PARTIAL_CONSTRUCTS = {
+  intermediateThrowEvent: {
+    check: "intermediate throw event (signal)",
+    proven: "signalEventDefinition",
+    unproven: "message, link (#1157), escalation (#1168)",
+  },
 };
 
 function record(name, ok, detail) {
@@ -690,6 +707,74 @@ async function runAuditedConstructsFixture() {
       session.free();
     }
   }
+
+  // --- user task parks the run; script task is a job typed as its element id ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-humanwork", "{}");
+      // Snapshot before driving: `driveToQuiescence` completes open user tasks
+      // itself, so parking is only observable from here.
+      const parked = session.snapshot();
+      const open = parked.userTasks.filter((t) => t.state === "Created");
+      const parkedOk = open.length === 1 && open[0].elementId === "Human";
+      record(
+        "user task (parks until completed)",
+        parkedOk,
+        parkedOk
+          ? "the engine parked on it and offered no job for it"
+          : `open tasks ${JSON.stringify(parked.userTasks.map((t) => [t.elementId, t.state]))}`,
+      );
+
+      let scriptRan = false;
+      if (parkedOk) session.completeUserTask(open[0].key, "{}");
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { Script: () => { scriptRan = true; return {}; } },
+        {},
+        20,
+      );
+      const ok = parkedOk && scriptRan && snapshot.completedInstances >= 1;
+      record(
+        "script task (job typed as its element id)",
+        ok,
+        ok
+          ? "offered a job under its own element id, and the instance completed after it"
+          : `script ran: ${scriptRan}, completed ${snapshot.completedInstances}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- call activity on a sequence flow: child runs, caller carries on ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-caller", "{}");
+      let childRan = false;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-child-work": () => { childRan = true; return {}; } },
+        {},
+        20,
+      );
+      // Two instances complete — caller and child. One would mean the call
+      // activity finished without the child ever running (nano-bpm#1159).
+      const ok = childRan && snapshot.completedInstances >= 2 && snapshot.incidents.length === 0;
+      record(
+        "call activity (on a sequence flow)",
+        ok,
+        ok
+          ? "the child process ran and the caller completed after it"
+          : `child ran: ${childRan}, completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
 }
 
 async function main() {
@@ -716,9 +801,12 @@ async function main() {
   // The audit downstream trusts this map; a name pointing at a check that no
   // longer exists would have it report proof that nothing produces.
   const recorded = new Set(results.map((r) => r.name));
-  const dangling = [...new Set(Object.values(PROVEN_CONSTRUCTS))].filter(
-    (name) => !recorded.has(name),
-  );
+  const dangling = [
+    ...new Set([
+      ...Object.values(PROVEN_CONSTRUCTS),
+      ...Object.values(PARTIAL_CONSTRUCTS).map((p) => p.check),
+    ]),
+  ].filter((name) => !recorded.has(name));
   if (dangling.length) {
     process.exitCode = 1;
     console.log(
