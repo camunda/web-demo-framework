@@ -45,13 +45,18 @@ import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS, runChecks } from "../probe/cover
  * engine rather than trusting a label.
  */
 const probeResults = new Map((await runChecks()).map((r) => [r.name, r]));
-const passed = (check) => probeResults.get(check)?.ok === true;
+// A construct can name several checks — every path it covers has to pass, or
+// one green variant would stand in for a regressed one.
+const passed = (check) =>
+  [check].flat().every((name) => probeResults.get(name)?.ok === true);
+const failingOf = (check) =>
+  [check].flat().filter((name) => probeResults.get(name)?.ok !== true);
 
 const CLAIMS = {};
 for (const [construct, check] of Object.entries(PROVEN_CONSTRUCTS)) {
   CLAIMS[construct] = passed(check)
-    ? ["verified", check]
-    : ["FAILING-PROBE", `${check} — this check did not pass on this run`];
+    ? ["verified", [check].flat().join(" + ")]
+    : ["FAILING-PROBE", `${failingOf(check).join(", ")} — did not pass on this run`];
 }
 
 // Proven for one variant only — also taken from the checks, so the qualifier
@@ -92,6 +97,11 @@ const KNOWN_FAILURES = {
     verdict: "silently-wrong",
     why: "nano-bpm#1157 — token vanishes, run reports success",
     probe: null,
+  },
+  intermediateThrowEvent: {
+    verdict: "silently-wrong",
+    why: "the token carries on, but a waiting catcher never receives the signal",
+    probe: "intermediate throw event (signal) — NOT broadcast, silently skipped",
   },
   sendTask: { verdict: "rejected-at-deploy", why: "nano-bpm#1168 — unknown element", probe: null },
   inclusiveGateway: {

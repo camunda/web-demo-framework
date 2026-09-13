@@ -15,7 +15,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import { createBojtosSession } from "@nanobpm/bojtos-kit";
+import { createBojtosSession, dispatchRound } from "@nanobpm/bojtos-kit";
 import { probe, driveToQuiescence, loadWasm } from "./index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,10 +24,14 @@ const fixturesDir = path.join(here, "fixtures");
 const results = [];
 
 /**
- * Which construct each check proves, for `tools/audit/construct-coverage.mjs`
+ * Which check(s) prove each construct, for `tools/audit/construct-coverage.mjs`
  * to read instead of keeping its own list. A hand-maintained "verified" column
  * drifts the moment a check is renamed or deleted, and a stale one is worse
  * than none: it says something has been checked when nothing checks it.
+ *
+ * A construct covering several engine paths names *all* of them — a message
+ * event behaves differently as an ordinary catch, a start event and a boundary
+ * event, and one passing check must not stand for the other two.
  *
  * Validated at the end of every run — a name here that no check records is a
  * hard error, not a quiet mismatch.
@@ -38,8 +42,12 @@ export const PROVEN_CONSTRUCTS = {
   endEvent: "timer (timeDuration)",
   sequenceFlow: "timer (timeDuration)",
   timerEventDefinition: "timer (timeDuration)",
-  messageEventDefinition: "message correlation",
-  intermediateCatchEvent: "message correlation",
+  messageEventDefinition: [
+    "message correlation",
+    "message start event (instance created by correlation)",
+    "message boundary event (interrupting)",
+  ],
+  intermediateCatchEvent: ["message correlation", "signal broadcast"],
   signalEventDefinition: "signal broadcast",
   multiInstanceLoopCharacteristics: "multi-instance (parallel)",
   errorEventDefinition: "error boundary event",
@@ -57,19 +65,13 @@ export const PROVEN_CONSTRUCTS = {
 };
 
 /**
- * Constructs proven for *one variant only*. An element like
- * `intermediateThrowEvent` means nothing on its own — a signal throw and a link
- * throw are different engine paths, and one of them is broken (#1157). Claiming
- * the element is verified because one variant runs is how a real gap hides
- * behind a green tick, so these are reported apart from `PROVEN_CONSTRUCTS`.
+ * Constructs proven for *one variant only* — reported apart from
+ * `PROVEN_CONSTRUCTS` so one working path can't stand for an element. Empty
+ * today: the signal throw that used to sit here turned out not to work at all
+ * once a check observed the signal rather than the token, so
+ * `intermediateThrowEvent` is a known failure instead.
  */
-export const PARTIAL_CONSTRUCTS = {
-  intermediateThrowEvent: {
-    check: "intermediate throw event (signal)",
-    proven: "signalEventDefinition",
-    unproven: "message, link (#1157), escalation (#1168)",
-  },
-};
+export const PARTIAL_CONSTRUCTS = {};
 
 function record(name, ok, detail) {
   results.push({ name, ok, detail });
@@ -654,23 +656,40 @@ async function runAuditedConstructsFixture() {
     const session = await createBojtosSession({ wasm: loadWasm() });
     try {
       session.deploy(xml);
+      // Park a listener on the signal first — a signal isn't retained, so the
+      // catcher has to be waiting before the throw happens.
+      session.createInstance("probe-signal-catcher", "{}");
+      const armed = session.snapshot().signalSubscriptions.length === 1;
+
       session.createInstance("probe-throw", "{}");
       let after = false;
-      const { snapshot } = await driveToQuiescence(
-        session,
-        { "probe-after-throw": () => { after = true; return {}; } },
-        {},
-        20,
-      );
-      // The element after the throw is the assertion: a throw event treated as
-      // a wait state would park here instead, which is how link events fail.
-      const ok = after && snapshot.completedInstances >= 1;
+      let caught = false;
+      // Jobs only. `driveToQuiescence` broadcasts a signal itself once nothing
+      // else can progress, which would fire the catcher and prove nothing.
+      for (let round = 0; round < 10; round += 1) {
+        const result = await dispatchRound(
+          session,
+          {
+            "probe-after-throw": () => { after = true; return {}; },
+            "probe-caught-signal": () => { caught = true; return {}; },
+          },
+          {},
+        );
+        if (result.handled === 0) break;
+      }
+      const snapshot = session.snapshot();
+      // The recorded failure, asserted exactly: the token carries on (so this is
+      // not a wait state) while a catcher that was already waiting never hears
+      // it. Asserting the failure rather than lamenting it means this check
+      // turns red the day the engine starts broadcasting.
+      const stillBroken =
+        armed && after && !caught && snapshot.signalSubscriptions.length === 1;
       record(
-        "intermediate throw event (signal)",
-        ok,
-        ok
-          ? "the token passed through the throw and finished the process"
-          : `element after the throw ran: ${after}, completed ${snapshot.completedInstances}`,
+        "intermediate throw event (signal) — NOT broadcast, silently skipped",
+        stillBroken,
+        stillBroken
+          ? "the token passed through the throw and finished; a waiting catcher never received the signal"
+          : `behaviour changed — catcher armed: ${armed}, after the throw: ${after}, caught: ${caught}, subscriptions left: ${snapshot.signalSubscriptions.length}; re-check the engine and update the coverage doc`,
       );
     } finally {
       session.free();
@@ -809,7 +828,18 @@ function checkFixtureIds() {
 export async function runChecks() {
   const before = process.exitCode;
   results.length = 0;
-  await main();
+  try {
+    await main();
+  } catch (e) {
+    // A fixture that throws must still leave a report. Rejecting here would
+    // reject the audit's top-level await and print no rows at all — the one
+    // outcome a report-only tool must not have.
+    record(
+      "probe harness",
+      false,
+      `a check threw and the run stopped early: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   const collected = results.map((r) => ({ name: r.name, ok: r.ok, detail: r.detail }));
   process.exitCode = before;
   return collected;
@@ -842,7 +872,7 @@ async function main() {
   const recorded = new Set(results.map((r) => r.name));
   const dangling = [
     ...new Set([
-      ...Object.values(PROVEN_CONSTRUCTS),
+      ...Object.values(PROVEN_CONSTRUCTS).flat(),
       ...Object.values(PARTIAL_CONSTRUCTS).map((p) => p.check),
     ]),
   ].filter((name) => !recorded.has(name));

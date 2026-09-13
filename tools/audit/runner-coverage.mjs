@@ -36,8 +36,19 @@ const worker = kit("worker.d.ts");
 // Comments first: the members are documented inline and the prose contains
 // semicolons, which would otherwise truncate the union at the first one.
 const declarations = worker.replace(/\/\*[\s\S]*?\*\//g, "");
-const union = declarations.slice(declarations.indexOf("export type SettleReason ="));
-const reasons = [...union.slice(0, union.indexOf(";")).matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]);
+const unionStart = declarations.indexOf("export type SettleReason =");
+const unionEnd = declarations.indexOf(";", unionStart);
+// The delimiter is checked, not assumed: without it `slice(0, -1)` swallows the
+// declarations that follow and their string literals pass for settle reasons.
+if (unionStart === -1 || unionEnd === -1) {
+  console.error(
+    "Could not locate the kit's SettleReason union — its type layout has changed, and this audit is no longer reading it. Fix the parse before trusting the result.",
+  );
+  process.exit(2);
+}
+const reasons = [
+  ...declarations.slice(unionStart, unionEnd).matchAll(/"([a-zA-Z]+)"/g),
+].map((m) => m[1]);
 const summary = src("stepSummary.ts");
 
 if (reasons.length < 2) {
@@ -85,8 +96,15 @@ if (snapStart === -1 || bodyEnd === -1) {
   );
   process.exit(2);
 }
-const snapshotArrays = [...types.slice(bodyStart + 1, bodyEnd).matchAll(/^\s+([a-zA-Z]+)\??:\s*([^;]+);/gm)]
-  .filter((m) => m[2].trim().endsWith("[]"))
+// Every spelling of an array, not just `T[]`: a kit that switched a queue to
+// `ReadonlyArray<T>` would otherwise drop out of this list silently, which is
+// the drift this check exists to catch.
+const isArrayType = (t) =>
+  /\[\]$/.test(t) || /^(?:readonly\s+)?(?:Readonly)?Array<.*>$/.test(t);
+const snapshotArrays = [
+  ...types.slice(bodyStart + 1, bodyEnd).matchAll(/^\s+([a-zA-Z]+)\??:\s*([^;]+);/gm),
+]
+  .filter((m) => isArrayType(m[2].trim().replace(/^readonly\s+/, "readonly ")))
   .map((m) => m[1]);
 
 if (snapshotArrays.length < 5) {

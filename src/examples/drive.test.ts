@@ -259,16 +259,18 @@ describe("every example goes somewhere", () => {
     const startSchema = model.startFormId
       ? (example.forms?.[model.startFormId] as FormSchema | undefined)
       : undefined;
-    const seed = JSON.stringify({
+    const startVars = {
       ...example.seed,
       ...(startSchema ? formDefaults(startSchema) : {}),
-    });
+    };
+    const seed = JSON.stringify(startVars);
     let started;
     if (model.startMessage) {
       const { messageName, correlationKey } = model.startMessage;
-      // The same resolution the runner uses — a start subscription can be any
-      // FEEL expression, not just a bare variable name.
-      const key = resolveCorrelationKey(correlationKey, example.seed);
+      // The same resolution the runner uses, against the same payload — a start
+      // subscription can name a field the start form defaults, not just one the
+      // seed carries.
+      const key = resolveCorrelationKey(correlationKey, startVars);
       started = session.correlateMessage(messageName, key, seed);
     } else {
       started = session.createInstance(model.processId, seed);

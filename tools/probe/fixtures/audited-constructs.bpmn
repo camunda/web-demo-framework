@@ -75,6 +75,26 @@
     <bpmn:endEvent id="HE"><bpmn:incoming>hf3</bpmn:incoming></bpmn:endEvent>
   </bpmn:process>
 
+  <!-- Waits on what probe-throw throws, so the throw is observable rather than
+       inferred from the token carrying on. A plain start event, not a signal
+       start event: this engine opens no subscription for those (verified), so
+       one would silently never arm and the check would prove nothing. -->
+  <bpmn:process id="probe-signal-catcher" isExecutable="true">
+    <bpmn:startEvent id="NS"><bpmn:outgoing>nf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="nf1" sourceRef="NS" targetRef="WaitSignal" />
+    <bpmn:intermediateCatchEvent id="WaitSignal">
+      <bpmn:incoming>nf1</bpmn:incoming><bpmn:outgoing>nf2</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="nsed" signalRef="Signal_Probe" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="nf2" sourceRef="WaitSignal" targetRef="Caught" />
+    <bpmn:serviceTask id="Caught">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-caught-signal" /></bpmn:extensionElements>
+      <bpmn:incoming>nf2</bpmn:incoming><bpmn:outgoing>nf3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="nf3" sourceRef="Caught" targetRef="NE" />
+    <bpmn:endEvent id="NE"><bpmn:incoming>nf3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
   <!-- Both events arm; the first to arrive wins and the loser is cancelled. -->
   <bpmn:process id="probe-event-gateway" isExecutable="true">
     <bpmn:startEvent id="GS"><bpmn:outgoing>gf1</bpmn:outgoing></bpmn:startEvent>
