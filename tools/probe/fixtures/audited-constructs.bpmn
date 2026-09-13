@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   The constructs `tools/audit/construct-coverage.mjs` found in real Camunda
-  models that this repo had never checked. Four processes, one per claim, so
-  the audit's "verified" column is backed by something that runs rather than by
-  a note someone typed after probing once.
+  models that this repo had never checked. One process per claim (plus the child
+  a call activity needs), so the audit's "verified" column is backed by something
+  that runs rather than by a note someone typed after probing once.
+
+  Ids are document-wide in BPMN: reusing one across processes still deploys, but
+  the references bind ambiguously. `coverage-check.mjs` fails the run if any
+  fixture repeats one.
 -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeAudited" targetNamespace="http://bpmn.io/schema/bpmn">
   <bpmn:signal id="Signal_Probe" name="probe-thrown-signal" />

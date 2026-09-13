@@ -10,13 +10,14 @@
 //
 //   node tools/audit/construct-coverage.mjs <dir> [<dir>...]
 //
-// Five verdicts, and the last two are the point:
-//   verified           — driven for real, here or in coverage-check.mjs
-//   partial            — one variant runs; the others have never been checked
-//   rejected-at-deploy — unmodelled, but it says so; a model can't pretend to run
-//   raises-incident    — accepted, then fails loudly at run time. Visible, at least.
-//   silently-wrong     — accepted, runs green, does the wrong thing. The dangerous class.
+// Seven verdicts, and the dangerous ones sort first:
 //   UNAUDITED          — used by real models, and we have never checked
+//   FAILING-PROBE      — a check claims this, and that check did not pass just now
+//   silently-wrong     — accepted, runs green, does the wrong thing. The dangerous class.
+//   partial            — one variant runs; the others have never been checked
+//   raises-incident    — accepted, then fails loudly at run time. Visible, at least.
+//   rejected-at-deploy — unmodelled, but it says so; a model can't pretend to run
+//   verified           — driven for real, here or in coverage-check.mjs
 //
 // Deliberately not a pass/fail gate: it reports, and the interesting number is
 // how much of the corpus sits in the third column.
@@ -62,19 +63,56 @@ for (const [c, p] of Object.entries(PARTIAL_CONSTRUCTS)) {
 }
 
 /**
- * Reproduced and filed. Not proofs — pointers to the issue that reproduces.
- * Nothing is claimed `verified` here: a verified column that anyone can type
- * into is the stale-proof problem `PROVEN_CONSTRUCTS` exists to prevent.
+ * Reproduced and filed. Nothing is claimed `verified` here: a verified column
+ * anyone can type into is the stale-proof problem `PROVEN_CONSTRUCTS` exists to
+ * prevent.
+ *
+ * Where a check asserts the broken behaviour, the claim is tied to it — those
+ * checks assert the *failure*, so one of them failing means the engine changed
+ * and the note here is the stale thing. `probe: null` marks a claim backed only
+ * by an issue, which the summary counts so it can't hide.
  */
-Object.assign(CLAIMS, {
-  receiveTask: ["silently-wrong", "nano-bpm#1009 — silently skipped, no subscription"],
-  linkEventDefinition: ["silently-wrong", "nano-bpm#1157 — token vanishes, run reports success"],
-  businessRuleTask: ["raises-incident", "nano-bpm#1158 — no DMN deploy path; fails loudly at run time"],
-  compensateEventDefinition: ["rejected-at-deploy", "nano-bpm#886 — fixed upstream, unreleased"],
-  sendTask: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
-  inclusiveGateway: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
-  escalationEventDefinition: ["rejected-at-deploy", "nano-bpm#1168 — unknown element"],
-});
+const KNOWN_FAILURES = {
+  receiveTask: {
+    verdict: "silently-wrong",
+    why: "nano-bpm#1009 — silently skipped, no subscription",
+    probe: "receive task (message wait) — NOT supported, silently skipped",
+  },
+  businessRuleTask: {
+    verdict: "raises-incident",
+    why: "nano-bpm#1158 — no DMN deploy path; fails loudly at run time",
+    probe: "DMN business rule task (no decision deployed)",
+  },
+  compensateEventDefinition: {
+    verdict: "rejected-at-deploy",
+    why: "nano-bpm#886 — fixed upstream, unreleased",
+    probe: "compensation (rejected at deploy — not modelled, #886)",
+  },
+  linkEventDefinition: {
+    verdict: "silently-wrong",
+    why: "nano-bpm#1157 — token vanishes, run reports success",
+    probe: null,
+  },
+  sendTask: { verdict: "rejected-at-deploy", why: "nano-bpm#1168 — unknown element", probe: null },
+  inclusiveGateway: {
+    verdict: "rejected-at-deploy",
+    why: "nano-bpm#1168 — unknown element",
+    probe: null,
+  },
+  escalationEventDefinition: {
+    verdict: "rejected-at-deploy",
+    why: "nano-bpm#1168 — unknown element",
+    probe: null,
+  },
+};
+
+for (const [construct, { verdict, why, probe }] of Object.entries(KNOWN_FAILURES)) {
+  if (probe && !passed(probe)) {
+    CLAIMS[construct] = ["FAILING-PROBE", `${probe} — this check did not pass on this run`];
+  } else {
+    CLAIMS[construct] = [verdict, probe ? why : `${why} (issue only — no probe)`];
+  }
+}
 
 /** Constructs a model can carry that say nothing about execution. */
 const COSMETIC = new Set([
@@ -87,8 +125,8 @@ const COSMETIC = new Set([
   "group", "category", "categoryValue", "extension", "import", "resource",
 ]);
 
-const BPMN_TAG = /<bpmn2?:([A-Za-z]+)[\s>/]/g;
-const ZEEBE_TAG = /<zeebe:([A-Za-z]+)[\s>/]/g;
+const BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+const ZEEBE_NS = "http://camunda.org/schema/zeebe/1.0";
 
 /**
  * Drop comments and CDATA before counting. A `<bpmn:sendTask>` quoted in a
@@ -97,6 +135,31 @@ const ZEEBE_TAG = /<zeebe:([A-Za-z]+)[\s>/]/g;
  */
 function elementsOnly(xml) {
   return xml.replace(/<!--[\s\S]*?-->/g, "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+}
+
+/**
+ * The prefixes *this document* binds to the BPMN and Zeebe namespaces. `bpmn:`
+ * and `zeebe:` are convention, not rule — a model using `<z:taskDefinition>` is
+ * perfectly valid, and an audit that claims to inventory every construct can't
+ * only recognise the prefixes it expected.
+ */
+function tagMatchers(xml) {
+  const prefixesFor = (ns) => {
+    const found = [
+      ...xml.matchAll(new RegExp(`xmlns:([A-Za-z_][\\w.-]*)\\s*=\\s*"${ns}"`, "g")),
+    ].map((m) => m[1]);
+    // A default `xmlns` binding needs no prefix at all.
+    if (new RegExp(`xmlns\\s*=\\s*"${ns}"`).test(xml)) found.push("");
+    return [...new Set(found)];
+  };
+  const matcher = (prefixes) =>
+    prefixes.length === 0
+      ? null
+      : new RegExp(
+          `<(?:${prefixes.map((p) => (p ? `${p}:` : "")).join("|")})([A-Za-z]+)[\\s>/]`,
+          "g",
+        );
+  return { bpmn: matcher(prefixesFor(BPMN_NS)), zeebe: matcher(prefixesFor(ZEEBE_NS)) };
 }
 
 function bpmnFilesIn(dir) {
@@ -203,8 +266,9 @@ for (const dir of dirs) {
     // Relative to cwd, not the basename: every example's model is `model.bpmn`,
     // and collapsing them would understate how widely a gap is used.
     const label = path.relative(process.cwd(), file);
-    for (const m of xml.matchAll(BPMN_TAG)) record(bpmn, m[1], label);
-    for (const m of xml.matchAll(ZEEBE_TAG)) record(zeebe, m[1], label);
+    const tags = tagMatchers(xml);
+    if (tags.bpmn) for (const m of xml.matchAll(tags.bpmn)) record(bpmn, m[1], label);
+    if (tags.zeebe) for (const m of xml.matchAll(tags.zeebe)) record(zeebe, m[1], label);
   }
 }
 
@@ -248,10 +312,12 @@ for (const r of rows) {
 
 const unaudited = rows.filter((r) => r.verdict === "UNAUDITED");
 const partial = rows.filter((r) => r.verdict === "partial");
+const unprobed = rows.filter((r) => r.evidence.includes("(issue only — no probe)"));
 const extensionGaps = reportExtensions(new Set(zeebe.keys()));
 console.log(
   `\n${unaudited.length} unaudited construct(s), in ${new Set(unaudited.flatMap((r) => [...r.models])).size} model(s).` +
     ` ${partial.length} proven for one variant only.` +
+    ` ${unprobed.length} claimed from an issue with no probe behind it.` +
     ` ${extensionGaps} framework-side extension gap(s).`,
 );
 if (unaudited.length || partial.length) {

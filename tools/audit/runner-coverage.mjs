@@ -62,10 +62,30 @@ for (const reason of reasons) {
 // that adds a queue has to be classified before this audit will pass, rather
 // than going unnoticed while the report still reads clean.
 const runner = src("ui/ExampleRunner.tsx");
-const types = kit("types.d.ts");
-const snapStart = types.indexOf("export interface Snapshot {");
-const snapBody = types.slice(snapStart, types.indexOf("\n}", snapStart)).replace(/\/\*[\s\S]*?\*\//g, "");
-const snapshotArrays = [...snapBody.matchAll(/^\s+([a-zA-Z]+)\??:\s*([^;]+);/gm)]
+const types = kit("types.d.ts").replace(/\/\*[\s\S]*?\*\//g, "");
+// `\b` matters: a bare `indexOf("export interface Snapshot")` also matches
+// `SnapshotDelta` and would parse a different type without saying so.
+const snapDecl = /export interface Snapshot\b[^{]*\{/.exec(types);
+const snapStart = snapDecl ? snapDecl.index : -1;
+// Match the braces rather than looking for an unindented `}`: that finds the
+// *next* interface's brace if the kit is ever reformatted, and silently scans
+// half the file's declarations into this audit's idea of a snapshot.
+const bodyStart = snapDecl ? snapDecl.index + snapDecl[0].length - 1 : -1;
+let bodyEnd = -1;
+for (let i = bodyStart, depth = 0; snapStart !== -1 && i < types.length; i += 1) {
+  if (types[i] === "{") depth += 1;
+  else if (types[i] === "}" && (depth -= 1) === 0) {
+    bodyEnd = i;
+    break;
+  }
+}
+if (snapStart === -1 || bodyEnd === -1) {
+  console.error(
+    "Could not locate the kit's Snapshot declaration — its type layout has changed, and this audit is no longer reading it. Fix the parse before trusting the result.",
+  );
+  process.exit(2);
+}
+const snapshotArrays = [...types.slice(bodyStart + 1, bodyEnd).matchAll(/^\s+([a-zA-Z]+)\??:\s*([^;]+);/gm)]
   .filter((m) => m[2].trim().endsWith("[]"))
   .map((m) => m[1]);
 

@@ -179,12 +179,19 @@ async function readerCanAct(
     (m) => !m.kind.toLowerCase().includes("boundary"),
   );
   if (waiting.length > 0) {
-    session.correlateMessage(waiting[0].messageName, waiting[0].correlationKey, "{}");
-    return true;
+    const target = waiting[0];
+    const after = session.correlateMessage(target.messageName, target.correlationKey, "{}");
+    // Publishing is only a move if the engine took it. A correlation that
+    // leaves the same subscription open has advanced nothing, and returning
+    // true would spin out the round budget and then report a clean finish.
+    return !after.messageSubscriptions.some(
+      (m) => m.messageName === target.messageName && m.correlationKey === target.correlationKey,
+    );
   }
   if (snap.signalSubscriptions.length > 0) {
-    session.broadcastSignal(snap.signalSubscriptions[0].signalName, "{}");
-    return true;
+    const name = snap.signalSubscriptions[0].signalName;
+    const after = session.broadcastSignal(name, "{}");
+    return !after.signalSubscriptions.some((s) => s.signalName === name);
   }
   return false;
 }
@@ -283,12 +290,18 @@ describe("every example goes somewhere", () => {
 
     const snap = session.snapshot();
     const root = snap.instances.find((i) => i.key === rootKey);
+    // A boundary subscription is the reader's to fire, so one left open is a
+    // resting place. An ordinary one still open here is not: the loop above
+    // already tried to correlate it and the engine didn't take it.
+    const pressable = snap.messageSubscriptions.filter((m) =>
+      m.kind.toLowerCase().includes("boundary"),
+    );
     const stalled =
       root?.state === "Active" &&
       snap.incidents.length === 0 &&
       openUserTasks(snap).length === 0 &&
       snap.timers.length === 0 &&
-      snap.messageSubscriptions.length === 0 &&
+      pressable.length === 0 &&
       snap.signalSubscriptions.length === 0;
 
     expect({
