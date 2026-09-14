@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-       "probe": "node tools/probe/index.mjs",
+    "probe": "node tools/probe/index.mjs",
     "coverage-check": "node tools/probe/coverage-check.mjs",
     "eval": "node --import ./tools/eval/register.mjs tools/eval/index.mjs",
     "eval:vision": "node tools/eval-vision/index.mjs",

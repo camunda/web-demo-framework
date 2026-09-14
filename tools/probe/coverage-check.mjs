@@ -43,21 +43,17 @@ const results = [];
  */
 export const PROVEN_CONSTRUCTS = {
   serviceTask: "timer (timeDuration)",
-  startEvent: "timer (timeDuration)",
-  endEvent: "timer (timeDuration)",
   sequenceFlow: "timer (timeDuration)",
-  timerEventDefinition: "timer (timeDuration)",
-  messageEventDefinition: [
-    "message correlation",
-    "message start event (instance created by correlation)",
-    "message boundary event (interrupting)",
-  ],
-  intermediateCatchEvent: ["message correlation", "signal broadcast"],
-  signalEventDefinition: "signal broadcast",
+  "startEvent[plain]": "timer (timeDuration)",
+  "endEvent[plain]": "timer (timeDuration)",
+  "startEvent[message]": "message start event (instance created by correlation)",
+  "intermediateCatchEvent[timer]": "timer (timeDuration)",
+  "intermediateCatchEvent[message]": "message correlation",
+  "intermediateCatchEvent[signal]": "signal broadcast",
+  "boundaryEvent[error]": "error boundary event",
+  "boundaryEvent[message]": "message boundary event (interrupting)",
   "multiInstanceLoopCharacteristics[parallel]": "multi-instance (parallel)",
   "callActivity[sequenceFlow]": "call activity (on a sequence flow)",
-  errorEventDefinition: "error boundary event",
-  boundaryEvent: "error boundary event",
   exclusiveGateway: "exclusive gateway (conditional + default flow)",
   "subProcess[sequenceFlow]": "embedded sub-process on a sequence flow",
   "subProcess[adHocTool]": "ad-hoc sub-process: embedded sub-process as a compound tool",
@@ -804,9 +800,9 @@ async function runAuditedConstructsFixture() {
         {},
         20,
       );
-      // Two instances complete — caller and child. One would mean the call
-      // activity finished without the child ever running (nano-bpm#1159).
-      const ok = childRan && snapshot.completedInstances >= 2 && snapshot.incidents.length === 0;
+      // Two instances complete — caller and child, exactly. "At least two" would
+      // also pass if a regression spawned duplicate children.
+      const ok = childRan && snapshot.completedInstances === 2 && snapshot.incidents.length === 0;
       record(
         "call activity (on a sequence flow)",
         ok,
@@ -834,7 +830,7 @@ function checkFixtureIds() {
     const xml = readFileSync(path.join(fixturesDir, file), "utf8")
       .replace(/<!--[\s\S]*?-->/g, "")
       .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
-    const ids = [...xml.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+    const ids = [...xml.matchAll(/\sid=(?:"([^"]+)"|'([^']+)')/g)].map((m) => m[1] ?? m[2]);
     const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
     if (dupes.length) offenders.push(`${file}: ${dupes.join(", ")}`);
   }
@@ -991,6 +987,31 @@ async function runAdHocCallActivityFixture() {
   }
 }
 
+/**
+ * A signal start event opens no subscription, so nothing can start the process.
+ * Recorded as the failure it is, rather than left as an assumption.
+ */
+async function runSignalStartFixture() {
+  const name = "signal start event — NOT subscribed, never starts anything";
+  const xml = readFileSync(path.join(fixturesDir, "signal-start.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    session.deploy(xml);
+    const subs = session.snapshot().signalSubscriptions.length;
+    const after = session.broadcastSignal("probe-start-signal", "{}");
+    const stillBroken = subs === 0 && after.instances.length === 0;
+    record(
+      name,
+      stillBroken,
+      stillBroken
+        ? "no subscription after deploy, and a broadcast created no instance"
+        : `behaviour changed — ${subs} subscription(s), ${after.instances.length} instance(s); re-check the engine and update the coverage doc`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
   checkFixtureIds();
@@ -1009,6 +1030,7 @@ async function main() {
   await runAdHocBoundaryCancelFixture();
   await runAgentInterruptFixture();
   await runAdHocCallActivityFixture();
+  await runSignalStartFixture();
   await runDeployRejections();
   await runAuditedConstructsFixture();
 

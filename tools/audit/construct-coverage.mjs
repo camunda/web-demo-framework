@@ -22,7 +22,7 @@
 // Deliberately not a pass/fail gate: it reports, and the interesting number is
 // how much of the corpus sits in the third column.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import path from "node:path";
 import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS, runChecks } from "../probe/coverage-check.mjs";
 
@@ -44,6 +44,20 @@ import { PROVEN_CONSTRUCTS, PARTIAL_CONSTRUCTS, runChecks } from "../probe/cover
  * running them is the only way to know it still passes, so the audit boots the
  * engine rather than trusting a label.
  */
+// Arguments first: running the probes takes an engine boot and several seconds,
+// and a typo'd path shouldn't pay for that before being told it's a typo.
+const dirs = process.argv.slice(2);
+if (dirs.length === 0) {
+  console.error("usage: node tools/audit/construct-coverage.mjs <dir> [<dir>...]");
+  process.exit(2);
+}
+for (const dir of dirs) {
+  if (!existsSync(dir)) {
+    console.error(`No such corpus directory: ${dir}`);
+    process.exit(2);
+  }
+}
+
 const probeResults = new Map((await runChecks()).map((r) => [r.name, r]));
 // A construct can name several checks — every path it covers has to pass, or
 // one green variant would stand in for a regressed one.
@@ -102,6 +116,21 @@ const KNOWN_FAILURES = {
     verdict: "silently-wrong",
     why: "the token carries on, but a waiting catcher never receives the signal",
     probe: "intermediate throw event (signal) — NOT broadcast, silently skipped",
+  },
+  "intermediateThrowEvent[signal]": {
+    verdict: "silently-wrong",
+    why: "the token carries on, but a waiting catcher never receives the signal",
+    probe: "intermediate throw event (signal) — NOT broadcast, silently skipped",
+  },
+  "startEvent[signal]": {
+    verdict: "silently-wrong",
+    why: "no subscription is opened at deploy, so a broadcast creates no instance",
+    probe: "signal start event — NOT subscribed, never starts anything",
+  },
+  "boundaryEvent[escalation]": {
+    verdict: "rejected-at-deploy",
+    why: "nano-bpm#1168 — not modelled; the flow out of it dangles",
+    probe: "escalationEventDefinition (not modelled — rejected at deploy, #1168)",
   },
   "callActivity[adHocTool]": {
     verdict: "silently-wrong",
@@ -194,11 +223,62 @@ function variantsIn(xml, prefixes) {
   for (let i = 0; i < subsInAdHoc; i += 1) out.push("subProcess[adHocTool]");
   for (let i = 0; i < subsTotal - subsInAdHoc; i += 1) out.push("subProcess[sequenceFlow]");
 
+  // An event element means nothing without its definition: a signal catch works,
+  // a signal throw is a no-op and a signal start event never subscribes — all
+  // three are `signalEventDefinition`. Recording `element[definition]` is what
+  // stops one proven path standing for the rest.
+  const definitionIn = (body) => {
+    const def = body.match(new RegExp(`<${p}([a-zA-Z]+)EventDefinition\\b`));
+    return def ? def[1] : "plain";
+  };
+  for (const el of EVENT_ELEMENTS) {
+    for (const m of xml.matchAll(new RegExp(`<${p}${el}\\b[^>]*/>`, "g"))) {
+      void m;
+      out.push(`${el}[plain]`);
+    }
+    for (const m of xml.matchAll(new RegExp(`<${p}${el}\\b[^>]*[^/]>([\\s\\S]*?)</${p}${el}>`, "g"))) {
+      out.push(`${el}[${definitionIn(m[1])}]`);
+    }
+  }
+
   return out;
 }
 
+/** Event elements, qualified by the definition they carry. */
+const EVENT_ELEMENTS = [
+  "startEvent",
+  "intermediateCatchEvent",
+  "intermediateThrowEvent",
+  "boundaryEvent",
+  "endEvent",
+];
+
+/**
+ * Counted through the element that carries them (see `EVENT_ELEMENTS`), so the
+ * same usage isn't reported twice under two schemes.
+ */
+const COUNTED_VIA_ELEMENT = new Set([
+  "messageEventDefinition",
+  "signalEventDefinition",
+  "timerEventDefinition",
+  "errorEventDefinition",
+  "escalationEventDefinition",
+  "linkEventDefinition",
+  "compensateEventDefinition",
+  "terminateEventDefinition",
+]);
+
 /** Tags the variant pass owns, so they aren't also counted bare. */
-const VARIANT_TAGS = new Set(["multiInstanceLoopCharacteristics", "callActivity", "subProcess"]);
+const VARIANT_TAGS = new Set([
+  "multiInstanceLoopCharacteristics",
+  "callActivity",
+  "subProcess",
+  "startEvent",
+  "intermediateCatchEvent",
+  "intermediateThrowEvent",
+  "boundaryEvent",
+  "endEvent",
+]);
 
 function tagMatchers(xml) {
   const prefixesFor = (ns) => {
@@ -307,12 +387,6 @@ function reportExtensions(used) {
   return gaps;
 }
 
-const dirs = process.argv.slice(2);
-if (dirs.length === 0) {
-  console.error("usage: node tools/audit/construct-coverage.mjs <dir> [<dir>...]");
-  process.exit(2);
-}
-
 /** construct -> { count, models: Set } */
 const bpmn = new Map();
 const zeebe = new Map();
@@ -334,7 +408,7 @@ for (const dir of dirs) {
     const tags = tagMatchers(xml);
     if (tags.bpmn)
       for (const m of xml.matchAll(tags.bpmn)) {
-        if (VARIANT_TAGS.has(m[1])) continue;
+        if (VARIANT_TAGS.has(m[1]) || COUNTED_VIA_ELEMENT.has(m[1])) continue;
         record(bpmn, m[1], label);
       }
     if (tags.bpmnPrefixes.length)

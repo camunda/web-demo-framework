@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A signal start event. The engine opens no subscription for one, so a broadcast
+  creates nothing — found while building a catcher for the signal-throw probe.
+  Asserted as the recorded failure so it turns red if that changes.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_SignalStart" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:signal id="Signal_Start" name="probe-start-signal" />
+  <bpmn:process id="probe-signal-start" isExecutable="true">
+    <bpmn:startEvent id="SS">
+      <bpmn:outgoing>sf1</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="ssed" signalRef="Signal_Start" />
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="sf1" sourceRef="SS" targetRef="SW" />
+    <bpmn:serviceTask id="SW">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-signal-start-work" /></bpmn:extensionElements>
+      <bpmn:incoming>sf1</bpmn:incoming><bpmn:outgoing>sf2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="sf2" sourceRef="SW" targetRef="SE" />
+    <bpmn:endEvent id="SE"><bpmn:incoming>sf2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
