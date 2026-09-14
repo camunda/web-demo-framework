@@ -33,6 +33,11 @@ const results = [];
  * event behaves differently as an ordinary catch, a start event and a boundary
  * event, and one passing check must not stand for the other two.
  *
+ * Some constructs are keyed `name[variant]` because the variants are different
+ * engine paths with different verdicts — a call activity works on a sequence
+ * flow and is silently broken as an ad-hoc tool (#1159). The audit records the
+ * same qualified names, so the bare tag never collects a blanket verdict.
+ *
  * Validated at the end of every run — a name here that no check records is a
  * hard error, not a quiet mismatch.
  */
@@ -49,7 +54,8 @@ export const PROVEN_CONSTRUCTS = {
   ],
   intermediateCatchEvent: ["message correlation", "signal broadcast"],
   signalEventDefinition: "signal broadcast",
-  multiInstanceLoopCharacteristics: "multi-instance (parallel)",
+  "multiInstanceLoopCharacteristics[parallel]": "multi-instance (parallel)",
+  "callActivity[sequenceFlow]": "call activity (on a sequence flow)",
   errorEventDefinition: "error boundary event",
   boundaryEvent: "error boundary event",
   exclusiveGateway: "exclusive gateway (conditional + default flow)",
@@ -61,7 +67,6 @@ export const PROVEN_CONSTRUCTS = {
   eventBasedGateway: "event-based gateway (race, loser cancelled)",
   scriptTask: "script task (job typed as its element id)",
   userTask: "user task (parks until completed)",
-  callActivity: "call activity (on a sequence flow)",
 };
 
 /**
@@ -616,14 +621,16 @@ async function runAuditedConstructsFixture() {
         20,
       );
       // Both branches, not just one: a fork that ran a single side and still
-      // completed would look identical from the instance count alone.
+      // completed would look identical from the instance count alone. And
+      // exactly one completion, since a join that let both tokens through would
+      // satisfy "at least one" while being precisely the bug worth catching.
       const ok =
-        ran.has("BranchA") && ran.has("BranchB") && snapshot.completedInstances >= 1;
+        ran.has("BranchA") && ran.has("BranchB") && snapshot.completedInstances === 1;
       record(
         "parallel gateway (fork and join)",
         ok,
         ok
-          ? "both branches ran and the join completed the instance"
+          ? "both branches ran and the join completed the instance exactly once"
           : `ran ${JSON.stringify([...ran])}, completed ${snapshot.completedInstances}`,
       );
     } finally {
@@ -683,13 +690,20 @@ async function runAuditedConstructsFixture() {
       // it. Asserting the failure rather than lamenting it means this check
       // turns red the day the engine starts broadcasting.
       const stillBroken =
-        armed && after && !caught && snapshot.signalSubscriptions.length === 1;
+        armed &&
+        after &&
+        !caught &&
+        snapshot.signalSubscriptions.length === 1 &&
+        // The throwing instance has to have *finished*. Without this, a
+        // regression that ran AfterThrow but left the process hanging would be
+        // recorded as the expected silent skip.
+        snapshot.instances.some((i) => i.processId === "probe-throw" && i.completed);
       record(
         "intermediate throw event (signal) — NOT broadcast, silently skipped",
         stillBroken,
         stillBroken
           ? "the token passed through the throw and finished; a waiting catcher never received the signal"
-          : `behaviour changed — catcher armed: ${armed}, after the throw: ${after}, caught: ${caught}, subscriptions left: ${snapshot.signalSubscriptions.length}; re-check the engine and update the coverage doc`,
+          : `behaviour changed — catcher armed: ${armed}, after the throw: ${after}, caught: ${caught}, subscriptions left: ${snapshot.signalSubscriptions.length}, throw instance completed: ${snapshot.instances.some((i) => i.processId === "probe-throw" && i.completed)}; re-check the engine and update the coverage doc`,
       );
     } finally {
       session.free();
@@ -804,7 +818,13 @@ async function runAuditedConstructsFixture() {
 function checkFixtureIds() {
   const offenders = [];
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith(".bpmn"))) {
-    const ids = [...readFileSync(path.join(fixturesDir, file), "utf8").matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+    // Comments and CDATA stripped first: an id mentioned in documentation is not
+    // a declared id, and failing a valid fixture for it would train people to
+    // ignore this check.
+    const xml = readFileSync(path.join(fixturesDir, file), "utf8")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+    const ids = [...xml.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
     const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
     if (dupes.length) offenders.push(`${file}: ${dupes.join(", ")}`);
   }

@@ -103,6 +103,11 @@ const KNOWN_FAILURES = {
     why: "the token carries on, but a waiting catcher never receives the signal",
     probe: "intermediate throw event (signal) — NOT broadcast, silently skipped",
   },
+  "callActivity[adHocTool]": {
+    verdict: "silently-wrong",
+    why: "nano-bpm#1159 — the child never starts, and output mapping yields nulls",
+    probe: "ad-hoc sub-process: embedded sub-process as a compound tool",
+  },
   sendTask: { verdict: "rejected-at-deploy", why: "nano-bpm#1168 — unknown element", probe: null },
   inclusiveGateway: {
     verdict: "rejected-at-deploy",
@@ -148,18 +153,49 @@ function elementsOnly(xml) {
 }
 
 /**
- * The prefixes *this document* binds to the BPMN and Zeebe namespaces. `bpmn:`
- * and `zeebe:` are convention, not rule — a model using `<z:taskDefinition>` is
- * perfectly valid, and an audit that claims to inventory every construct can't
- * only recognise the prefixes it expected.
+ * Constructs whose variants are different engine paths with different verdicts,
+ * recorded as `name[variant]` so the bare tag never collects one blanket
+ * verdict. Counting `callActivity` as verified because it works on a sequence
+ * flow would hide the ad-hoc use, which is silently broken (#1159).
  */
+function variantsIn(xml, prefixes) {
+  const p = `(?:${prefixes.map((x) => (x ? `${x}:` : "")).join("|")})`;
+  const out = [];
+
+  for (const m of xml.matchAll(new RegExp(`<${p}multiInstanceLoopCharacteristics\\b([^>]*)>?`, "g"))) {
+    out.push(`multiInstanceLoopCharacteristics[${/isSequential\s*=\s*["']true["']/.test(m[1]) ? "sequential" : "parallel"}]`);
+  }
+
+  // Only a call activity the ad-hoc host can activate *directly* is the broken
+  // use. One wrapped in an embedded sub-process is the documented #1159
+  // workaround and works, so the nested blocks come out before counting.
+  const adHocBlocks = [
+    ...xml.matchAll(new RegExp(`<${p}adHocSubProcess\\b[\\s\\S]*?</${p}adHocSubProcess>`, "g")),
+  ].map((m) => m[0].replace(new RegExp(`<${p}subProcess\\b[\\s\\S]*?</${p}subProcess>`, "g"), ""));
+  const inAdHoc = adHocBlocks.reduce(
+    (n, block) => n + [...block.matchAll(new RegExp(`<${p}callActivity\\b`, "g"))].length,
+    0,
+  );
+  const total = [...xml.matchAll(new RegExp(`<${p}callActivity\\b`, "g"))].length;
+  for (let i = 0; i < inAdHoc; i += 1) out.push("callActivity[adHocTool]");
+  for (let i = 0; i < total - inAdHoc; i += 1) out.push("callActivity[sequenceFlow]");
+
+  return out;
+}
+
+/** Tags the variant pass owns, so they aren't also counted bare. */
+const VARIANT_TAGS = new Set(["multiInstanceLoopCharacteristics", "callActivity"]);
+
 function tagMatchers(xml) {
   const prefixesFor = (ns) => {
+    // Both quote styles: single-quoted attributes are equally valid XML, and a
+    // corpus using them would otherwise inventory as zero constructs with no
+    // error — a clean report that means nothing.
     const found = [
-      ...xml.matchAll(new RegExp(`xmlns:([A-Za-z_][\\w.-]*)\\s*=\\s*"${ns}"`, "g")),
+      ...xml.matchAll(new RegExp(`xmlns:([A-Za-z_][\\w.-]*)\\s*=\\s*["']${ns}["']`, "g")),
     ].map((m) => m[1]);
     // A default `xmlns` binding needs no prefix at all.
-    if (new RegExp(`xmlns\\s*=\\s*"${ns}"`).test(xml)) found.push("");
+    if (new RegExp(`xmlns\\s*=\\s*["']${ns}["']`).test(xml)) found.push("");
     return [...new Set(found)];
   };
   const matcher = (prefixes) =>
@@ -169,7 +205,12 @@ function tagMatchers(xml) {
           `<(?:${prefixes.map((p) => (p ? `${p}:` : "")).join("|")})([A-Za-z]+)[\\s>/]`,
           "g",
         );
-  return { bpmn: matcher(prefixesFor(BPMN_NS)), zeebe: matcher(prefixesFor(ZEEBE_NS)) };
+  const bpmnPrefixes = prefixesFor(BPMN_NS);
+  return {
+    bpmn: matcher(bpmnPrefixes),
+    zeebe: matcher(prefixesFor(ZEEBE_NS)),
+    bpmnPrefixes,
+  };
 }
 
 function bpmnFilesIn(dir) {
@@ -277,7 +318,13 @@ for (const dir of dirs) {
     // and collapsing them would understate how widely a gap is used.
     const label = path.relative(process.cwd(), file);
     const tags = tagMatchers(xml);
-    if (tags.bpmn) for (const m of xml.matchAll(tags.bpmn)) record(bpmn, m[1], label);
+    if (tags.bpmn)
+      for (const m of xml.matchAll(tags.bpmn)) {
+        if (VARIANT_TAGS.has(m[1])) continue;
+        record(bpmn, m[1], label);
+      }
+    if (tags.bpmnPrefixes.length)
+      for (const name of variantsIn(xml, tags.bpmnPrefixes)) record(bpmn, name, label);
     if (tags.zeebe) for (const m of xml.matchAll(tags.zeebe)) record(zeebe, m[1], label);
   }
 }
@@ -310,6 +357,15 @@ const icon = {
   "rejected-at-deploy": "⛔",
   UNAUDITED: "❓",
 };
+
+// A corpus with no models is a typo or a wrong path, not a corpus with no gaps.
+// Both print "0 unaudited", so refuse rather than hand back a false clean bill.
+if (fileCount === 0) {
+  console.error(
+    `No .bpmn files found under ${dirs.join(", ")} — nothing was audited. Check the path.`,
+  );
+  process.exit(2);
+}
 
 console.log(`Construct coverage — ${fileCount} models across ${dirs.length} corpus dir(s)\n`);
 for (const r of rows) {

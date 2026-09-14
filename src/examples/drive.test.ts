@@ -11,8 +11,10 @@ import { resolveCorrelationKey } from "../framework/model";
 import { buildWorkers } from "../framework/compile";
 import { buildDraftRunDefinition } from "../framework/draft";
 import {
+  imageRefVariables,
   makeImageAccessor,
   makeVisionAccessor,
+  type RunImage,
   type VisionSupport,
 } from "../framework/imageInput";
 import { makeScriptedVisionBrain } from "../framework/brains/vision";
@@ -36,6 +38,15 @@ import { EXAMPLES, loadExample } from "./index";
  * finishes, or stops on something a reader can act on. What it must never do is
  * stall with no incident, no open task, and nothing to press — which is exactly
  * how a silently-skipped construct presents.
+ *
+ * Scope, so this isn't read as more than it is: handler and agent sources are
+ * compiled here with `new Function`, not through `compileHandler`, because the
+ * production path evaluates them inside the sandbox iframe (see
+ * `src/framework/sandbox/`) which does not exist under jsdom — handlers taken
+ * off a draft simply never resolve. So this covers **engine and routing**
+ * behaviour: deployment, job dispatch, wait states and the reader's moves. It
+ * does not cover the sandbox boundary, and a source that only fails there would
+ * pass here.
  */
 
 function compile(source: string): ExampleHandler {
@@ -44,18 +55,23 @@ function compile(source: string): ExampleHandler {
 }
 
 /**
- * The runner gives an `imageInput` example a scripted-vision reader built from
- * its own `scriptedVision` ground truth. Without it `helpers.vision` resolves
- * to nothing and plate-recognition always takes its manual-entry branch — the
- * sweep would then drive a path no reader with an image ever sees.
+ * The runner only has an image once the reader picks one: the selection goes
+ * into the start payload as `imageRefVariables` and is registered against the
+ * instance via `setRunImage`. The sweep stands in for a reader who picked the
+ * first gallery image, so `helpers.vision` resolves the way it does in the app
+ * rather than always falling through to the no-image branch.
  */
-function visionFor(example: ExampleDef): VisionSupport | undefined {
+function selectedImage(example: ExampleDef): RunImage | null {
+  const first = example.imageInput?.seedImages[0];
+  return first ? { imageId: first.id } : null;
+}
+
+function visionFor(example: ExampleDef, image: RunImage | null): VisionSupport | undefined {
   if (!example.imageInput) return undefined;
-  const first = example.imageInput.seedImages[0];
   return {
     read: makeScriptedVisionBrain(example.scriptedVision).read,
     live: false,
-    resolve: () => (first ? { imageId: first.id } : undefined),
+    resolve: () => image ?? undefined,
   };
 }
 
@@ -107,23 +123,31 @@ function formPayload(example: ExampleDef, bpmn: string, elementId: string): stri
   if (!schema?.components) return "{}";
 
   const values: Record<string, unknown> = {};
-  for (const raw of schema.components) {
-    const c = raw as {
-      key?: string;
-      type?: string;
-      values?: { value: unknown }[];
-      validate?: { required?: boolean };
-    };
-    if (!c.key || !c.validate?.required) continue;
-    values[c.key] =
-      c.type === "radio" || c.type === "select"
-        ? (c.values?.[0]?.value ?? "")
-        : c.type === "number"
-          ? 1
-          : c.type === "checkbox"
-            ? true
-            : "audit";
-  }
+  // Components nest (groups, containers), and the form helpers walk the tree —
+  // a required field inside a group would otherwise go unfilled and the task
+  // would fail validation, which reads as a stalled example.
+  const walk = (components: unknown[]) => {
+    for (const raw of components) {
+      const c = raw as {
+        key?: string;
+        type?: string;
+        components?: unknown[];
+        values?: { value: unknown }[];
+        validate?: { required?: boolean };
+      };
+      if (c.components) walk(c.components);
+      if (!c.key || !c.validate?.required) continue;
+      values[c.key] =
+        c.type === "radio" || c.type === "select"
+          ? (c.values?.[0]?.value ?? "")
+          : c.type === "number"
+            ? 1
+            : c.type === "checkbox"
+              ? true
+              : "audit";
+    }
+  };
+  walk(schema.components);
   return JSON.stringify(values);
 }
 
@@ -215,7 +239,8 @@ describe("every example goes somewhere", () => {
     const draft = buildDraftRunDefinition(example);
     const bpmn = draft.resolvedBpmn;
     const model = draft.model;
-    const vision = visionFor(example);
+    const image = selectedImage(example);
+    const vision = visionFor(example, image);
 
     // Job types the example holds back for a reader choice. The runner deletes
     // these from its worker map, so registering one here would auto-complete a
@@ -262,6 +287,7 @@ describe("every example goes somewhere", () => {
     const startVars = {
       ...example.seed,
       ...(startSchema ? formDefaults(startSchema) : {}),
+      ...imageRefVariables(image),
     };
     const seed = JSON.stringify(startVars);
     let started;
@@ -293,11 +319,12 @@ describe("every example goes somewhere", () => {
     const snap = session.snapshot();
     const root = snap.instances.find((i) => i.key === rootKey);
     // A boundary subscription is the reader's to fire, so one left open is a
-    // resting place. An ordinary one still open here is not: the loop above
-    // already tried to correlate it and the engine didn't take it.
-    const pressable = snap.messageSubscriptions.filter((m) =>
-      m.kind.toLowerCase().includes("boundary"),
-    );
+    // resting place. An ordinary one still open is not: the loop already tried
+    // to correlate it and the engine didn't take it — reported on its own line
+    // so a boundary button sitting alongside can't excuse it.
+    const isBoundary = (m: { kind: string }) => m.kind.toLowerCase().includes("boundary");
+    const pressable = snap.messageSubscriptions.filter(isBoundary);
+    const unconsumed = snap.messageSubscriptions.filter((m) => !isBoundary(m));
     const stalled =
       root?.state === "Active" &&
       snap.incidents.length === 0 &&
@@ -311,6 +338,13 @@ describe("every example goes somewhere", () => {
       stalledWithNothingToDo: stalled
         ? (root?.activeElements ?? []).map((e) => e.elementId ?? e)
         : false,
-    }).toEqual({ incidents: [], stalledWithNothingToDo: false });
+      waitingOnAMessageThatNeverCorrelated: unconsumed.map(
+        (m) => `${m.elementId}: ${m.messageName}`,
+      ),
+    }).toEqual({
+      incidents: [],
+      stalledWithNothingToDo: false,
+      waitingOnAMessageThatNeverCorrelated: [],
+    });
   }, 30_000);
 });
