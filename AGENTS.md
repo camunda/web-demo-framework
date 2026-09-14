@@ -25,16 +25,15 @@ script. Don't invoke them; match the style of the file you're editing instead.
 
 ## Line endings: check before you edit
 
-The repo is split roughly half and half between CRLF and LF files, and there is
-no `.gitattributes` to normalise it. Rewriting a CRLF file with LF turns a
-three-line change into a whole-file diff that hides the actual edit.
+## Line endings: LF
 
-Check the file you're about to rewrite (`file src/…` or `grep -qU $'\r'`) and
-preserve what's there. This matters most for scripted edits — a Python/Node
-rewrite defaults to LF unless you pass `newline=""`.
+`.gitattributes` sets `* text=auto eol=lf`, so every text file is LF both in the
+repo and in the working tree, on every platform. The 10 JPEGs are marked
+`binary`.
 
-Normalising the repo would be a fine change; it just needs to be its own PR
-rather than riding along inside another one.
+You shouldn't have to think about this. If a tool ever writes CRLF, git
+normalises it on the way in — but it will show as a whole-file diff in your
+editor first, so if you see one, that's what happened.
 
 ## Examples never *modify* `src/framework/`
 
@@ -64,10 +63,15 @@ on the initial path.
 
 Tests run in jsdom (`vitest.config.ts`) with `setupFiles: vitest.setup.ts`.
 
-- **Auto-cleanup is off** (no `globals`). Import and register it yourself:
-  `import { cleanup } from "@testing-library/react"; afterEach(cleanup);`.
-  Without it, repeated `render()` calls accumulate stale DOM and queries match
-  the wrong nodes.
+- **Auto-cleanup is off** (no `globals`), and so is every Vitest global. Import
+  both:
+  ```ts
+  import { afterEach } from "vitest";
+  import { cleanup } from "@testing-library/react";
+  afterEach(cleanup);
+  ```
+  Without the cleanup, repeated `render()` calls accumulate stale DOM and queries
+  match the wrong nodes.
 - **There is no sandbox iframe in jsdom**, and this bites twice. You can't
   verify sandbox *isolation* there — a test asserting sandboxed code can't
   reach `parent.document` passes even if the sandbox is broken (see
@@ -123,15 +127,19 @@ Each of these is documented at its landing site — this is just the index.
   type `manualControl` and resolves it via `throwJobError`. Boundary error
   events also need an explicit `errorRef`. See `docs/engine-coverage.md`.
 - **`driveToQuiescence` resolves wait states for you** — it completes open user
-  tasks, advances timers and publishes messages when nothing else can progress.
-  To *observe* a wait state, snapshot before driving, or dispatch jobs only.
+  tasks, advances timers, correlates messages *and broadcasts signals* whenever
+  nothing else can progress. To *observe* a wait state, snapshot before driving
+  or dispatch jobs only; otherwise the helper consumes the very thing you're
+  trying to measure.
 - **Don't group lazy deps into `manualChunks` by module id.** Rollup can
   synthesize a static import edge back into the entry chunk to reach the shared
   bytes, silently putting the whole chunk on the initial path. See the comment
   above `manualChunks` in `vite.config.ts`.
-- **The scripted brain drives one agent host.** Multiple hosts work for the live
-  brain; the scripted one drives the primary process's first host. See
-  `docs/supported-edits.md`.
+- **The scripted brain drives every agent host.** `ExampleRunner` registers a
+  scripted handler for each distinct agent job type across *every* process — a
+  host can live in a called process, where the primary process has none — and
+  passes `job.elementId` through so one scripted source can branch per host,
+  exactly as it does for a live brain. A single-host example can ignore it.
 - **`src/framework/ui/ExampleRunner.tsx` is a merge hotspot.** It's the runner's
   single top-level component, so most feature slices touch it. Keep changes
   additive — new state, new `Suspense`-wrapped branches, wrapping rather than

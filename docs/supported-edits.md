@@ -37,7 +37,7 @@ behalf.
 
 | Edit | What the reader sees |
 | --- | --- |
-| Multiple AI Agent hosts **with the scripted brain** (no live brain configured) | Only the primary process's first agent host is driven by the scripted brain; any other host sharing its job type is guarded by `elementId` and throws instead, which the engine reports as an **incident on the diagram** (not a silent stall, and not silently driven by the primary host's closure). Use a live brain to exercise more than one host today. |
+| Multiple AI Agent hosts **with the scripted brain** (no live brain configured) | Fully supported, the same way as the live brain: `ExampleRunner` registers a scripted handler for every distinct agent job type across every process — including hosts in called processes, where the primary process has no host of its own — and passes `job.elementId` to the scripted source so it can branch per host. A single-host example never has to read it. (This row previously said only the primary process's first host was driven and any other threw an incident; that restriction is gone.) |
 | A model with **zero** `<bpmn:process>` elements | `parseModel` throws "No `<bpmn:process>` in the diagram", surfaced as a single top-level `"error"` diagnostic; there's nothing else to resolve. |
 | Structural edits that break the underlying XML (mismatched tags, invalid namespaces) | `parseModel` throws "Invalid BPMN XML: …" via the browser's `DOMParser`, surfaced the same way. |
 | Removing the ad-hoc sub-process construct entirely from an agentic model | Not specifically diagnosed beyond "no agent host found" (the process behaves as fully non-agentic) — there's no dedicated message pointing at "you used to have an agent here." |
