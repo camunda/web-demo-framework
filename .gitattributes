@@ -1,0 +1,11 @@
+# Normalise every text file to LF, in the repository and in the working tree.
+#
+# The repo was split roughly half and half between CRLF and LF with no rule, so
+# any tool that rewrote a file with the other ending turned a three-line change
+# into a whole-file diff and hid the actual edit. `text=auto` lets git detect
+# text vs binary; `eol=lf` means a checkout is LF on every platform, so the
+# working tree matches what is stored.
+* text=auto eol=lf
+
+# Binary assets: never touched, and not worth diffing.
+*.jpg binary
