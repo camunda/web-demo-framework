@@ -23,8 +23,6 @@ npm run budget          # per-artifact gzip budget (tools/bundle-budget)
 There is **no linter or formatter** — no ESLint config, no Prettier, no `lint`
 script. Don't invoke them; match the style of the file you're editing instead.
 
-## Line endings: check before you edit
-
 ## Line endings: LF
 
 `.gitattributes` sets `* text=auto eol=lf`, so every text file is LF both in the
