@@ -103,7 +103,7 @@ if (snapStart === -1 || bodyEnd === -1) {
 const isArrayType = (t) =>
   /\[\]$/.test(t) || /^(?:readonly\s+)?(?:Readonly)?Array<.*>$/.test(t);
 const snapshotArrays = [
-  ...types.slice(bodyStart + 1, bodyEnd).matchAll(/^\s+([a-zA-Z]+)\??:\s*([^;]+);/gm),
+  ...types.slice(bodyStart + 1, bodyEnd).matchAll(/^\s+(?:readonly\s+)?([a-zA-Z]+)\??:\s*([^;]+);/gm),
 ]
   .filter((m) => isArrayType(m[2].trim().replace(/^readonly\s+/, "readonly ")))
   .map((m) => m[1]);

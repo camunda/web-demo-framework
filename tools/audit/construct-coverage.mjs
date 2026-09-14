@@ -106,18 +106,22 @@ const KNOWN_FAILURES = {
   "callActivity[adHocTool]": {
     verdict: "silently-wrong",
     why: "nano-bpm#1159 — the child never starts, and output mapping yields nulls",
-    probe: "ad-hoc sub-process: embedded sub-process as a compound tool",
+    probe: "ad-hoc sub-process: call activity as a tool — child never starts (#1159)",
   },
-  sendTask: { verdict: "rejected-at-deploy", why: "nano-bpm#1168 — unknown element", probe: null },
+  sendTask: {
+    verdict: "rejected-at-deploy",
+    why: "nano-bpm#1168 — not modelled; the flow into it dangles",
+    probe: "sendTask (not modelled — rejected at deploy, #1168)",
+  },
   inclusiveGateway: {
     verdict: "rejected-at-deploy",
-    why: "nano-bpm#1168 — unknown element",
-    probe: null,
+    why: "nano-bpm#1168 — not modelled; the flow into it dangles",
+    probe: "inclusiveGateway (not modelled — rejected at deploy, #1168)",
   },
   escalationEventDefinition: {
     verdict: "rejected-at-deploy",
-    why: "nano-bpm#1168 — unknown element",
-    probe: null,
+    why: "nano-bpm#1168 — not modelled; the flow out of it dangles",
+    probe: "escalationEventDefinition (not modelled — rejected at deploy, #1168)",
   },
 };
 
@@ -180,11 +184,21 @@ function variantsIn(xml, prefixes) {
   for (let i = 0; i < inAdHoc; i += 1) out.push("callActivity[adHocTool]");
   for (let i = 0; i < total - inAdHoc; i += 1) out.push("callActivity[sequenceFlow]");
 
+  // Same split for embedded sub-processes: one activated as an ad-hoc tool is a
+  // different engine path from one on a sequence flow, and only the first was
+  // ever probed.
+  const subsInAdHoc = [
+    ...xml.matchAll(new RegExp(`<${p}adHocSubProcess\\b[\\s\\S]*?</${p}adHocSubProcess>`, "g")),
+  ].reduce((n, m) => n + [...m[0].matchAll(new RegExp(`<${p}subProcess\\b`, "g"))].length, 0);
+  const subsTotal = [...xml.matchAll(new RegExp(`<${p}subProcess\\b`, "g"))].length;
+  for (let i = 0; i < subsInAdHoc; i += 1) out.push("subProcess[adHocTool]");
+  for (let i = 0; i < subsTotal - subsInAdHoc; i += 1) out.push("subProcess[sequenceFlow]");
+
   return out;
 }
 
 /** Tags the variant pass owns, so they aren't also counted bare. */
-const VARIANT_TAGS = new Set(["multiInstanceLoopCharacteristics", "callActivity"]);
+const VARIANT_TAGS = new Set(["multiInstanceLoopCharacteristics", "callActivity", "subProcess"]);
 
 function tagMatchers(xml) {
   const prefixesFor = (ns) => {

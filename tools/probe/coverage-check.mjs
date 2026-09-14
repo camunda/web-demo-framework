@@ -59,7 +59,8 @@ export const PROVEN_CONSTRUCTS = {
   errorEventDefinition: "error boundary event",
   boundaryEvent: "error boundary event",
   exclusiveGateway: "exclusive gateway (conditional + default flow)",
-  subProcess: "ad-hoc sub-process: embedded sub-process as a compound tool",
+  "subProcess[sequenceFlow]": "embedded sub-process on a sequence flow",
+  "subProcess[adHocTool]": "ad-hoc sub-process: embedded sub-process as a compound tool",
   adHocSubProcess: "ad-hoc sub-process: embedded sub-process as a compound tool",
   parallelGateway: "parallel gateway (fork and join)",
   task: "abstract task and manual task (pass-through)",
@@ -645,13 +646,22 @@ async function runAuditedConstructsFixture() {
       session.deploy(xml);
       session.createInstance("probe-passthrough", "{}");
       const { snapshot } = await driveToQuiescence(session, {}, {}, 20);
-      const ok = snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+      // Reaching the end is not the same as passing *through* these two. A
+      // regression that skipped either and still completed would look identical
+      // from the instance count, so read the per-element stats.
+      const ran = (id) =>
+        (snapshot.elementStats.find((e) => e.elementId === id)?.completed ?? 0) >= 1;
+      const ok =
+        ran("AbstractTask") &&
+        ran("ManualTask") &&
+        snapshot.completedInstances >= 1 &&
+        snapshot.incidents.length === 0;
       record(
         "abstract task and manual task (pass-through)",
         ok,
         ok
-          ? "neither offered a job, and the token carried on through both"
-          : `completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+          ? "neither offered a job, both completed, and the token carried on through them"
+          : `AbstractTask completed: ${ran("AbstractTask")}, ManualTask completed: ${ran("ManualTask")}, instances ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
       );
     } finally {
       session.free();
@@ -865,6 +875,122 @@ export async function runChecks() {
   return collected;
 }
 
+/**
+ * Constructs the engine refuses at deploy (#1168). Probing a refusal matters as
+ * much as probing a success: without it, the day one of these starts deploying,
+ * the audit keeps reporting "rejected-at-deploy" for something that now runs —
+ * and an unsupported construct quietly becoming supported is exactly the kind
+ * of change a coverage tool exists to notice.
+ *
+ * The refusal is not an "unsupported element" message: the parser doesn't model
+ * these at all, so the element simply isn't there and the sequence flow into it
+ * dangles. Matching the offending element *id* is therefore what pins the
+ * behaviour — matching on the construct name passes for the wrong reason (an id
+ * containing "escalation" satisfied that, which is how this check first went
+ * green).
+ */
+async function runDeployRejections() {
+  const cases = [
+    ["sendTask", "reject-send-task.bpmn", "Send"],
+    ["inclusiveGateway", "reject-inclusive-gateway.bpmn", "Fork"],
+    ["escalationEventDefinition", "reject-escalation.bpmn", "EscBoundary"],
+  ];
+  for (const [construct, file, elementId] of cases) {
+    const name = `${construct} (not modelled — rejected at deploy, #1168)`;
+    const xml = readFileSync(path.join(fixturesDir, file), "utf8");
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      record(name, false, `unexpectedly deployed — ${construct} may now be supported; re-check the engine and update the coverage doc (#1168)`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const rejected = msg.includes(elementId) && /unknown|unsupported|invalid/i.test(msg);
+      record(
+        name,
+        rejected,
+        rejected
+          ? `deploy rejected, naming ${elementId}: ${msg.slice(0, 80)}`
+          : `deploy threw, but not about ${elementId}: ${msg.slice(0, 120)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+}
+
+/**
+ * The two claims the wrapped ad-hoc fixture next door does *not* back: a call
+ * activity activated directly as a tool (#1159), and an ordinary sub-process on
+ * a sequence flow. Both were previously reported on that fixture's evidence,
+ * which contains neither.
+ */
+async function runAdHocCallActivityFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "adhoc-call-activity.bpmn"), "utf8");
+
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-adhoc-call", "{}");
+      let childRan = false;
+      let turn = 0;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-adhoc-child-work": () => { childRan = true; return {}; } },
+        {
+          "io.camunda.agenticai:aiagent-job-worker:1": () => {
+            turn += 1;
+            return turn === 1
+              ? { activateElements: [{ elementId: "DirectCallTool" }] }
+              : { completionConditionFulfilled: true };
+          },
+        },
+        40,
+      );
+      // The recorded failure: the child never starts, and nothing complains.
+      const childInstances = snapshot.instances.filter(
+        (i) => i.processId === "probe-adhoc-child",
+      ).length;
+      const stillBroken =
+        !childRan && childInstances === 0 && snapshot.incidents.length === 0;
+      record(
+        "ad-hoc sub-process: call activity as a tool — child never starts (#1159)",
+        stillBroken,
+        stillBroken
+          ? "the tool was activated, no child instance was created, and no incident was raised"
+          : `behaviour changed — child job ran: ${childRan}, child instances: ${childInstances}, incidents ${JSON.stringify(snapshot.incidents)}; re-check the engine and update the coverage doc`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-plain-subprocess", "{}");
+      let inner = false;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-inner-job": () => { inner = true; return {}; } },
+        {},
+        20,
+      );
+      const ok = inner && snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+      record(
+        "embedded sub-process on a sequence flow",
+        ok,
+        ok
+          ? "the inner flow ran and the outer process completed after it"
+          : `inner job ran: ${inner}, completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
   checkFixtureIds();
@@ -882,6 +1008,8 @@ async function main() {
   await runAdHocInnerFlowFixture();
   await runAdHocBoundaryCancelFixture();
   await runAgentInterruptFixture();
+  await runAdHocCallActivityFixture();
+  await runDeployRejections();
   await runAuditedConstructsFixture();
 
   console.log("\nSummary:");

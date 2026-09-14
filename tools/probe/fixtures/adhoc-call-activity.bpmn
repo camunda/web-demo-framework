@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A `bpmn:callActivity` activated *directly* as an ad-hoc tool — the broken use
+  in Magikcraft/nano-bpm#1159. Distinct from the wrapped form in
+  adhoc-inner-flow.bpmn, which is the workaround and works: the audit reports
+  these as different variants, so each needs its own evidence.
+
+  Plus an ordinary sequence-flow sub-process, which nothing else here proves.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_AdHocCall" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-adhoc-call" isExecutable="true">
+    <bpmn:startEvent id="AS"><bpmn:outgoing>af1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="af1" sourceRef="AS" targetRef="Host" />
+    <bpmn:adHocSubProcess id="Host" zeebe:modelerTemplate="io.camunda.connectors.agenticai.aiagent.jobworker.v1">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>af1</bpmn:incoming><bpmn:outgoing>af2</bpmn:outgoing>
+      <bpmn:callActivity id="DirectCallTool" name="Delegate directly">
+        <bpmn:extensionElements>
+          <zeebe:calledElement processId="probe-adhoc-child" propagateAllChildVariables="true" />
+        </bpmn:extensionElements>
+      </bpmn:callActivity>
+    </bpmn:adHocSubProcess>
+    <bpmn:sequenceFlow id="af2" sourceRef="Host" targetRef="AE" />
+    <bpmn:endEvent id="AE"><bpmn:incoming>af2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <bpmn:process id="probe-adhoc-child" isExecutable="true">
+    <bpmn:startEvent id="DS"><bpmn:outgoing>df1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="df1" sourceRef="DS" targetRef="ChildJob" />
+    <bpmn:serviceTask id="ChildJob">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-adhoc-child-work" /></bpmn:extensionElements>
+      <bpmn:incoming>df1</bpmn:incoming><bpmn:outgoing>df2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="df2" sourceRef="ChildJob" targetRef="DE" />
+    <bpmn:endEvent id="DE"><bpmn:incoming>df2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+
+  <bpmn:process id="probe-plain-subprocess" isExecutable="true">
+    <bpmn:startEvent id="PS2"><bpmn:outgoing>pf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="pf1" sourceRef="PS2" targetRef="Embedded" />
+    <bpmn:subProcess id="Embedded" name="Ordinary sub-process">
+      <bpmn:incoming>pf1</bpmn:incoming><bpmn:outgoing>pf2</bpmn:outgoing>
+      <bpmn:startEvent id="IS2"><bpmn:outgoing>inf1</bpmn:outgoing></bpmn:startEvent>
+      <bpmn:sequenceFlow id="inf1" sourceRef="IS2" targetRef="InnerJob" />
+      <bpmn:serviceTask id="InnerJob">
+        <bpmn:extensionElements><zeebe:taskDefinition type="probe-inner-job" /></bpmn:extensionElements>
+        <bpmn:incoming>inf1</bpmn:incoming><bpmn:outgoing>inf2</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="inf2" sourceRef="InnerJob" targetRef="IE2" />
+      <bpmn:endEvent id="IE2"><bpmn:incoming>inf2</bpmn:incoming></bpmn:endEvent>
+    </bpmn:subProcess>
+    <bpmn:sequenceFlow id="pf2" sourceRef="Embedded" targetRef="PE2" />
+    <bpmn:endEvent id="PE2"><bpmn:incoming>pf2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

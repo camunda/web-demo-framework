@@ -325,6 +325,12 @@ describe("every example goes somewhere", () => {
     const isBoundary = (m: { kind: string }) => m.kind.toLowerCase().includes("boundary");
     const pressable = snap.messageSubscriptions.filter(isBoundary);
     const unconsumed = snap.messageSubscriptions.filter((m) => !isBoundary(m));
+    // A job left Created that no worker took is a stall whatever else is open —
+    // a boundary button sitting alongside doesn't unblock it. Manual-control
+    // types are excluded: those wait for the reader on purpose.
+    const unhandled = snap.jobs.filter(
+      (j) => j.state === "Created" && !manualJobTypes.has(j.jobType),
+    );
     const stalled =
       root?.state === "Active" &&
       snap.incidents.length === 0 &&
@@ -341,10 +347,12 @@ describe("every example goes somewhere", () => {
       waitingOnAMessageThatNeverCorrelated: unconsumed.map(
         (m) => `${m.elementId}: ${m.messageName}`,
       ),
+      jobsNoWorkerTook: unhandled.map((j) => `${j.elementId}: ${j.jobType}`),
     }).toEqual({
       incidents: [],
       stalledWithNothingToDo: false,
       waitingOnAMessageThatNeverCorrelated: [],
+      jobsNoWorkerTook: [],
     });
   }, 30_000);
 });
