@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A construct the engine rejects at deploy (Magikcraft/nano-bpm#1168). The point
+  of probing a rejection is that the day it stops being rejected, the claim in
+  the audit goes stale silently — so the check asserts the refusal.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_RejectSendTask" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-reject-send-task" isExecutable="true">
+    <bpmn:startEvent id="RS"><bpmn:outgoing>rf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="rf1" sourceRef="RS" targetRef="Send" />
+    <bpmn:sendTask id="Send" name="Send something">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-send" /></bpmn:extensionElements>
+      <bpmn:incoming>rf1</bpmn:incoming><bpmn:outgoing>rf2</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:sequenceFlow id="rf2" sourceRef="Send" targetRef="RE" />
+    <bpmn:endEvent id="RE"><bpmn:incoming>rf2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

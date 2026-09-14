@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rejected at deploy (Magikcraft/nano-bpm#1168) — see reject-send-task.bpmn. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_RejectEscalation" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:escalation id="Escalation_Probe" name="probe-escalation" escalationCode="PROBE_ESC" />
+  <bpmn:process id="probe-reject-escalation" isExecutable="true">
+    <bpmn:startEvent id="ES"><bpmn:outgoing>ef1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="ef1" sourceRef="ES" targetRef="Work" />
+    <bpmn:serviceTask id="Work">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-esc-work" /></bpmn:extensionElements>
+      <bpmn:incoming>ef1</bpmn:incoming><bpmn:outgoing>ef2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="EscBoundary" attachedToRef="Work">
+      <bpmn:outgoing>ef3</bpmn:outgoing>
+      <bpmn:escalationEventDefinition id="eed" escalationRef="Escalation_Probe" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="ef2" sourceRef="Work" targetRef="EE" />
+    <bpmn:sequenceFlow id="ef3" sourceRef="EscBoundary" targetRef="EE" />
+    <bpmn:endEvent id="EE"><bpmn:incoming>ef2</bpmn:incoming><bpmn:incoming>ef3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

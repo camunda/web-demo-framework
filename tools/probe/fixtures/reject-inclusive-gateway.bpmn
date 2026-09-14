@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rejected at deploy (Magikcraft/nano-bpm#1168) — see reject-send-task.bpmn. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_RejectInclusive" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-reject-inclusive" isExecutable="true">
+    <bpmn:startEvent id="IS"><bpmn:outgoing>if1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="if1" sourceRef="IS" targetRef="Fork" />
+    <bpmn:inclusiveGateway id="Fork">
+      <bpmn:incoming>if1</bpmn:incoming><bpmn:outgoing>if2</bpmn:outgoing>
+    </bpmn:inclusiveGateway>
+    <bpmn:sequenceFlow id="if2" sourceRef="Fork" targetRef="IE" />
+    <bpmn:endEvent id="IE"><bpmn:incoming>if2</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

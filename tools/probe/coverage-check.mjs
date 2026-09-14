@@ -12,16 +12,68 @@
 //
 //   node tools/probe/coverage-check.mjs
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import { createBojtosSession } from "@nanobpm/bojtos-kit";
+import { createBojtosSession, dispatchRound } from "@nanobpm/bojtos-kit";
 import { probe, driveToQuiescence, loadWasm } from "./index.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(here, "fixtures");
 
 const results = [];
+
+/**
+ * Which check(s) prove each construct, for `tools/audit/construct-coverage.mjs`
+ * to read instead of keeping its own list. A hand-maintained "verified" column
+ * drifts the moment a check is renamed or deleted, and a stale one is worse
+ * than none: it says something has been checked when nothing checks it.
+ *
+ * A construct covering several engine paths names *all* of them — a message
+ * event behaves differently as an ordinary catch, a start event and a boundary
+ * event, and one passing check must not stand for the other two.
+ *
+ * Some constructs are keyed `name[variant]` because the variants are different
+ * engine paths with different verdicts — a call activity works on a sequence
+ * flow and is silently broken as an ad-hoc tool (#1159). The audit records the
+ * same qualified names, so the bare tag never collects a blanket verdict.
+ *
+ * Validated at the end of every run — a name here that no check records is a
+ * hard error, not a quiet mismatch.
+ */
+export const PROVEN_CONSTRUCTS = {
+  serviceTask: "timer (timeDuration)",
+  sequenceFlow: "timer (timeDuration)",
+  "startEvent[plain]": "timer (timeDuration)",
+  "endEvent[plain]": "timer (timeDuration)",
+  "startEvent[message]": "message start event (instance created by correlation)",
+  "intermediateCatchEvent[timer]": "timer (timeDuration)",
+  "intermediateCatchEvent[message]": "message correlation",
+  "intermediateCatchEvent[signal]": "signal broadcast",
+  "boundaryEvent[error]": "error boundary event",
+  "boundaryEvent[message]": "message boundary event (interrupting)",
+  "multiInstanceLoopCharacteristics[parallel]": "multi-instance (parallel)",
+  "callActivity[sequenceFlow]": "call activity (on a sequence flow)",
+  exclusiveGateway: "exclusive gateway (conditional + default flow)",
+  "subProcess[sequenceFlow]": "embedded sub-process on a sequence flow",
+  "subProcess[adHocTool]": "ad-hoc sub-process: embedded sub-process as a compound tool",
+  adHocSubProcess: "ad-hoc sub-process: embedded sub-process as a compound tool",
+  parallelGateway: "parallel gateway (fork and join)",
+  task: "abstract task and manual task (pass-through)",
+  manualTask: "abstract task and manual task (pass-through)",
+  eventBasedGateway: "event-based gateway (race, loser cancelled)",
+  scriptTask: "script task (job typed as its element id)",
+  userTask: "user task (parks until completed)",
+};
+
+/**
+ * Constructs proven for *one variant only* — reported apart from
+ * `PROVEN_CONSTRUCTS` so one working path can't stand for an element. Empty
+ * today: the signal throw that used to sit here turned out not to work at all
+ * once a check observed the signal rather than the token, so
+ * `intermediateThrowEvent` is a known failure instead.
+ */
+export const PARTIAL_CONSTRUCTS = {};
 
 function record(name, ok, detail) {
   results.push({ name, ok, detail });
@@ -542,8 +594,427 @@ async function runAgentInterruptFixture() {
   }
 }
 
+
+/**
+ * The constructs `tools/audit/construct-coverage.mjs` found in real Camunda
+ * models that nothing here had ever driven. Each verdict in that audit's
+ * "verified" column points at one of these, so the claim is backed by a run
+ * rather than by a note written after probing once by hand.
+ */
+async function runAuditedConstructsFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "audited-constructs.bpmn"), "utf8");
+
+  // --- parallel gateway: fork, both branches, join ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-parallel", "{}");
+      const ran = new Set();
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-branch": (job) => { ran.add(job.elementId); return {}; } },
+        {},
+        20,
+      );
+      // Both branches, not just one: a fork that ran a single side and still
+      // completed would look identical from the instance count alone. And
+      // exactly one completion, since a join that let both tokens through would
+      // satisfy "at least one" while being precisely the bug worth catching.
+      const ok =
+        ran.has("BranchA") && ran.has("BranchB") && snapshot.completedInstances === 1;
+      record(
+        "parallel gateway (fork and join)",
+        ok,
+        ok
+          ? "both branches ran and the join completed the instance exactly once"
+          : `ran ${JSON.stringify([...ran])}, completed ${snapshot.completedInstances}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- bpmn:task / bpmn:manualTask: no implementation, no job, no stall ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-passthrough", "{}");
+      const { snapshot } = await driveToQuiescence(session, {}, {}, 20);
+      // Reaching the end is not the same as passing *through* these two. A
+      // regression that skipped either and still completed would look identical
+      // from the instance count, so read the per-element stats.
+      const ran = (id) =>
+        (snapshot.elementStats.find((e) => e.elementId === id)?.completed ?? 0) >= 1;
+      const ok =
+        ran("AbstractTask") &&
+        ran("ManualTask") &&
+        snapshot.completedInstances >= 1 &&
+        snapshot.incidents.length === 0;
+      record(
+        "abstract task and manual task (pass-through)",
+        ok,
+        ok
+          ? "neither offered a job, both completed, and the token carried on through them"
+          : `AbstractTask completed: ${ran("AbstractTask")}, ManualTask completed: ${ran("ManualTask")}, instances ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- intermediate throw event: carries on rather than waiting ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      // Park a listener on the signal first — a signal isn't retained, so the
+      // catcher has to be waiting before the throw happens.
+      session.createInstance("probe-signal-catcher", "{}");
+      const armed = session.snapshot().signalSubscriptions.length === 1;
+
+      session.createInstance("probe-throw", "{}");
+      let after = false;
+      let caught = false;
+      // Jobs only. `driveToQuiescence` broadcasts a signal itself once nothing
+      // else can progress, which would fire the catcher and prove nothing.
+      for (let round = 0; round < 10; round += 1) {
+        const result = await dispatchRound(
+          session,
+          {
+            "probe-after-throw": () => { after = true; return {}; },
+            "probe-caught-signal": () => { caught = true; return {}; },
+          },
+          {},
+        );
+        if (result.handled === 0) break;
+      }
+      const snapshot = session.snapshot();
+      // The recorded failure, asserted exactly: the token carries on (so this is
+      // not a wait state) while a catcher that was already waiting never hears
+      // it. Asserting the failure rather than lamenting it means this check
+      // turns red the day the engine starts broadcasting.
+      const stillBroken =
+        armed &&
+        after &&
+        !caught &&
+        snapshot.signalSubscriptions.length === 1 &&
+        // The throwing instance has to have *finished*. Without this, a
+        // regression that ran AfterThrow but left the process hanging would be
+        // recorded as the expected silent skip.
+        snapshot.instances.some((i) => i.processId === "probe-throw" && i.completed);
+      record(
+        "intermediate throw event (signal) — NOT broadcast, silently skipped",
+        stillBroken,
+        stillBroken
+          ? "the token passed through the throw and finished; a waiting catcher never received the signal"
+          : `behaviour changed — catcher armed: ${armed}, after the throw: ${after}, caught: ${caught}, subscriptions left: ${snapshot.signalSubscriptions.length}, throw instance completed: ${snapshot.instances.some((i) => i.processId === "probe-throw" && i.completed)}; re-check the engine and update the coverage doc`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- event-based gateway: both arm, first wins, loser is cancelled ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-event-gateway", JSON.stringify({ k: "K1" }));
+      const armed = session.snapshot();
+      const bothArmed = armed.messageSubscriptions.length === 1 && armed.timers.length === 1;
+
+      const snap = session.correlateMessage("probe-race-msg", "K1", "{}");
+      const tookMessage = snap.takenSequenceFlows.some((f) => f.from === "OnMessage");
+      const tookTimer = snap.takenSequenceFlows.some((f) => f.from === "OnTimeout");
+      // "Message won" is only half of it. The timer has to be *gone*, or the
+      // gateway is a parallel split wearing a diamond.
+      const ok =
+        bothArmed && tookMessage && !tookTimer && snap.timers.length === 0 &&
+        snap.completedInstances >= 1;
+      record(
+        "event-based gateway (race, loser cancelled)",
+        ok,
+        !bothArmed
+          ? `both events did not arm: ${armed.messageSubscriptions.length} subscription(s), ${armed.timers.length} timer(s)`
+          : ok
+            ? "message won, the timer was cancelled, and the instance completed once"
+            : `took message: ${tookMessage}, took timer: ${tookTimer}, timers left: ${snap.timers.length}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- user task parks the run; script task is a job typed as its element id ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-humanwork", "{}");
+      // Snapshot before driving: `driveToQuiescence` completes open user tasks
+      // itself, so parking is only observable from here.
+      const parked = session.snapshot();
+      const open = parked.userTasks.filter((t) => t.state === "Created");
+      const parkedOk = open.length === 1 && open[0].elementId === "Human";
+      record(
+        "user task (parks until completed)",
+        parkedOk,
+        parkedOk
+          ? "the engine parked on it and offered no job for it"
+          : `open tasks ${JSON.stringify(parked.userTasks.map((t) => [t.elementId, t.state]))}`,
+      );
+
+      let scriptRan = false;
+      if (parkedOk) session.completeUserTask(open[0].key, "{}");
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { Script: () => { scriptRan = true; return {}; } },
+        {},
+        20,
+      );
+      const ok = parkedOk && scriptRan && snapshot.completedInstances >= 1;
+      record(
+        "script task (job typed as its element id)",
+        ok,
+        ok
+          ? "offered a job under its own element id, and the instance completed after it"
+          : `script ran: ${scriptRan}, completed ${snapshot.completedInstances}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  // --- call activity on a sequence flow: child runs, caller carries on ---
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-caller", "{}");
+      let childRan = false;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-child-work": () => { childRan = true; return {}; } },
+        {},
+        20,
+      );
+      // Two instances complete — caller and child, exactly. "At least two" would
+      // also pass if a regression spawned duplicate children.
+      const ok = childRan && snapshot.completedInstances === 2 && snapshot.incidents.length === 0;
+      record(
+        "call activity (on a sequence flow)",
+        ok,
+        ok
+          ? "the child process ran and the caller completed after it"
+          : `child ran: ${childRan}, completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+}
+
+/**
+ * BPMN ids are document-wide. A multi-process fixture that reuses one across
+ * processes still deploys, so a check can pass while its flow references bind
+ * ambiguously — the proof then means nothing, which is worse than no proof.
+ */
+function checkFixtureIds() {
+  const offenders = [];
+  for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith(".bpmn"))) {
+    // Comments and CDATA stripped first: an id mentioned in documentation is not
+    // a declared id, and failing a valid fixture for it would train people to
+    // ignore this check.
+    const xml = readFileSync(path.join(fixturesDir, file), "utf8")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+    const ids = [...xml.matchAll(/\sid=(?:"([^"]+)"|'([^']+)')/g)].map((m) => m[1] ?? m[2]);
+    const dupes = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+    if (dupes.length) offenders.push(`${file}: ${dupes.join(", ")}`);
+  }
+  record(
+    "fixtures declare no duplicate ids",
+    offenders.length === 0,
+    offenders.length === 0 ? "every id is unique within its document" : offenders.join(" | "),
+  );
+}
+
+/**
+ * Run every check and return what each one actually recorded. The audit next
+ * door consumes this rather than the check *names*: a name proves a check
+ * exists, not that it passed, and a construct whose probe is failing must not
+ * keep reporting as verified.
+ *
+ * `record` sets `process.exitCode` so the CLI fails CI. A caller embedding
+ * these checks gets the results instead, and decides its own status — this is
+ * a library call, and a report-only tool must stay report-only.
+ */
+export async function runChecks() {
+  const before = process.exitCode;
+  results.length = 0;
+  try {
+    await main();
+  } catch (e) {
+    // A fixture that throws must still leave a report. Rejecting here would
+    // reject the audit's top-level await and print no rows at all — the one
+    // outcome a report-only tool must not have.
+    record(
+      "probe harness",
+      false,
+      `a check threw and the run stopped early: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  const collected = results.map((r) => ({ name: r.name, ok: r.ok, detail: r.detail }));
+  process.exitCode = before;
+  return collected;
+}
+
+/**
+ * Constructs the engine refuses at deploy (#1168). Probing a refusal matters as
+ * much as probing a success: without it, the day one of these starts deploying,
+ * the audit keeps reporting "rejected-at-deploy" for something that now runs —
+ * and an unsupported construct quietly becoming supported is exactly the kind
+ * of change a coverage tool exists to notice.
+ *
+ * The refusal is not an "unsupported element" message: the parser doesn't model
+ * these at all, so the element simply isn't there and the sequence flow into it
+ * dangles. Matching the offending element *id* is therefore what pins the
+ * behaviour — matching on the construct name passes for the wrong reason (an id
+ * containing "escalation" satisfied that, which is how this check first went
+ * green).
+ */
+async function runDeployRejections() {
+  const cases = [
+    ["sendTask", "reject-send-task.bpmn", "Send"],
+    ["inclusiveGateway", "reject-inclusive-gateway.bpmn", "Fork"],
+    ["escalationEventDefinition", "reject-escalation.bpmn", "EscBoundary"],
+  ];
+  for (const [construct, file, elementId] of cases) {
+    const name = `${construct} (not modelled — rejected at deploy, #1168)`;
+    const xml = readFileSync(path.join(fixturesDir, file), "utf8");
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      record(name, false, `unexpectedly deployed — ${construct} may now be supported; re-check the engine and update the coverage doc (#1168)`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const rejected = msg.includes(elementId) && /unknown|unsupported|invalid/i.test(msg);
+      record(
+        name,
+        rejected,
+        rejected
+          ? `deploy rejected, naming ${elementId}: ${msg.slice(0, 80)}`
+          : `deploy threw, but not about ${elementId}: ${msg.slice(0, 120)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+}
+
+/**
+ * The two claims the wrapped ad-hoc fixture next door does *not* back: a call
+ * activity activated directly as a tool (#1159), and an ordinary sub-process on
+ * a sequence flow. Both were previously reported on that fixture's evidence,
+ * which contains neither.
+ */
+async function runAdHocCallActivityFixture() {
+  const xml = readFileSync(path.join(fixturesDir, "adhoc-call-activity.bpmn"), "utf8");
+
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-adhoc-call", "{}");
+      let childRan = false;
+      let turn = 0;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-adhoc-child-work": () => { childRan = true; return {}; } },
+        {
+          "io.camunda.agenticai:aiagent-job-worker:1": () => {
+            turn += 1;
+            return turn === 1
+              ? { activateElements: [{ elementId: "DirectCallTool" }] }
+              : { completionConditionFulfilled: true };
+          },
+        },
+        40,
+      );
+      // The recorded failure: the child never starts, and nothing complains.
+      const childInstances = snapshot.instances.filter(
+        (i) => i.processId === "probe-adhoc-child",
+      ).length;
+      const stillBroken =
+        !childRan && childInstances === 0 && snapshot.incidents.length === 0;
+      record(
+        "ad-hoc sub-process: call activity as a tool — child never starts (#1159)",
+        stillBroken,
+        stillBroken
+          ? "the tool was activated, no child instance was created, and no incident was raised"
+          : `behaviour changed — child job ran: ${childRan}, child instances: ${childInstances}, incidents ${JSON.stringify(snapshot.incidents)}; re-check the engine and update the coverage doc`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+
+  {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-plain-subprocess", "{}");
+      let inner = false;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        { "probe-inner-job": () => { inner = true; return {}; } },
+        {},
+        20,
+      );
+      const ok = inner && snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+      record(
+        "embedded sub-process on a sequence flow",
+        ok,
+        ok
+          ? "the inner flow ran and the outer process completed after it"
+          : `inner job ran: ${inner}, completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+      );
+    } finally {
+      session.free();
+    }
+  }
+}
+
+/**
+ * A signal start event opens no subscription, so nothing can start the process.
+ * Recorded as the failure it is, rather than left as an assumption.
+ */
+async function runSignalStartFixture() {
+  const name = "signal start event — NOT subscribed, never starts anything";
+  const xml = readFileSync(path.join(fixturesDir, "signal-start.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    session.deploy(xml);
+    const subs = session.snapshot().signalSubscriptions.length;
+    const after = session.broadcastSignal("probe-start-signal", "{}");
+    const stillBroken = subs === 0 && after.instances.length === 0;
+    record(
+      name,
+      stillBroken,
+      stillBroken
+        ? "no subscription after deploy, and a broadcast created no instance"
+        : `behaviour changed — ${subs} subscription(s), ${after.instances.length} instance(s); re-check the engine and update the coverage doc`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
 async function main() {
   console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
+  checkFixtureIds();
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
   await runGenericFixture("message correlation", "message.bpmn");
   await runGenericFixture("signal broadcast", "signal.bpmn");
@@ -558,11 +1029,33 @@ async function main() {
   await runAdHocInnerFlowFixture();
   await runAdHocBoundaryCancelFixture();
   await runAgentInterruptFixture();
+  await runAdHocCallActivityFixture();
+  await runSignalStartFixture();
+  await runDeployRejections();
+  await runAuditedConstructsFixture();
 
   console.log("\nSummary:");
   for (const r of results) console.log(`  ${r.ok ? "✅" : "❌"} ${r.name}`);
+
+  // The audit downstream trusts this map; a name pointing at a check that no
+  // longer exists would have it report proof that nothing produces.
+  const recorded = new Set(results.map((r) => r.name));
+  const dangling = [
+    ...new Set([
+      ...Object.values(PROVEN_CONSTRUCTS).flat(),
+      ...Object.values(PARTIAL_CONSTRUCTS).map((p) => p.check),
+    ]),
+  ].filter((name) => !recorded.has(name));
+  if (dangling.length) {
+    process.exitCode = 1;
+    console.log(
+      `\n❌ PROVEN_CONSTRUCTS names ${dangling.length} check(s) that did not run: ${dangling.join(", ")}`,
+    );
+  }
 }
 
+// Importable for its PROVEN_CONSTRUCTS map without running the whole suite.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
 main().catch((e) => {
   console.error(e instanceof Error ? (e.stack ?? e.message) : String(e));
   process.exit(1);

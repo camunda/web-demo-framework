@@ -140,3 +140,70 @@ describe("example models", () => {
     ).resolves.toHaveLength(EXAMPLES.length);
   });
 });
+
+/**
+ * Some wait states the runner can clear on the reader's behalf: it advances the
+ * clock for a timer, correlates an ordinary message catch, broadcasts a signal.
+ * A message *boundary* event is deliberately not one of them — firing it
+ * automatically would cancel the activity on every single run, which is the
+ * opposite of what a boundary event is there to demonstrate.
+ *
+ * So a boundary event is only reachable if the manifest declares it in
+ * `messageEvents`, which is what puts a button in front of the reader. A model
+ * that has one and a manifest that doesn't is a dead end: the run parks, the
+ * subscription is open, and there is nothing to press.
+ *
+ * The engine can't catch this and neither can the type system — the two halves
+ * are in different files and both are individually valid.
+ */
+function unreachableBoundaries(bpmn: string, declared: readonly string[]): string[] {
+  const known = new Set(declared);
+  return parseModel(bpmn)
+    .boundaryEvents.filter((b) => b.messageName && !known.has(b.elementId))
+    .map((b) => `${b.elementId} (on ${b.attachedTo}, message "${b.messageName}")`);
+}
+
+describe("every message boundary event is reachable by the reader", () => {
+  /**
+   * The rule, proven on a model built for it. No example ships a message
+   * boundary event yet, so the sweep below cannot currently fail — and a check
+   * that can't fail is not a check. This is what makes it one.
+   */
+  const WITH_BOUNDARY = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="D" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:message id="M" name="second-alert">
+    <bpmn:extensionElements><zeebe:subscription correlationKey="=customerId" /></bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:process id="p" isExecutable="true">
+    <bpmn:startEvent id="S"><bpmn:outgoing>f1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="S" targetRef="Work" />
+    <bpmn:serviceTask id="Work">
+      <bpmn:extensionElements><zeebe:taskDefinition type="w" /></bpmn:extensionElements>
+      <bpmn:incoming>f1</bpmn:incoming><bpmn:outgoing>f2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="Interrupt" attachedToRef="Work">
+      <bpmn:outgoing>f3</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="med" messageRef="M" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="f2" sourceRef="Work" targetRef="E" />
+    <bpmn:sequenceFlow id="f3" sourceRef="Interrupt" targetRef="E" />
+    <bpmn:endEvent id="E"><bpmn:incoming>f2</bpmn:incoming><bpmn:incoming>f3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>`;
+
+  it("names a boundary event no manifest declares", () => {
+    expect(unreachableBoundaries(WITH_BOUNDARY, [])).toEqual([
+      'Interrupt (on Work, message "second-alert")',
+    ]);
+  });
+
+  it("accepts one the manifest offers a button for", () => {
+    expect(unreachableBoundaries(WITH_BOUNDARY, ["Interrupt"])).toEqual([]);
+  });
+
+  it.each(EXAMPLES.map((e) => e.id))("%s leaves none unreachable", async (id) => {
+    const example = await loadExample(id);
+    const declared = (example.messageEvents ?? []).map((m) => m.elementId);
+    expect(unreachableBoundaries(example.bpmn, declared)).toEqual([]);
+  });
+});
