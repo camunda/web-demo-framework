@@ -206,12 +206,18 @@ describe("isModelCacheError", () => {
     }
   });
 
-  it("leads with retrying, not with a smaller model or the network", () => {
-    // What the reader actually saw said "try a smaller model, check your
-    // connection" for a failure that was neither.
-    expect(modelCacheAdvice()).toMatch(/connect again/i);
-    expect(modelCacheAdvice()).not.toMatch(/smaller model/i);
-    expect(modelCacheAdvice()).not.toMatch(/check your connection/i);
+  it("leads with retrying, and rules nothing out that the message can't", () => {
+    // The original advice named one cause ("try a smaller model, check your
+    // connection") for a failure that is none of them specifically. Chromium
+    // flattens an abort, a dropped connection, a CORS/non-2xx response and a
+    // full quota into the same string, so the advice has to carry all of them.
+    const advice = modelCacheAdvice();
+    expect(advice).toMatch(/connect again/i);
+    for (const cause of [/interrupted/i, /connection/i, /storage is full/i]) {
+      expect(advice, `names ${cause}`).toMatch(cause);
+    }
+    // And says so, rather than implying the cause is known.
+    expect(advice).toMatch(/doesn't say which/i);
   });
 });
 

@@ -216,19 +216,24 @@ describe("ExampleRunner — a tour step pointing at a collapsible panel", () => 
    */
   it("re-measures the tour when the variables panel is toggled under it", async () => {
     await renderExample(seedExportCompliance);
+    const panel = () => screen.getByText("Instance variables").closest("details")!;
+    expect(panel().open).toBe(false);
+
     fireEvent.click(screen.getByRole("button", { name: /take the tour/i }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /touring/i })).toBeInTheDocument(),
     );
 
-    // Starting the tour opens the panel itself, so measure from there.
+    // Starting the tour opens the panel: a step describes what it holds, and
+    // driver.js would otherwise highlight a collapsed summary.
+    await waitFor(() => expect(panel().open).toBe(true));
+
     tourHandle.refresh.mockClear();
     // jsdom implements no activation behaviour for <summary>, so a click on it
     // toggles nothing. Drive the state change the browser would instead: set
     // `open`, then fire the toggle event it dispatches after.
-    const panel = screen.getByText("Instance variables").closest("details")!;
-    panel.open = false;
-    fireEvent(panel, new Event("toggle"));
+    panel().open = false;
+    fireEvent(panel(), new Event("toggle"));
 
     expect(tourHandle.refresh).toHaveBeenCalledTimes(1);
   }, 30_000);
@@ -264,6 +269,27 @@ describe("ExampleRunner — changing the example input mid-run", () => {
 
     expect(flagged()).toBeEnabled();
     expect(lock()).not.toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * `step()` sets only `stepping` before awaiting `beginRun()`, and for the
+   * length of that await the snapshot is still null — so a lock keyed on
+   * `running || canResume` alone leaves the input live after the seed has
+   * already been captured.
+   */
+  it("locks the input for Step too, not just Run", async () => {
+    const app = await renderExample(seedExportCompliance);
+    const flagged = () => screen.getByRole("button", { name: /likely flagged/i });
+    const lock = () => screen.queryByText(/locked while this run/i);
+
+    const step = screen.getByRole("button", { name: "⏭ Step" });
+    await waitFor(() => expect(step).toBeEnabled(), { timeout: 20_000 });
+    fireEvent.click(step);
+
+    await waitFor(() => expect(lock()).toBeInTheDocument());
+    expect(flagged()).toBeDisabled();
+
+    await app.settle();
   }, 40_000);
 
   /**

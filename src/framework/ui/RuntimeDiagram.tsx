@@ -43,7 +43,7 @@ interface Box {
   height: number;
 }
 
-interface CanvasLike {
+export interface CanvasLike {
   addMarker: (id: string, cls: string) => void;
   removeMarker: (id: string, cls: string) => void;
   resized: () => void;
@@ -70,7 +70,7 @@ interface OverlaysLike {
 const FIT_PADDING = 16;
 
 /** `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides. */
-function fitWithPadding(canvas: CanvasLike) {
+export function fitWithPadding(canvas: CanvasLike) {
   canvas.zoom("fit-viewport");
   const { inner } = canvas.viewbox();
   // An empty diagram has nothing to pad, and its zero-sized box would make the

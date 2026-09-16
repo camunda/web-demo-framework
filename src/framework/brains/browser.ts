@@ -203,16 +203,17 @@ export function deviceLostAdvice(): string {
 }
 
 /**
- * Whether an error came from the browser's Cache storage rather than from the
- * model or the network.
+ * Whether an error came out of the `cache.add()` WebLLM downloads through,
+ * rather than from the GPU or the model itself.
  *
- * WebLLM downloads every weight shard through `cache.add(new Request(url,
- * { signal }))`, and Chromium reports *any* failure of the fetch inside that
- * call as the same flat `TypeError: Failed to execute 'add' on 'Cache':
- * Request failed` — an aborted signal included. So this covers a load
- * interrupted part-way (switching model or example mid-download aborts it) as
- * well as storage that won't take the bytes, which is why the advice leads
- * with retrying rather than with freeing space.
+ * WebLLM fetches every weight shard with `cache.add(new Request(url,
+ * { signal }))`, and Chromium reports *any* failure of that inner fetch as the
+ * same flat `TypeError: Failed to execute 'add' on 'Cache': Request failed` —
+ * a dropped connection, a CORS or non-2xx response, an aborted signal and
+ * storage that won't take the bytes are indistinguishable from the message.
+ *
+ * So this identifies *where* the failure happened, not why, and
+ * {@link modelCacheAdvice} has to cover every cause it can't rule out.
  */
 export function isModelCacheError(message: string): boolean {
   return /on 'cache'|cache\.(add|put)|quota ?exceeded|exceeded the quota|storage is full/i.test(
@@ -220,15 +221,16 @@ export function isModelCacheError(message: string): boolean {
   );
 }
 
-/** Advice that fits storage, rather than "try a smaller model". */
+/** Advice for a failure whose cause the message genuinely doesn't narrow down. */
 export function modelCacheAdvice(): string {
   return (
-    "The browser's Cache storage refused the download — which is about storage or an " +
-    "interrupted fetch, not about the model being too large. Press Connect again first: " +
-    "nothing partial is kept, so a retry starts clean, and switching model or example " +
-    "while a download is running aborts it exactly this way. If it keeps happening, free " +
-    "up disk space or clear this site's storage (DevTools → Application → Storage → Clear " +
-    "site data) and retry. The Scripted and Endpoint brains download nothing."
+    "The download failed while being written to the browser's Cache storage. That one " +
+    "error covers several causes and doesn't say which: the fetch was interrupted, the " +
+    "connection dropped, or this origin's storage is full. Press Connect again first — " +
+    "nothing partial is kept, so a retry starts clean. If it persists: check your " +
+    "connection, free up disk space or clear this site's storage (DevTools → Application " +
+    "→ Storage → Clear site data), and try a smaller model if the quota is what's short. " +
+    "The Scripted and Endpoint brains download nothing."
   );
 }
 

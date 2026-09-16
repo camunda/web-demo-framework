@@ -1044,13 +1044,19 @@ export function ExampleRunner({
   /**
    * Whether the example input can still reach anything.
    *
-   * It only ever seeds the *next* instance, so it is inert both mid-run and
-   * while a finished-but-open run is still resumable — Run resumes that
+   * It only ever seeds the *next* instance, so it is inert once one is under
+   * way and while a finished-but-open run is still resumable — Run resumes that
    * instance rather than starting one. Left live, picking a different scenario
    * moves the pill and the form and then changes nothing, which reads as the
    * next run silently repeating the last one.
+   *
+   * `stepping` is in here on its own account, not as a proxy for `running`:
+   * `step()` sets only that flag before awaiting `beginRun()`, and for the
+   * length of that await the snapshot is still null — so a lock keyed on
+   * `running || canResume` alone leaves the input live after the seed has
+   * already been captured.
    */
-  const inputLocked = running || canResume;
+  const inputLocked = running || stepping || canResume;
   /**
    * Reported invalid, as opposed to not yet reported. Never leave Run disabled
    * by a form the reader cannot see — but do not flash the editor open during
@@ -1418,7 +1424,7 @@ export function ExampleRunner({
           imageInput={example.imageInput}
           value={imageSelection}
           onSelect={setImageSelection}
-          disabled={running}
+          disabled={inputLocked}
         />
       )}
 
@@ -1463,7 +1469,7 @@ export function ExampleRunner({
         </button>
         {inputLocked ? (
           <span className="scenario-hint">
-            {running
+            {running || stepping
               ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
               : "This run is still open — press ↺ Reset to start a new one"}
           </span>

@@ -1,6 +1,6 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { RuntimeDiagram } from "./RuntimeDiagram";
+import { fitWithPadding, RuntimeDiagram, type CanvasLike } from "./RuntimeDiagram";
 
 /**
  * The "locked" part of this component is structural — a plain bpmn-js `Viewer`
@@ -52,8 +52,7 @@ describe("RuntimeDiagram", () => {
     expect(classed.firstElementChild).toHaveClass("runtime-diagram", "diagram");
   });
 
-  it("imports the diagram and renders its elements", async () => {
-    const { container } = render(
+  it("imports the diagram and renders its elements", async () => {    const { container } = render(
       <RuntimeDiagram xml={XML} activeIds={[]} incidentIds={[]} />,
     );
 
@@ -142,5 +141,51 @@ describe("RuntimeDiagram", () => {
     expect(() => viewer.get("zoomScroll")).toThrow();
     expect(() => viewer.get("moveCanvas")).toThrow();
     viewer.destroy();
+  });
+});
+
+/**
+ * jsdom computes no layout, so the real fit can't be measured here — but the
+ * box this hands bpmn-js can be, and that box is the whole fix. `fit-viewport`
+ * fits the element bounding box exactly, which clips the live-token overlay
+ * anchored outside its element's top-left corner.
+ */
+describe("fitWithPadding", () => {
+  const fakeCanvas = (inner: { x: number; y: number; width: number; height: number }) => {
+    const zoomed: string[] = [];
+    const set: unknown[] = [];
+    const canvas: CanvasLike = {
+      addMarker: () => {},
+      removeMarker: () => {},
+      resized: () => {},
+      zoom: (mode) => {
+        zoomed.push(mode);
+      },
+      viewbox: (box) => {
+        if (box) set.push(box);
+        return { inner };
+      },
+    };
+    return { canvas, zoomed, set };
+  };
+
+  it("fits first, then widens the content box by the padding on all four sides", () => {
+    const { canvas, zoomed, set } = fakeCanvas({ x: 100, y: 50, width: 400, height: 200 });
+
+    fitWithPadding(canvas);
+
+    expect(zoomed).toEqual(["fit-viewport"]);
+    expect(set).toEqual([{ x: 84, y: 34, width: 432, height: 232 }]);
+  });
+
+  it("leaves an empty diagram to plain fit-viewport", () => {
+    // A zero-sized content box has nothing to pad, and padding it would invert
+    // the box rather than inset it.
+    const { canvas, zoomed, set } = fakeCanvas({ x: 0, y: 0, width: 0, height: 0 });
+
+    fitWithPadding(canvas);
+
+    expect(zoomed).toEqual(["fit-viewport"]);
+    expect(set).toEqual([]);
   });
 });

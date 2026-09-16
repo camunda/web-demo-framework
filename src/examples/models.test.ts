@@ -140,19 +140,25 @@ describe("example models", () => {
 
       const wordsIn = (text: string) =>
         new Set(Array.from(text.toLowerCase().matchAll(/[a-z0-9][\w-]*/g), (m) => m[0]));
-      // Only data-looking words: a capital or a digit, which mid-sentence
-      // prose lacks. Without this, an ordinary word one scenario's sentence
-      // happens not to use ("the") reads as distinctive.
+      // Only data-looking words: something bearing a capital or a digit, which
+      // mid-sentence prose lacks. Without this, an ordinary word one scenario's
+      // sentence happens not to use ("the") reads as distinctive. A bare
+      // number qualifies — an invoice amount is exactly the kind of answer
+      // that must not appear in the description of the argument carrying it.
       const dataWordsIn = (text: string) =>
         new Set(
-          Array.from(text.matchAll(/\b[A-Za-z][\w-]{2,}\b/g), (m) => m[0])
+          Array.from(text.matchAll(/[\w-]{3,}/g), (m) => m[0])
             .filter((word) => /[A-Z0-9]/.test(word))
             .map((word) => word.toLowerCase()),
         );
       const perScenario = scenarios.map((s) =>
         dataWordsIn(
+          // Numbers and booleans count too: `.filter(typeof v === "string")`
+          // silently exempted every numeric scenario value, which is most of
+          // what invoice-payment's scenarios differ by.
           Object.values(s.variables)
-            .filter((v) => typeof v === "string")
+            .filter((v) => v !== null && typeof v !== "object")
+            .map((v) => String(v))
             .join(" "),
         ),
       );
