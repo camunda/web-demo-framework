@@ -117,8 +117,15 @@ function userMessage(
   variables: Record<string, unknown>,
   history: string[],
   remaining: ToolSpec[],
-  /** Set after a premature "done" — see `requiredTools` in {@link LiveAgentOptions}. */
+  /** Set after a premature "done" or a jam — see `requiredTools` in {@link LiveAgentOptions}. */
   outstanding: string[] = [],
+  /**
+   * Whether `outstanding` follows the model reporting itself done. A jam gets
+   * the same reminder without that claim: it did not say it was finished, it
+   * repeated a spent tool, and telling it otherwise contradicts the rejection
+   * printed alongside.
+   */
+  outstandingAfterDone = false,
   /** Why the previous reply in this same turn sequence was rejected, if it was. */
   rejected: string[] = [],
   /**
@@ -173,14 +180,16 @@ function userMessage(
     );
   }
   if (outstanding.length) {
-    // Stated plainly, because the model has already claimed to be finished
-    // once: repeating the general instruction doesn't work, naming the
-    // outstanding call does.
+    // Stated plainly, because the general instruction has already not worked
+    // once: naming the outstanding call is what gets through.
+    const one = outstanding.length === 1;
     parts.push(
-      `You reported that you are done, but ${outstanding.join(" and ")} ` +
-        `${outstanding.length === 1 ? "has" : "have"} not run. ` +
+      (outstandingAfterDone
+        ? `You reported that you are done, but ${outstanding.join(" and ")} `
+        : `${outstanding.join(" and ")} `) +
+        `${one ? "has" : "have"} not run. ` +
         `Passing those values as another tool's arguments does not count. ` +
-        `Call ${outstanding.length === 1 ? "it" : "them"} now.`,
+        `Call ${one ? "it" : "them"} now.`,
     );
   }
   parts.push("Which tool should run next? Reply with JSON only.");
@@ -443,6 +452,8 @@ export function makeLiveAgent(
   let earlyDoneNudges = 0;
   /** Named in the next prompt after a premature "done"; cleared once used. */
   let outstanding: string[] = [];
+  /** Whether that list came from a premature "done" rather than a jam. */
+  let outstandingAfterDone = false;
   /** Why the previous reply was rejected, fed back so the retry differs; cleared once used. */
   let rejected: string[] = [];
 
@@ -490,10 +501,11 @@ export function makeLiveAgent(
         if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
           earlyDoneNudges += 1;
           outstanding = missing;
+          outstandingAfterDone = false;
           unproductive = 0;
           trace({
             kind: "agent",
-            text: `🤖 ${maxUnproductiveTurns} turns activated nothing and ${missing.join(", ")} hasn't run — asking once more`,
+            text: `🤖 ${maxUnproductiveTurns} turns activated nothing and ${missing.join(", ")} ${missing.length === 1 ? "hasn't" : "haven't"} run — asking once more`,
             turn,
           });
           continue;
@@ -556,12 +568,14 @@ export function makeLiveAgent(
           history,
           remaining,
           outstanding,
+          outstandingAfterDone,
           rejected,
           allowRepeats,
         ),
       },
     ];
     outstanding = [];
+    outstandingAfterDone = false;
     rejected = [];
 
     let raw: string;
@@ -589,6 +603,7 @@ export function makeLiveAgent(
       if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
         earlyDoneNudges += 1;
         outstanding = missing;
+        outstandingAfterDone = true;
         trace({
           kind: "agent",
           text: `🤖 model says it is done, but ${missing.join(", ")} hasn't run — asking once more`,

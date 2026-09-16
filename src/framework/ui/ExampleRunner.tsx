@@ -329,10 +329,17 @@ export function ExampleRunner({
   // it holds, which would otherwise highlight a closed summary. Opening it
   // whenever a tour starts is what keeps that step worth reading.
   const [varsOpen, setVarsOpen] = usePersistentDisclosure("variables", false);
+  // Held apart from the persisted preference on purpose, exactly as
+  // `forcedStartOpen` is: the tour opening this panel is tour state, not a
+  // choice the reader made, and writing it through would leave every later
+  // visit expanded because they once took the tour.
+  const [varsOpenedByTour, setVarsOpenedByTour] = useState(false);
   const startTour = useCallback(() => {
-    setVarsOpen(true);
+    // Only when it would actually change: opening an already-open panel fires
+    // no `toggle`, and the flag would then swallow the reader's next one.
+    if (!varsOpen) setVarsOpenedByTour(true);
     tour.start();
-  }, [setVarsOpen, tour]);
+  }, [varsOpen, tour]);
   useEffect(() => {
     if (initialTourId && example.tour?.id === initialTourId) {
       startTour();
@@ -1469,9 +1476,12 @@ export function ExampleRunner({
         </button>
         {inputLocked ? (
           <span className="scenario-hint">
-            {running || stepping
+            {running
               ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
-              : "This run is still open — press ↺ Reset to start a new one"}
+              : stepping
+                ? // Reset is disabled mid-step, so this must not suggest it.
+                  "Locked while this step finishes"
+                : "This run is still open — press ↺ Reset to start a new one"}
           </span>
         ) : needsStartForm ? (
           <span className="scenario-hint">
@@ -1758,9 +1768,15 @@ export function ExampleRunner({
               <details
                 className="vars-block"
                 data-tour={TOUR_ANCHOR.variablesPanel}
-                open={varsOpen}
+                open={varsOpen || varsOpenedByTour}
                 onToggle={(e) => {
-                  setVarsOpen(e.currentTarget.open);
+                  // Setting `open` fires `toggle` too, so the tour's own open
+                  // echoes back here — persisting it would record it as a
+                  // choice. Anything else is the reader.
+                  if (!(varsOpenedByTour && e.currentTarget.open)) {
+                    setVarsOpenedByTour(false);
+                    setVarsOpen(e.currentTarget.open);
+                  }
                   // This panel is itself a tour target, so toggling it mid-tour
                   // moves it out from under a highlight measured before.
                   tour.refresh();

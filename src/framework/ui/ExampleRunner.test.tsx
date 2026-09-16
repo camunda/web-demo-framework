@@ -217,7 +217,9 @@ describe("ExampleRunner — a tour step pointing at a collapsible panel", () => 
   it("re-measures the tour when the variables panel is toggled under it", async () => {
     await renderExample(seedExportCompliance);
     const panel = () => screen.getByText("Instance variables").closest("details")!;
+    const stored = () => localStorage.getItem("wdf:section:v2:variables");
     expect(panel().open).toBe(false);
+    expect(stored()).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /take the tour/i }));
     await waitFor(() =>
@@ -227,6 +229,9 @@ describe("ExampleRunner — a tour step pointing at a collapsible panel", () => 
     // Starting the tour opens the panel: a step describes what it holds, and
     // driver.js would otherwise highlight a collapsed summary.
     await waitFor(() => expect(panel().open).toBe(true));
+    // But taking a tour is not a disclosure choice — it must not overwrite a
+    // reader's saved preference and leave every later visit expanded.
+    expect(stored()).toBeNull();
 
     tourHandle.refresh.mockClear();
     // jsdom implements no activation behaviour for <summary>, so a click on it
@@ -236,6 +241,8 @@ describe("ExampleRunner — a tour step pointing at a collapsible panel", () => 
     fireEvent(panel(), new Event("toggle"));
 
     expect(tourHandle.refresh).toHaveBeenCalledTimes(1);
+    // A real toggle is still a choice, and still persists.
+    expect(stored()).toBe("0");
   }, 30_000);
 });
 
@@ -280,13 +287,23 @@ describe("ExampleRunner — changing the example input mid-run", () => {
   it("locks the input for Step too, not just Run", async () => {
     const app = await renderExample(seedExportCompliance);
     const flagged = () => screen.getByRole("button", { name: /likely flagged/i });
-    const lock = () => screen.queryByText(/locked while this run/i);
 
     const step = screen.getByRole("button", { name: "⏭ Step" });
     await waitFor(() => expect(step).toBeEnabled(), { timeout: 20_000 });
     fireEvent.click(step);
 
-    await waitFor(() => expect(lock()).toBeInTheDocument());
+    // Its own wording, not the Run one: Reset is disabled mid-step, so the
+    // hint must not send the reader there. Both assertions run in one tick —
+    // the hint element is reused, and its text changes the moment the step
+    // lands and `canResume` takes over.
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/locked while this step finishes/i),
+        ).not.toHaveTextContent(/Reset/);
+      },
+      { timeout: 20_000 },
+    );
     expect(flagged()).toBeDisabled();
 
     await app.settle();

@@ -420,8 +420,34 @@ describe("makeLiveAgent — a required tool unrun when the model jams", () => {
     ).toBe(true);
     // The reminder has to reach the model, not just the trace.
     expect(prompts.some((p) => p.includes("ToolB") && p.includes("not run"))).toBe(true);
+    // ...without claiming something the model didn't do. It jammed on a spent
+    // tool; it never said it was finished, and the rejection printed alongside
+    // says exactly that.
+    expect(prompts.some((p) => p.includes("You reported that you are done"))).toBe(false);
     // And when it still doesn't land, the giving-up line says what was missed.
     expect(trace.some((e) => e.text.includes("ToolB never ran"))).toBe(true);
+  });
+
+  it("keeps the reminder grammatical when more than one tool is outstanding", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const prompts: string[] = [];
+    const chat: ChatFn = async (messages) => {
+      prompts.push(messages[messages.length - 1]!.content);
+      return '{"tool": "Nope", "arguments": {}}';
+    };
+    const agent = makeLiveAgent(
+      { ...makeSpec(), maxModelCalls: 12 },
+      chat,
+      (e) => trace.push(e),
+      { requiredTools: ["ToolA", "ToolB"] },
+    );
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(
+      trace.some((e) => e.text.includes("ToolA, ToolB haven't run")),
+    ).toBe(true);
+    expect(prompts.some((p) => p.includes("ToolA and ToolB have not run"))).toBe(true);
   });
 
   it("says nothing about required tools when they have all run", async () => {

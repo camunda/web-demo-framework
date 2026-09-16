@@ -227,7 +227,8 @@ export function modelCacheAdvice(): string {
     "The download failed while being written to the browser's Cache storage. That one " +
     "error covers several causes and doesn't say which: the fetch was interrupted, the " +
     "connection dropped, or this origin's storage is full. Press Connect again first — " +
-    "nothing partial is kept, so a retry starts clean. If it persists: check your " +
+    "the shard that failed was not cached, and whatever downloaded before it is reused, " +
+    "so a retry picks up rather than starting over. If it persists: check your " +
     "connection, free up disk space or clear this site's storage (DevTools → Application " +
     "→ Storage → Clear site data), and try a smaller model if the quota is what's short. " +
     "The Scripted and Endpoint brains download nothing."
