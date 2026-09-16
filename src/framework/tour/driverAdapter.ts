@@ -26,6 +26,15 @@ export interface TourHandle {
    * the caller believing a torn-down tour is still running.
    */
   isActive(): boolean;
+  /**
+   * Re-measures the current step's target and repositions the highlight.
+   *
+   * driver.js measures when a step opens and then only on window resize and
+   * scroll, so a change to the page's own layout — collapsing a panel a step
+   * points at, say — leaves the cutout and popover where the old layout put
+   * them. Nothing in here can detect that; the caller has to say when.
+   */
+  refresh(): void;
   /** Tears the tour down (removes the overlay/popover and its listeners). */
   destroy(): void;
 }
@@ -82,6 +91,7 @@ export async function startTour(steps: TourStep[]): Promise<TourHandle> {
 
   return {
     isActive: () => driverObj.isActive(),
+    refresh: () => driverObj.refresh(),
     destroy: () => driverObj.destroy(),
   };
 }

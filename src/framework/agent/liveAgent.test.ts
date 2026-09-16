@@ -380,6 +380,70 @@ describe("makeLiveAgent — a premature done, when a tool is required", () => {
   });
 });
 
+describe("makeLiveAgent — a required tool unrun when the model jams", () => {
+  /**
+   * Observed with Qwen2.5 1.5B on the loan example: it ran three tools, then
+   * re-requested an already-run one three turns running, identically, and the
+   * unproductive-streak cap ended the agent with `UpdateApplicationStatus` —
+   * a required tool — never called. The streak path used to give up without
+   * checking, so only a premature *"done"* got the pointed reminder, and a run
+   * that never recorded its decision read as a business outcome.
+   */
+  const REPEAT_FOREVER = [
+    '{"tool": "ToolA", "arguments": {"code": "A1"}}',
+    ...Array(6).fill('{"tool": "ToolA", "arguments": {"code": "A1"}}'),
+  ];
+
+  it("spends a nudge naming the tool before the streak ends the agent", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const prompts: string[] = [];
+    const chat: ChatFn = async (messages) => {
+      prompts.push(messages[messages.length - 1]!.content);
+      return REPEAT_FOREVER[prompts.length - 1] ?? '{"tool": "ToolA", "arguments": {"code": "A1"}}';
+    };
+    const agent = makeLiveAgent(
+      // Room for the nudge and a second streak after it, so this ends on the
+      // streak rather than on `maxModelCalls`.
+      { ...makeSpec(), maxModelCalls: 12 },
+      chat,
+      (e) => trace.push(e),
+      { requiredTools: ["ToolB"] },
+    );
+
+    // First invocation activates ToolA; the engine calls back once it drains.
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(result.completionConditionFulfilled).toBe(true);
+    expect(
+      trace.some((e) => e.text.includes("activated nothing and ToolB hasn't run")),
+    ).toBe(true);
+    // The reminder has to reach the model, not just the trace.
+    expect(prompts.some((p) => p.includes("ToolB") && p.includes("not run"))).toBe(true);
+    // And when it still doesn't land, the giving-up line says what was missed.
+    expect(trace.some((e) => e.text.includes("ToolB never ran"))).toBe(true);
+  });
+
+  it("says nothing about required tools when they have all run", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const agent = makeLiveAgent(
+      makeSpec(),
+      fakeChat([
+        '{"tool": "ToolB", "arguments": {"code": "B1"}}',
+        ...Array(6).fill('{"tool": "ToolB", "arguments": {"code": "B1"}}'),
+      ]),
+      (e) => trace.push(e),
+      { requiredTools: ["ToolB"] },
+    );
+
+    await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(result.completionConditionFulfilled).toBe(true);
+    expect(trace.some((e) => e.text.includes("never ran"))).toBe(false);
+  });
+});
+
 describe("makeLiveAgent — trace timeline correlation (turn/elementId/args)", () => {
   it("stamps every entry in a turn with the same turn number, and the activated tool with its elementId + resolved args", async () => {
     const trace: import("../types").TraceEntry[] = [];

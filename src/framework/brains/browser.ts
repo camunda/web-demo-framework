@@ -202,6 +202,36 @@ export function deviceLostAdvice(): string {
   );
 }
 
+/**
+ * Whether an error came from the browser's Cache storage rather than from the
+ * model or the network.
+ *
+ * WebLLM downloads every weight shard through `cache.add(new Request(url,
+ * { signal }))`, and Chromium reports *any* failure of the fetch inside that
+ * call as the same flat `TypeError: Failed to execute 'add' on 'Cache':
+ * Request failed` — an aborted signal included. So this covers a load
+ * interrupted part-way (switching model or example mid-download aborts it) as
+ * well as storage that won't take the bytes, which is why the advice leads
+ * with retrying rather than with freeing space.
+ */
+export function isModelCacheError(message: string): boolean {
+  return /on 'cache'|cache\.(add|put)|quota ?exceeded|exceeded the quota|storage is full/i.test(
+    message,
+  );
+}
+
+/** Advice that fits storage, rather than "try a smaller model". */
+export function modelCacheAdvice(): string {
+  return (
+    "The browser's Cache storage refused the download — which is about storage or an " +
+    "interrupted fetch, not about the model being too large. Press Connect again first: " +
+    "nothing partial is kept, so a retry starts clean, and switching model or example " +
+    "while a download is running aborts it exactly this way. If it keeps happening, free " +
+    "up disk space or clear this site's storage (DevTools → Application → Storage → Clear " +
+    "site data) and retry. The Scripted and Endpoint brains download nothing."
+  );
+}
+
 export class BrowserBrain {
   readonly kind = "browser" as const;
   model: string | null = null;
@@ -255,6 +285,11 @@ export class BrowserBrain {
       if (isDeviceLostError(message)) {
         throw new Error(
           `Couldn't load ${modelId} in the browser (${message}). ${deviceLostAdvice()}`,
+        );
+      }
+      if (isModelCacheError(message)) {
+        throw new Error(
+          `Couldn't load ${modelId} in the browser (${message}). ${modelCacheAdvice()}`,
         );
       }
       const needsShaderF16 = BROWSER_MODELS.find(

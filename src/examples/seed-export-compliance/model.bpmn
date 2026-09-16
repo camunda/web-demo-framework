@@ -50,7 +50,7 @@
             <zeebe:input source="={user: &#34;genome&#34;, password: &#34;&#34;}" target="connection.uriProperties" />
             <zeebe:input source="=true" target="data.returnResults" />
             <zeebe:input source="SELECT name AS refSeqId, chrom, txStart, txEnd, name2 AS geneSymbol FROM ncbiRefSeqCurated WHERE name2 = ? LIMIT 1" target="data.query" />
-            <zeebe:input source="=[fromAi(toolCall.geneMarker, &#34;The gene marker symbol referenced in the shipment notes (e.g. TP53).&#34;, &#34;string&#34;)]" target="data.variables" />
+            <zeebe:input source="=[fromAi(toolCall.geneMarker, &#34;The gene marker symbol referenced in the shipment notes, copied exactly as it appears there.&#34;, &#34;string&#34;)]" target="data.variables" />
           </zeebe:ioMapping>
           <zeebe:taskHeaders>
             <zeebe:header key="elementTemplateVersion" value="3" />
@@ -70,7 +70,7 @@
             <zeebe:input source="https://countries.trevorblades.com/" target="graphql.url" />
             <zeebe:input source="=false" target="graphql.storeResponse" />
             <zeebe:input source="query GetCountry($code: ID!) {&#10;  country(code: $code) {&#10;    name&#10;    capital&#10;    currency&#10;    languages { name }&#10;  }&#10;}" target="graphql.query" />
-            <zeebe:input source="={code: fromAi(toolCall.countryCode, &#34;The ISO-3166 alpha-2 code for the destination country mentioned in the shipment notes (e.g. BR for Brazil).&#34;, &#34;string&#34;)}" target="graphql.variables" />
+            <zeebe:input source="={code: fromAi(toolCall.countryCode, &#34;The destination country named in the shipment notes, as its two-letter ISO-3166 alpha-2 code. This lookup covers only BR, DE, IN, JP and KE.&#34;, &#34;string&#34;)}" target="graphql.variables" />
             <zeebe:input source="=20" target="graphql.connectionTimeoutInSeconds" />
             <zeebe:input source="=20" target="graphql.readTimeoutInSeconds" />
           </zeebe:ioMapping>
@@ -91,7 +91,7 @@
             <zeebe:input source="noAuth" target="authentication.type" />
             <zeebe:input source="GET" target="method" />
             <zeebe:input source="https://api.mathjs.org/v4/" target="url" />
-            <zeebe:input source="={&#10;  expr: string(fromAi(toolCall.intA, &#34;The character length of the gene symbol confirmed by VerifyGeneticMarker (e.g. length of &#39;TP53&#39; = 4). Compute this yourself from that prior tool result.&#34;, &#34;number&#34;)) + &#34;+&#34; + string(fromAi(toolCall.intB, &#34;The character length of the destination capital city name confirmed by CheckDestinationCountry (e.g. length of &#39;Brasília&#39; = 8). Compute this yourself from that prior tool result.&#34;, &#34;number&#34;))&#10;}" target="queryParameters" />
+            <zeebe:input source="={&#10;  expr: string(string length(fromAi(toolCall.geneMarker, &#34;The same gene marker symbol you gave VerifyGeneticMarker, exactly as it came back.&#34;, &#34;string&#34;))) + &#34;+&#34; + string(string length(fromAi(toolCall.capitalCity, &#34;The capital city exactly as CheckDestinationCountry returned it, copied character for character.&#34;, &#34;string&#34;)))&#10;}" target="queryParameters" />
             <zeebe:input source="=false" target="storeResponse" />
             <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
             <zeebe:input source="=20" target="readTimeoutInSeconds" />

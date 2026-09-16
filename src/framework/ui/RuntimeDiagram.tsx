@@ -36,16 +36,52 @@ export interface RuntimeDiagramProps {
   className?: string;
 }
 
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface CanvasLike {
   addMarker: (id: string, cls: string) => void;
   removeMarker: (id: string, cls: string) => void;
   resized: () => void;
   zoom: (mode: string) => void;
+  viewbox: (box?: Box) => { inner: Box };
 }
 
 interface OverlaysLike {
   add: (id: string, overlay: { position: unknown; html: string }) => string;
   remove: (id: string) => void;
+}
+
+/**
+ * Room left around the model when fitting, in diagram units.
+ *
+ * `fit-viewport` fits the element bounding box exactly, but the live token is
+ * an overlay anchored 12 units above and left of its element's corner (plus a
+ * glow), so a token on the topmost or leftmost element lands outside the box
+ * that was fitted and the container edge cuts it off. Padding the box the
+ * canvas fits to is what gives it somewhere to sit. Diagram units rather than
+ * pixels, because bpmn-js scales overlay offsets with the zoom too — a pixel
+ * value would over- or under-shoot at every scale but one.
+ */
+const FIT_PADDING = 16;
+
+/** `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides. */
+function fitWithPadding(canvas: CanvasLike) {
+  canvas.zoom("fit-viewport");
+  const { inner } = canvas.viewbox();
+  // An empty diagram has nothing to pad, and its zero-sized box would make the
+  // scale this derives from meaningless.
+  if (!inner?.width || !inner.height) return;
+  canvas.viewbox({
+    x: inner.x - FIT_PADDING,
+    y: inner.y - FIT_PADDING,
+    width: inner.width + FIT_PADDING * 2,
+    height: inner.height + FIT_PADDING * 2,
+  });
 }
 
 export function RuntimeDiagram({
@@ -137,7 +173,7 @@ export function RuntimeDiagram({
       .importXML(xml)
       .then(() => {
         if (!current) return;
-        viewer.get<CanvasLike>("canvas").zoom("fit-viewport");
+        fitWithPadding(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
         applyMarkers();
         if (containerRef.current)
@@ -168,7 +204,7 @@ export function RuntimeDiagram({
       const canvas = viewer.get<CanvasLike>("canvas");
       try {
         canvas.resized();
-        canvas.zoom("fit-viewport");
+        fitWithPadding(canvas);
       } catch {
         /* nothing imported yet — the import fits the viewport itself */
       }

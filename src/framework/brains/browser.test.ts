@@ -6,6 +6,8 @@ import {
   estimateAvailableVramMB,
   insufficientVramReason,
   isDeviceLostError,
+  isModelCacheError,
+  modelCacheAdvice,
   webgpuAvailable,
   webgpuUnavailableReason,
 } from "./browser";
@@ -177,6 +179,39 @@ describe("isDeviceLostError", () => {
     // the wrong path for an afternoon.
     expect(deviceLostAdvice()).toMatch(/driver/i);
     expect(deviceLostAdvice()).not.toMatch(/check your connection/i);
+  });
+});
+
+describe("isModelCacheError", () => {
+  /**
+   * Chromium flattens every failure of the fetch inside `cache.add()` into one
+   * message, so an aborted download and a full disk are indistinguishable from
+   * the string alone. Both belong here; neither is "try a smaller model".
+   */
+  it.each([
+    "TypeError: Failed to execute 'add' on 'Cache': Request failed",
+    "Failed to execute 'put' on 'Cache': Quota exceeded.",
+    "QuotaExceededError: The quota has been exceeded.",
+  ])("recognises %s", (message) => {
+    expect(isModelCacheError(message)).toBe(true);
+  });
+
+  it("leaves failures that really are the model or the GPU alone", () => {
+    for (const message of [
+      "Device was lost. This can happen due to insufficient memory or other GPU constraints.",
+      "HTTP 404 while downloading params_shard_0.bin",
+      "shader-f16 is not supported on this adapter",
+    ]) {
+      expect(isModelCacheError(message)).toBe(false);
+    }
+  });
+
+  it("leads with retrying, not with a smaller model or the network", () => {
+    // What the reader actually saw said "try a smaller model, check your
+    // connection" for a failure that was neither.
+    expect(modelCacheAdvice()).toMatch(/connect again/i);
+    expect(modelCacheAdvice()).not.toMatch(/smaller model/i);
+    expect(modelCacheAdvice()).not.toMatch(/check your connection/i);
   });
 });
 

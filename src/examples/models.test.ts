@@ -117,11 +117,83 @@ describe("example models", () => {
   );
 
   /**
+   * A `fromAi(...)` description is the spec the model is given for a value it
+   * has to produce. Illustrating one with a value lifted from a *particular*
+   * scenario turns it into a worked example of that scenario's answer, and a
+   * small model copies it: `seed-export-compliance` advertised "(e.g. TP53)"
+   * and "(e.g. BR for Brazil)" — the cleared shipment's own marker and country
+   * — so Qwen2.5 1.5B produced the Brazil result for the German shipment too,
+   * every time. Nothing else catches it: both scenarios run, and the leaked
+   * one looks perfect.
+   *
+   * Only tokens that tell one scenario apart from the others count. Wording
+   * shared by all of them describes the task rather than an answer. That also
+   * bounds this: a value merely *derived* from a scenario — a capital city, a
+   * character count — appears in no scenario's text and passes here.
+   */
+  it.each(EXAMPLES.map((e) => e.id))(
+    "%s describes its tool arguments without quoting one scenario's answer",
+    async (id) => {
+      const example = await loadExample(id);
+      const scenarios = example.scenarios ?? [];
+      if (scenarios.length < 2) return;
+
+      const wordsIn = (text: string) =>
+        new Set(Array.from(text.toLowerCase().matchAll(/[a-z0-9][\w-]*/g), (m) => m[0]));
+      // Only data-looking words: a capital or a digit, which mid-sentence
+      // prose lacks. Without this, an ordinary word one scenario's sentence
+      // happens not to use ("the") reads as distinctive.
+      const dataWordsIn = (text: string) =>
+        new Set(
+          Array.from(text.matchAll(/\b[A-Za-z][\w-]{2,}\b/g), (m) => m[0])
+            .filter((word) => /[A-Z0-9]/.test(word))
+            .map((word) => word.toLowerCase()),
+        );
+      const perScenario = scenarios.map((s) =>
+        dataWordsIn(
+          Object.values(s.variables)
+            .filter((v) => typeof v === "string")
+            .join(" "),
+        ),
+      );
+      const distinctive = new Set(
+        perScenario.flatMap((words, i) =>
+          [...words].filter((w) =>
+            perScenario.every((other, j) => j === i || !other.has(w)),
+          ),
+        ),
+      );
+
+      const { result: xml } = substituteTemplates(
+        example.bpmn,
+        createTemplateMap(example.templates),
+        "xml",
+      );
+      for (const agent of parseModel(xml).agents) {
+        for (const tool of agent.tools) {
+          for (const arg of tool.args) {
+            // Naming the *concept* being asked for is not a leak, even when
+            // only one scenario happens to exercise it — an `iban` argument
+            // saying "IBAN" describes the field, not an answer.
+            const named = wordsIn(`${tool.elementId} ${arg.name}`);
+            const leaked = [...wordsIn(arg.description)].filter(
+              (w) => distinctive.has(w) && !named.has(w),
+            );
+            expect(
+              leaked,
+              `${tool.elementId}.${arg.name} describes itself with ${leaked.join(", ")}`,
+            ).toEqual([]);
+          }
+        }
+      }
+    },
+  );
+
+  /**
    * The gallery reads `meta.ts` and the runner reads `index.ts`, so a card
    * could advertise one thing and the page open another. Nothing else would
    * catch that: both halves typecheck fine while disagreeing.
-   */
-  it.each(EXAMPLES.map((e) => e.id))("%s's card matches its manifest", async (id) => {
+   */  it.each(EXAMPLES.map((e) => e.id))("%s's card matches its manifest", async (id) => {
     const meta = EXAMPLES.find((e) => e.id === id)!;
     const { bpmn: _bpmn, ...def } = await loadExample(id);
 

@@ -10,6 +10,12 @@ export interface UseTourResult {
   active: boolean;
   /** Starts `tour` from its first step. No-op if `tour` is undefined or already active. */
   start(): void;
+  /**
+   * Re-measures the current step's target after the page's layout has changed
+   * under it (see `TourHandle.refresh`). A no-op when no tour is running, so a
+   * caller can fire it on any layout change without checking.
+   */
+  refresh(): void;
   /** Tears down the active tour, if any. */
   stop(): void;
 }
@@ -56,6 +62,12 @@ export function useTour(tour: TourDef | undefined): UseTourResult {
     setActive(false);
   }, [stopPolling]);
 
+  // Reads the ref rather than `active`, so it is stable for the lifetime of the
+  // hook and a caller can wire it straight to an event handler.
+  const refresh = useCallback(() => {
+    handleRef.current?.refresh();
+  }, []);
+
   const start = useCallback(() => {
     if (!tour || tour.steps.length === 0 || handleRef.current) return;
     const token = (startTokenRef.current += 1);
@@ -101,6 +113,5 @@ export function useTour(tour: TourDef | undefined): UseTourResult {
   // Tear down a running tour if the component unmounts (e.g. the reader
   // switches examples) mid-tour.
   useEffect(() => stop, [stop]);
-
-  return { active, start, stop };
+  return { active, start, refresh, stop };
 }

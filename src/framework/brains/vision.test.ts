@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BrowserVisionBrain,
+  createLoadAggregator,
   DEFAULT_VISION_MODEL,
+  type LoadReport,
   makeScriptedVisionBrain,
   OCR_TASK,
   OCR_WITH_REGION_TASK,
@@ -129,6 +131,61 @@ describe("region task token is available for a bounding box", () => {
   it("exposes both the plain and region OCR task tokens", () => {
     expect(OCR_TASK).toBe("<OCR>");
     expect(OCR_WITH_REGION_TASK).toBe("<OCR_WITH_REGION>");
+  });
+});
+
+/**
+ * Transformers.js reports per file, and Florence-2 fetches four ONNX sessions
+ * at once. Forwarding each report raw showed whichever file reported last — a
+ * ~1 GB download rendering as a bar flickering between 0% and 1% while cycling
+ * the same filenames, indistinguishable from a stalled fetch.
+ */
+describe("load progress is aggregated across files, not reported per file", () => {
+  /** Interleaved, the way four parallel fetches actually arrive. */
+  const INTERLEAVED: LoadReport[] = [
+    { status: "initiate", file: "onnx/embed_tokens.onnx" },
+    { status: "initiate", file: "onnx/vision_encoder.onnx" },
+    { status: "progress", file: "onnx/embed_tokens.onnx", loaded: 75e6, total: 150e6 },
+    { status: "progress", file: "onnx/vision_encoder.onnx", loaded: 35e6, total: 350e6 },
+    { status: "progress", file: "onnx/embed_tokens.onnx", loaded: 150e6, total: 150e6 },
+    { status: "done", file: "onnx/embed_tokens.onnx" },
+    { status: "progress", file: "onnx/vision_encoder.onnx", loaded: 350e6, total: 350e6 },
+  ];
+
+  it("reports total bytes fetched over total bytes known", () => {
+    const tally = createLoadAggregator();
+    const reported = INTERLEAVED.map((r) => tally(r).progress);
+
+    // 0, 0 (no sizes yet), 75/150, 110/500, 185/500, 185/500 (done is a no-op
+    // for an already-complete file), 500/500.
+    expect(reported.map((p) => +p.toFixed(3))).toEqual([
+      0, 0, 0.5, 0.22, 0.37, 0.37, 1,
+    ]);
+  });
+
+  it("never reports the last file's own progress as the whole download", () => {
+    const tally = createLoadAggregator();
+    let last = { progress: 0, text: "" };
+    for (const report of INTERLEAVED) last = tally(report);
+
+    // The raw stream's final event says vision_encoder is at 100%; the whole
+    // download only is because embed_tokens finished too.
+    expect(last.progress).toBe(1);
+    expect(last.text).toBe("downloading 500 of 500 MB");
+  });
+
+  it("completes a file on `done`, which carries no byte counts", () => {
+    const tally = createLoadAggregator();
+    tally({ status: "progress", file: "a.onnx", loaded: 10e6, total: 100e6 });
+    expect(tally({ status: "done", file: "a.onnx" }).progress).toBe(1);
+  });
+
+  it("falls back to the status while no file has announced a size", () => {
+    const tally = createLoadAggregator();
+    expect(tally({ status: "initiate", file: "a.onnx" })).toEqual({
+      progress: 0,
+      text: "initiate",
+    });
   });
 });
 

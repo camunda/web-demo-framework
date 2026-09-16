@@ -479,11 +479,31 @@ export function makeLiveAgent(
       if (outcome) return outcome;
       unproductive += 1;
       if (unproductive >= maxUnproductiveTurns) {
+        // A streak means the model has lost the format, not that it is
+        // finished — a required tool can still be unrun. The `saysDone` path
+        // answers that with a pointed "it has not run, call it now", which is
+        // far more directive than the generic rejection these turns produce,
+        // so spend one of the same nudges here before giving up. Without it a
+        // run whose decision tool never ran ends looking like a business
+        // outcome rather than the infrastructure failure it is.
+        const missing = requiredTools.filter((id) => !called.has(id));
+        if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
+          earlyDoneNudges += 1;
+          outstanding = missing;
+          unproductive = 0;
+          trace({
+            kind: "agent",
+            text: `🤖 ${maxUnproductiveTurns} turns activated nothing and ${missing.join(", ")} hasn't run — asking once more`,
+            turn,
+          });
+          continue;
+        }
         trace({
           kind: "error",
           text:
             `🤖 ${unproductive} turns in a row activated nothing — completing the agent. ` +
-            "The model has lost the reply format; whatever it has already run stands.",
+            "The model has lost the reply format; whatever it has already run stands." +
+            (missing.length ? ` ${missing.join(", ")} never ran.` : ""),
           turn,
         });
         return { completionConditionFulfilled: true };
