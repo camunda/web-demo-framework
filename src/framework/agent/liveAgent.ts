@@ -498,7 +498,15 @@ export function makeLiveAgent(
         // run whose decision tool never ran ends looking like a business
         // outcome rather than the infrastructure failure it is.
         const missing = requiredTools.filter((id) => !called.has(id));
-        if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
+        // `turn` is the last one taken, and `runTurn` refuses `turn + 1` once
+        // it passes `maxModelCalls` — so without this the nudge announces a
+        // retry that the budget check kills on entry, and the run ends on
+        // "Turn budget spent" with nothing said about what never ran.
+        if (
+          missing.length &&
+          earlyDoneNudges < maxEarlyDoneNudges &&
+          turn < spec.maxModelCalls
+        ) {
           earlyDoneNudges += 1;
           outstanding = missing;
           outstandingAfterDone = false;
@@ -528,9 +536,12 @@ export function makeLiveAgent(
     if (turnRef) turnRef.current = turn;
 
     if (turn > spec.maxModelCalls) {
+      const missing = requiredTools.filter((id) => !called.has(id));
       trace({
         kind: "error",
-        text: `Turn budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.`,
+        text:
+          `Turn budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.` +
+          (missing.length ? ` ${missing.join(", ")} never ran.` : ""),
         turn,
       });
       return { completionConditionFulfilled: true };

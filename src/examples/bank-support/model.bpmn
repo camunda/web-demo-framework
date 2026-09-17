@@ -206,7 +206,7 @@
           <zeebe:taskDefinition type="calculate-loan-payment" retries="2" />
           <zeebe:ioMapping>
             <zeebe:input source="=fromAi(toolCall.loanAmount, &#34;The loan principal the customer asked about, as a plain number with no currency symbol and no thousands separators&#34;, &#34;number&#34;)" target="loanAmount" />
-            <zeebe:input source="=fromAi(toolCall.annualInterestRatePercent, &#34;The annual interest rate as a percentage figure rather than a fraction — four and three quarter percent is 4.75, not 0.0475&#34;, &#34;number&#34;)" target="annualInterestRatePercent" />
+            <zeebe:input source="=fromAi(toolCall.annualInterestRatePercent, &#34;The annual interest rate as the customer stated it, as a percentage figure rather than a fraction — the percent number itself, not that number divided by a hundred&#34;, &#34;number&#34;)" target="annualInterestRatePercent" />
             <zeebe:input source="=fromAi(toolCall.termInMonths, &#34;The loan term in months, for example 360 for a 30 year loan&#34;, &#34;number&#34;)" target="termInMonths" />
           </zeebe:ioMapping>
         </bpmn:extensionElements>

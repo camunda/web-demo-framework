@@ -450,6 +450,25 @@ describe("makeLiveAgent — a required tool unrun when the model jams", () => {
     expect(prompts.some((p) => p.includes("ToolA and ToolB have not run"))).toBe(true);
   });
 
+  it("does not promise another call when the budget is already spent", async () => {
+    const trace: { kind: string; text: string }[] = [];
+    const agent = makeLiveAgent(
+      // Exactly enough calls to complete the streak and no more, so the nudge
+      // would be announced and then killed by the budget check on entry.
+      { ...makeSpec(), maxModelCalls: 3 },
+      fakeChat(Array(6).fill('{"tool": "Nope", "arguments": {}}')),
+      (e) => trace.push(e),
+      { requiredTools: ["ToolB"] },
+    );
+
+    const result = await agent({ elementId: "Agent", variables: {}, type: "x" } as never);
+
+    expect(result.completionConditionFulfilled).toBe(true);
+    expect(trace.some((e) => e.text.includes("asking once more"))).toBe(false);
+    // Whichever exit it takes, it has to say what never ran.
+    expect(trace.some((e) => e.text.includes("ToolB never ran"))).toBe(true);
+  });
+
   it("says nothing about required tools when they have all run", async () => {
     const trace: { kind: string; text: string }[] = [];
     const agent = makeLiveAgent(
