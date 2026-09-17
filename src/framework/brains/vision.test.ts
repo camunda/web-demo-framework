@@ -342,4 +342,14 @@ describe("backend-init failures are told apart from download failures", () => {
     // The specific claim being guarded: it must not repeat the default advice.
     expect(advice).not.toMatch(/try the smaller/i);
   });
+
+  it("offers CSP as a lead rather than a diagnosis, and keeps the other causes", () => {
+    // A blob: import fails identically whether or not `script-src` allows
+    // `blob:`, so naming CSP as *the* cause would send readers whose policy is
+    // already correct off to edit it and skip the real driver/ORT question.
+    // The fall-through has to survive alongside the CSP pointer.
+    const advice = backendInitAdvice();
+    expect(advice).toMatch(/driver/i);
+    expect(advice).not.toMatch(/the cause is known|is missing `blob:`/i);
+  });
 });

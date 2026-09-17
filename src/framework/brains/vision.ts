@@ -254,13 +254,14 @@ export function isBackendInitError(message: string): boolean {
 export function backendInitAdvice(): string {
   return (
     "The download isn't the problem — ONNX Runtime couldn't start its WebGPU backend, so " +
-    "every model fails here the same way and a smaller one won't help. If the message names " +
-    "a blob: URL the cause is known: the page's Content-Security-Policy is missing `blob:` " +
-    "from `script-src`, which is where the backend loads its wasm module from (see " +
-    "docs/security.md). Otherwise it isn't narrowed down — connecting already confirmed a " +
-    "WebGPU adapter exists, so what's left is that adapter's driver or ONNX Runtime's own " +
-    "WebGPU build refusing it. Use the scripted-vision fallback meanwhile — it needs " +
-    "neither the GPU nor the network."
+    "every model fails here the same way and a smaller one won't help. A blob: URL in the " +
+    "message points at the page's Content-Security-Policy first: `script-src` has to allow " +
+    "`blob:`, which is where the backend loads its wasm module from (see docs/security.md). " +
+    "Check that rather than assume it — the same import fails the same way when the policy " +
+    "already allows it. If `blob:` is allowed, or the message names no URL at all, the cause " +
+    "isn't narrowed down: connecting already confirmed a WebGPU adapter exists, so what's " +
+    "left is that adapter's driver, or ONNX Runtime's own WebGPU build refusing it. Use the " +
+    "scripted-vision fallback meanwhile — it needs neither the GPU nor the network."
   );
 }
 
