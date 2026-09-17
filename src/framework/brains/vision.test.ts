@@ -315,6 +315,26 @@ describe("backend-init failures are told apart from download failures", () => {
     ).toBe(false);
   });
 
+  it("does not claim the Transformers.js chunk failing to download", () => {
+    // `connect()` lazy-imports Transformers.js inside the same `try` as the
+    // model load, so a chunk that genuinely 404s or is cut off arrives here
+    // wearing the same sentence as the CSP-blocked ORT backend. Only the scheme
+    // separates them, which is why the pattern anchors on `blob:` — matching
+    // `dynamically imported module` alone reports a real deployment fault as a
+    // missing CSP source and buries it.
+    expect(
+      isBackendInitError(
+        "Failed to fetch dynamically imported module: " +
+          "https://camunda.com/demo-app/assets/transformers.web-CWCFQ1o8.js",
+      ),
+    ).toBe(false);
+    expect(
+      isBackendInitError(
+        "Failed to fetch dynamically imported module: /assets/transformers.web-CWCFQ1o8.js",
+      ),
+    ).toBe(false);
+  });
+
   it("steers away from re-downloading, and names the CSP directive that fixes it", () => {
     const advice = backendInitAdvice();
     expect(advice).toContain("script-src");

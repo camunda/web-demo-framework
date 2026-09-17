@@ -236,24 +236,31 @@ function megabytes(bytes: number): string {
  * smaller model, check your connection) is then actively wrong: every model
  * fails here identically, so it only costs the reader another gigabyte.
  *
- * `dynamically imported module` is matched on its own because that half of the
- * message is the specific, diagnosable case — ORT loads its wasm glue from a
- * `URL.createObjectURL` blob, so a CSP without `blob:` in `script-src` blocks
- * it (see `docs/security.md` and `csp.test.ts`).
+ * The `blob:` in the dynamic-import branch is load-bearing, not incidental.
+ * `connect()` also `import()`s the Transformers.js chunk inside the same `try`,
+ * and a chunk that genuinely failed to download says `Failed to fetch
+ * dynamically imported module: /assets/transformers.web-….js` — the same
+ * sentence, a real network or deployment fault, and the one case where "check
+ * your connection" is the right thing to say. Only ORT loads its wasm glue from
+ * a `URL.createObjectURL` blob, so the scheme is what tells them apart.
  */
 export function isBackendInitError(message: string): boolean {
-  return /no available backend|backend not found|dynamically imported module/i.test(message);
+  return /no available backend|backend not found|dynamically imported module:\s*blob:/i.test(
+    message,
+  );
 }
 
 /** Advice for a failure that happened before the model was ever given to the GPU. */
 export function backendInitAdvice(): string {
   return (
     "The download isn't the problem — ONNX Runtime couldn't start its WebGPU backend, so " +
-    "every model fails here the same way and a smaller one won't help. If the message " +
-    "mentions a blob: URL, the page's Content-Security-Policy is missing `blob:` from " +
-    "`script-src`, which is where the backend loads its wasm module from. Otherwise this " +
-    "browser's WebGPU support is too old. Use the scripted-vision fallback meanwhile — it " +
-    "needs neither the GPU nor the network."
+    "every model fails here the same way and a smaller one won't help. If the message names " +
+    "a blob: URL the cause is known: the page's Content-Security-Policy is missing `blob:` " +
+    "from `script-src`, which is where the backend loads its wasm module from (see " +
+    "docs/security.md). Otherwise it isn't narrowed down — connecting already confirmed a " +
+    "WebGPU adapter exists, so what's left is that adapter's driver or ONNX Runtime's own " +
+    "WebGPU build refusing it. Use the scripted-vision fallback meanwhile — it needs " +
+    "neither the GPU nor the network."
   );
 }
 
