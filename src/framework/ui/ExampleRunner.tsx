@@ -1821,6 +1821,9 @@ export function ExampleRunner({
             }
           >
               <Tabs value={activeTab} onValueChange={setActiveTab}>
+                {/* Scrolls the strip from outside it, so the scrollbar can't
+                    eat into the list's fixed height — see styles.css. */}
+                <div className="tab-strip">
                 <TabsList>
                   {/*
                    * Sentence case, because the tabs either side of these are
@@ -1846,6 +1849,7 @@ export function ExampleRunner({
                     </TabsTrigger>
                   ))}
                 </TabsList>
+                </div>
 
                 <TabsContent value={MODEL_TAB}>
                   <div className="editor-meta">
