@@ -214,11 +214,14 @@ export function deviceLostAdvice(): string {
  *
  * So this identifies *where* the failure happened, not why, and
  * {@link modelCacheAdvice} has to cover every cause it can't rule out.
+ *
+ * `quota` is matched bare because the caller hands this `Error.message` only:
+ * a real `QuotaExceededError` arrives with its name already stripped, as
+ * whatever that engine words it — "The quota has been exceeded.", "Quota
+ * exceeded.", "…exceeded the quota".
  */
 export function isModelCacheError(message: string): boolean {
-  return /on 'cache'|cache\.(add|put)|quota ?exceeded|exceeded the quota|storage is full/i.test(
-    message,
-  );
+  return /on 'cache'|cache\.(add|put)|quota|storage is full/i.test(message);
 }
 
 /** Advice for a failure whose cause the message genuinely doesn't narrow down. */

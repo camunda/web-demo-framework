@@ -52,7 +52,8 @@ describe("RuntimeDiagram", () => {
     expect(classed.firstElementChild).toHaveClass("runtime-diagram", "diagram");
   });
 
-  it("imports the diagram and renders its elements", async () => {    const { container } = render(
+  it("imports the diagram and renders its elements", async () => {
+    const { container } = render(
       <RuntimeDiagram xml={XML} activeIds={[]} incidentIds={[]} />,
     );
 

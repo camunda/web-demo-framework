@@ -208,7 +208,8 @@ describe("ExampleRunner — when the agent really does give up early", () => {
   }, 40_000);
 });
 
-describe("ExampleRunner — a tour step pointing at a collapsible panel", () => {  /**
+describe("ExampleRunner — a tour step pointing at a collapsible panel", () => {
+  /**
    * This example's last step describes the variables panel, which the reader
    * can collapse from under it. driver.js measures a step's target when the
    * step opens and then only on window resize/scroll, so without this the

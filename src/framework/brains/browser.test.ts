@@ -187,13 +187,24 @@ describe("isModelCacheError", () => {
    * Chromium flattens every failure of the fetch inside `cache.add()` into one
    * message, so an aborted download and a full disk are indistinguishable from
    * the string alone. Both belong here; neither is "try a smaller model".
+   *
+   * These are message-only on purpose: `connect()` passes `Error.message`, so
+   * the `QuotaExceededError` name never reaches the matcher. A fixture
+   * carrying the name passes for the wrong reason.
    */
   it.each([
     "TypeError: Failed to execute 'add' on 'Cache': Request failed",
     "Failed to execute 'put' on 'Cache': Quota exceeded.",
-    "QuotaExceededError: The quota has been exceeded.",
+    "The quota has been exceeded.",
   ])("recognises %s", (message) => {
     expect(isModelCacheError(message)).toBe(true);
+  });
+
+  it("recognises a real QuotaExceededError once the name has been stripped", () => {
+    const quota = new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    // What `connect()` actually forwards — the name is not part of it.
+    expect(quota.message).not.toContain("QuotaExceededError");
+    expect(isModelCacheError(quota.message)).toBe(true);
   });
 
   it("leaves failures that really are the model or the GPU alone", () => {

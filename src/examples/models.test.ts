@@ -203,7 +203,8 @@ describe("example models", () => {
    * The gallery reads `meta.ts` and the runner reads `index.ts`, so a card
    * could advertise one thing and the page open another. Nothing else would
    * catch that: both halves typecheck fine while disagreeing.
-   */  it.each(EXAMPLES.map((e) => e.id))("%s's card matches its manifest", async (id) => {
+   */
+  it.each(EXAMPLES.map((e) => e.id))("%s's card matches its manifest", async (id) => {
     const meta = EXAMPLES.find((e) => e.id === id)!;
     const { bpmn: _bpmn, ...def } = await loadExample(id);
 
