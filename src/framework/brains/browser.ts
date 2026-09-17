@@ -202,6 +202,42 @@ export function deviceLostAdvice(): string {
   );
 }
 
+/**
+ * Whether an error came out of the `cache.add()` WebLLM downloads through,
+ * rather than from the GPU or the model itself.
+ *
+ * WebLLM fetches every weight shard with `cache.add(new Request(url,
+ * { signal }))`, and Chromium reports *any* failure of that inner fetch as the
+ * same flat `TypeError: Failed to execute 'add' on 'Cache': Request failed` —
+ * a dropped connection, a CORS or non-2xx response, an aborted signal and
+ * storage that won't take the bytes are indistinguishable from the message.
+ *
+ * So this identifies *where* the failure happened, not why, and
+ * {@link modelCacheAdvice} has to cover every cause it can't rule out.
+ *
+ * `quota` is matched bare because the caller hands this `Error.message` only:
+ * a real `QuotaExceededError` arrives with its name already stripped, as
+ * whatever that engine words it — "The quota has been exceeded.", "Quota
+ * exceeded.", "…exceeded the quota".
+ */
+export function isModelCacheError(message: string): boolean {
+  return /on 'cache'|cache\.(add|put)|quota|storage is full/i.test(message);
+}
+
+/** Advice for a failure whose cause the message genuinely doesn't narrow down. */
+export function modelCacheAdvice(): string {
+  return (
+    "The download failed while being written to the browser's Cache storage. That one " +
+    "error covers several causes and doesn't say which: the fetch was interrupted, the " +
+    "connection dropped, or this origin's storage is full. Press Connect again first — " +
+    "the shard that failed was not cached, and whatever downloaded before it is reused, " +
+    "so a retry picks up rather than starting over. If it persists: check your " +
+    "connection, free up disk space or clear this site's storage (DevTools → Application " +
+    "→ Storage → Clear site data), and try a smaller model if the quota is what's short. " +
+    "The Scripted and Endpoint brains download nothing."
+  );
+}
+
 export class BrowserBrain {
   readonly kind = "browser" as const;
   model: string | null = null;
@@ -255,6 +291,11 @@ export class BrowserBrain {
       if (isDeviceLostError(message)) {
         throw new Error(
           `Couldn't load ${modelId} in the browser (${message}). ${deviceLostAdvice()}`,
+        );
+      }
+      if (isModelCacheError(message)) {
+        throw new Error(
+          `Couldn't load ${modelId} in the browser (${message}). ${modelCacheAdvice()}`,
         );
       }
       const needsShaderF16 = BROWSER_MODELS.find(

@@ -183,12 +183,6 @@ function safeStringify(value: unknown, space?: number): string {
   }
 }
 
-/** One-line preview of the starting payload, for the inline “edit input” button. */
-function summarizeStart(values: Record<string, unknown>): string {
-  const text = safeStringify(values).replace(/\s+/g, " ");
-  return text.length > 78 ? `${text.slice(0, 78)}…` : text;
-}
-
 interface LogLine extends TraceEntry {
   id: number;
 }
@@ -330,9 +324,25 @@ export function ExampleRunner({
   // needs its own conditional. The tour is a plain click-through, detached
   // from run state, so it takes no snapshot getter.
   const tour = useTour(example.tour);
+  // The variables panel is detail most readers don't need while watching the
+  // run, so it starts collapsed — but two tours end on a step describing what
+  // it holds, which would otherwise highlight a closed summary. Opening it
+  // whenever a tour starts is what keeps that step worth reading.
+  const [varsOpen, setVarsOpen] = usePersistentDisclosure("variables", false);
+  // Held apart from the persisted preference on purpose, exactly as
+  // `forcedStartOpen` is: the tour opening this panel is tour state, not a
+  // choice the reader made, and writing it through would leave every later
+  // visit expanded because they once took the tour.
+  const [varsOpenedByTour, setVarsOpenedByTour] = useState(false);
+  const startTour = useCallback(() => {
+    // Only when it would actually change: opening an already-open panel fires
+    // no `toggle`, and the flag would then swallow the reader's next one.
+    if (!varsOpen) setVarsOpenedByTour(true);
+    tour.start();
+  }, [varsOpen, tour]);
   useEffect(() => {
     if (initialTourId && example.tour?.id === initialTourId) {
-      tour.start();
+      startTour();
     }
     // Intentionally only on mount, mirroring `initialBrainKind` above — this
     // seeds the initial "start the tour" instruction from the URL once, it
@@ -1039,6 +1049,22 @@ export function ExampleRunner({
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
+   * Whether the example input can still reach anything.
+   *
+   * It only ever seeds the *next* instance, so it is inert once one is under
+   * way and while a finished-but-open run is still resumable — Run resumes that
+   * instance rather than starting one. Left live, picking a different scenario
+   * moves the pill and the form and then changes nothing, which reads as the
+   * next run silently repeating the last one.
+   *
+   * `stepping` is in here on its own account, not as a proxy for `running`:
+   * `step()` sets only that flag before awaiting `beginRun()`, and for the
+   * length of that await the snapshot is still null — so a lock keyed on
+   * `running || canResume` alone leaves the input live after the seed has
+   * already been captured.
+   */
+  const inputLocked = running || stepping || canResume;
+  /**
    * Reported invalid, as opposed to not yet reported. Never leave Run disabled
    * by a form the reader cannot see — but do not flash the editor open during
    * the moment before the lazy form first validates, which for a seeded example
@@ -1405,7 +1431,7 @@ export function ExampleRunner({
           imageInput={example.imageInput}
           value={imageSelection}
           onSelect={setImageSelection}
-          disabled={running}
+          disabled={inputLocked}
         />
       )}
 
@@ -1425,7 +1451,7 @@ export function ExampleRunner({
                 size="sm"
                 variant={i === selectedScenario ? "default" : "secondary"}
                 aria-pressed={i === selectedScenario}
-                disabled={running}
+                disabled={inputLocked}
                 onClick={() =>
                   setStartValues((prev) => ({ ...prev, ...s.variables }))
                 }
@@ -1441,18 +1467,37 @@ export function ExampleRunner({
           onClick={() => setStartEditorOpen(!startEditorOpen)}
           aria-expanded={startEditorOpen}
           aria-controls="start-input-editor"
-          title="Edit the starting payload"
+          title={
+            startSchema
+              ? "Edit the starting payload"
+              : "Show the starting payload"
+          }
         >
-          <span className="scenario-edit-icon" aria-hidden>
-            ✎
-          </span>{" "}
-          input: <code>{summarizeStart(startValues)}</code>
+          {/* Without a start form the panel below is a read-only <pre>, so
+              offering to edit it promises something this example can't do. */}
+          {startSchema && (
+            <>
+              <span className="scenario-edit-icon" aria-hidden>
+                ✎
+              </span>{" "}
+            </>
+          )}
+          {startSchema ? "Edit input" : "View input"}
         </button>
-        {needsStartForm && (
+        {inputLocked ? (
+          <span className="scenario-hint">
+            {running
+              ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
+              : stepping
+                ? // Reset is disabled mid-step, so this must not suggest it.
+                  "Locked while this step finishes"
+                : "This run is still open — press ↺ Reset to start a new one"}
+          </span>
+        ) : needsStartForm ? (
           <span className="scenario-hint">
             Fill in the input to enable Run
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* Hidden rather than unmounted while collapsed: the start form reports
@@ -1489,7 +1534,7 @@ export function ExampleRunner({
               schema={startSchema}
               values={startValues}
               onChange={(k, v) => setStartValues((prev) => ({ ...prev, [k]: v }))}
-              disabled={running}
+              disabled={inputLocked}
               onValidityChange={setStartFormValid}
             />
           </Suspense>
@@ -1550,7 +1595,7 @@ export function ExampleRunner({
         {example.tour && (
           <Button
             variant="secondary"
-            onClick={tour.start}
+            onClick={startTour}
             disabled={tour.active}
           >
             {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
@@ -1730,15 +1775,31 @@ export function ExampleRunner({
             labelFor={elementLabels}
             hasAgent={!!displayAgent}
             variables={
-              <div className="vars-block" data-tour={TOUR_ANCHOR.variablesPanel}>
-                <div className="vars-head">Instance variables</div>
+              <details
+                className="vars-block"
+                data-tour={TOUR_ANCHOR.variablesPanel}
+                open={varsOpen || varsOpenedByTour}
+                onToggle={(e) => {
+                  // Setting `open` fires `toggle` too, so the tour's own open
+                  // echoes back here — persisting it would record it as a
+                  // choice. Anything else is the reader.
+                  if (!(varsOpenedByTour && e.currentTarget.open)) {
+                    setVarsOpenedByTour(false);
+                    setVarsOpen(e.currentTarget.open);
+                  }
+                  // This panel is itself a tour target, so toggling it mid-tour
+                  // moves it out from under a highlight measured before.
+                  tour.refresh();
+                }}
+              >
+                <summary className="vars-head">Instance variables</summary>
                 <pre className="vars">
                   {safeStringify(
                     Object.keys(displayVars).length > 0 ? displayVars : pendingSeed,
                     2,
                   )}
                 </pre>
-              </div>
+              </details>
             }
           />
         </div>

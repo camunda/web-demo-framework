@@ -111,7 +111,10 @@ export function App() {
             </h1>
             {hero.lede && <p>{hero.lede}</p>}
           </section>
-          <nav className="example-picker" aria-label="Scenario examples">
+          <h2 className="example-group-heading" id="examples-heading">
+            Examples
+          </h2>
+          <nav className="example-picker" aria-labelledby="examples-heading">
             {scenarioExamples.map((e) => (
               <Button
                 key={e.id}

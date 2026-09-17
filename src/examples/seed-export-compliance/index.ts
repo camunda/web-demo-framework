@@ -93,12 +93,12 @@ const SCRIPTED_AGENT = `async (job) => {
     return { completionConditionFulfilled: true };
   }
 
-  // Turn 3 — hand the legacy scoring engine its two numbers.
+  // Turn 3 — carry the two names forward to the legacy scoring engine.
   if (v.complianceScore === undefined || v.complianceScore === null) {
     return {
       variables: {
-        intA: String(v.markerRecord.geneSymbol || "").length,
-        intB: String(v.countryInfo.capital || "").length,
+        geneMarker: String(v.markerRecord.geneSymbol || ""),
+        capitalCity: String(v.countryInfo.capital || ""),
       },
       activateElements: [{ elementId: "ComputeComplianceScore" }],
     };
@@ -158,14 +158,17 @@ const CHECK_DESTINATION_COUNTRY = `async (job, { text, sleep, trace }) => {
   };
 }`;
 
-const COMPUTE_COMPLIANCE_SCORE = `async (job, { num, sleep }) => {
+const COMPUTE_COMPLIANCE_SCORE = `async (job, { text, sleep, trace }) => {
   // Stands in for the REST connector calling api.mathjs.org — the "legacy
-  // scoring engine". It adds the two numbers the agent worked out.
-  const a = num("intA");
-  const b = num("intB");
+  // scoring engine". The agent carries the two names forward from the earlier
+  // tools; the counting happens here because a small model cannot do it (see
+  // the note on this tool's arguments in the model).
+  const symbol = text("geneMarker");
+  const city = text("capitalCity");
 
   await sleep(300);
-  const score = a + b;
+  const score = symbol.length + city.length;
+  trace(symbol + " (" + symbol.length + ") + " + city + " (" + city.length + ") = " + score);
 
   return {
     complianceScore: score,

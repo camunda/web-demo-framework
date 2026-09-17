@@ -6,6 +6,8 @@ import {
   estimateAvailableVramMB,
   insufficientVramReason,
   isDeviceLostError,
+  isModelCacheError,
+  modelCacheAdvice,
   webgpuAvailable,
   webgpuUnavailableReason,
 } from "./browser";
@@ -177,6 +179,56 @@ describe("isDeviceLostError", () => {
     // the wrong path for an afternoon.
     expect(deviceLostAdvice()).toMatch(/driver/i);
     expect(deviceLostAdvice()).not.toMatch(/check your connection/i);
+  });
+});
+
+describe("isModelCacheError", () => {
+  /**
+   * Chromium flattens every failure of the fetch inside `cache.add()` into one
+   * message, so an aborted download and a full disk are indistinguishable from
+   * the string alone. Both belong here; neither is "try a smaller model".
+   *
+   * These are message-only on purpose: `connect()` passes `Error.message`, so
+   * the `QuotaExceededError` name never reaches the matcher. A fixture
+   * carrying the name passes for the wrong reason.
+   */
+  it.each([
+    "TypeError: Failed to execute 'add' on 'Cache': Request failed",
+    "Failed to execute 'put' on 'Cache': Quota exceeded.",
+    "The quota has been exceeded.",
+  ])("recognises %s", (message) => {
+    expect(isModelCacheError(message)).toBe(true);
+  });
+
+  it("recognises a real QuotaExceededError once the name has been stripped", () => {
+    const quota = new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    // What `connect()` actually forwards — the name is not part of it.
+    expect(quota.message).not.toContain("QuotaExceededError");
+    expect(isModelCacheError(quota.message)).toBe(true);
+  });
+
+  it("leaves failures that really are the model or the GPU alone", () => {
+    for (const message of [
+      "Device was lost. This can happen due to insufficient memory or other GPU constraints.",
+      "HTTP 404 while downloading params_shard_0.bin",
+      "shader-f16 is not supported on this adapter",
+    ]) {
+      expect(isModelCacheError(message)).toBe(false);
+    }
+  });
+
+  it("leads with retrying, and rules nothing out that the message can't", () => {
+    // The original advice named one cause ("try a smaller model, check your
+    // connection") for a failure that is none of them specifically. Chromium
+    // flattens an abort, a dropped connection, a CORS/non-2xx response and a
+    // full quota into the same string, so the advice has to carry all of them.
+    const advice = modelCacheAdvice();
+    expect(advice).toMatch(/connect again/i);
+    for (const cause of [/interrupted/i, /connection/i, /storage is full/i]) {
+      expect(advice, `names ${cause}`).toMatch(cause);
+    }
+    // And says so, rather than implying the cause is known.
+    expect(advice).toMatch(/doesn't say which/i);
   });
 });
 

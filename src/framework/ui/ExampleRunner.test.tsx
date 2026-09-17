@@ -1,10 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderExample } from "../testing/renderExample";
 import { messageStartFixture } from "../testing/messageStartFixture";
 import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
 import { seedExportCompliance } from "../../examples/seed-export-compliance";
+
+// Stands in for driver.js, whose every layout pass is scheduled on
+// `requestAnimationFrame` — so what it draws can't be asserted here anyway.
+// What can be is that the runner tells it to re-measure.
+const tourHandle = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  destroy: vi.fn(),
+}));
+vi.mock("../tour/driverAdapter", () => ({
+  buildDriveSteps: (steps: unknown[]) => steps,
+  startTour: () =>
+    Promise.resolve({
+      isActive: () => true,
+      refresh: tourHandle.refresh,
+      destroy: tourHandle.destroy,
+    }),
+}));
 
 // The runner boots the engine itself, and `createBojtosSession()` resolves the
 // wasm binary through `import.meta.url` — which only works under Vite. Hand it
@@ -188,5 +205,154 @@ describe("ExampleRunner — when the agent really does give up early", () => {
 
     expect(app.trace().join("\n")).toContain("Record compliance decision");
     expect(screen.queryByText(ALERT)).not.toBeInTheDocument();
+  }, 40_000);
+});
+
+describe("ExampleRunner — a tour step pointing at a collapsible panel", () => {
+  /**
+   * This example's last step describes the variables panel, which the reader
+   * can collapse from under it. driver.js measures a step's target when the
+   * step opens and then only on window resize/scroll, so without this the
+   * highlight and popover stay where the expanded panel used to be.
+   */
+  it("re-measures the tour when the variables panel is toggled under it", async () => {
+    await renderExample(seedExportCompliance);
+    const panel = () => screen.getByText("Instance variables").closest("details")!;
+    const stored = () => localStorage.getItem("wdf:section:v2:variables");
+    expect(panel().open).toBe(false);
+    expect(stored()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /take the tour/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /touring/i })).toBeInTheDocument(),
+    );
+
+    // Starting the tour opens the panel: a step describes what it holds, and
+    // driver.js would otherwise highlight a collapsed summary.
+    await waitFor(() => expect(panel().open).toBe(true));
+    // But taking a tour is not a disclosure choice — it must not overwrite a
+    // reader's saved preference and leave every later visit expanded.
+    expect(stored()).toBeNull();
+
+    tourHandle.refresh.mockClear();
+    // jsdom implements no activation behaviour for <summary>, so a click on it
+    // toggles nothing. Drive the state change the browser would instead: set
+    // `open`, then fire the toggle event it dispatches after.
+    panel().open = false;
+    fireEvent(panel(), new Event("toggle"));
+
+    expect(tourHandle.refresh).toHaveBeenCalledTimes(1);
+    // A real toggle is still a choice, and still persists.
+    expect(stored()).toBe("0");
+  }, 30_000);
+});
+
+describe("ExampleRunner — the example input toggle", () => {
+  /**
+   * The panel it opens renders the start form when the model declares one, and
+   * a read-only `<pre>` when it doesn't — so a single "Edit input" label
+   * promises an action half the examples can't perform.
+   */
+  it("offers to edit only where there is a form to edit", async () => {
+    await renderExample(seedExportCompliance);
+    expect(screen.getByRole("button", { name: /edit input/i })).toBeInTheDocument();
+
+    cleanup();
+
+    // order-process has no start-event form, so its payload is display-only.
+    await renderExample(orderProcess);
+    expect(screen.getByRole("button", { name: /view input/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit input/i })).not.toBeInTheDocument();
+  }, 40_000);
+});
+
+describe("ExampleRunner — changing the example input mid-run", () => {
+  /**
+   * The scenario pills and the start form are disabled while a run is in
+   * flight, because neither can reach an instance that has already started.
+   * Silently, that reads as a pill that just doesn't work: the reader picks
+   * the other shipment, presses Run, and gets the previous one again.
+   */
+  it("says why the input is locked, and unlocks it when the run ends", async () => {
+    const app = await renderExample(seedExportCompliance);
+    // Re-queried every time: the pills re-render as the run's state changes,
+    // and a node captured once goes stale.
+    const flagged = () => screen.getByRole("button", { name: /likely flagged/i });
+    const lock = () => screen.queryByText(/locked while this run/i);
+
+    expect(flagged()).toBeEnabled();
+    expect(lock()).not.toBeInTheDocument();
+
+    // This example has a start form, so Run stays disabled until the form has
+    // loaded and validated — clicking before that does nothing, silently.
+    const run = screen.getByRole("button", { name: "▶ Run" });
+    await waitFor(() => expect(run).toBeEnabled(), { timeout: 20_000 });
+    fireEvent.click(run);
+
+    await waitFor(() => expect(lock()).toBeInTheDocument());
+    expect(flagged()).toBeDisabled();
+
+    await app.settle();
+
+    expect(flagged()).toBeEnabled();
+    expect(lock()).not.toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * `step()` sets only `stepping` before awaiting `beginRun()`, and for the
+   * length of that await the snapshot is still null — so a lock keyed on
+   * `running || canResume` alone leaves the input live after the seed has
+   * already been captured.
+   */
+  it("locks the input for Step too, not just Run", async () => {
+    const app = await renderExample(seedExportCompliance);
+    const flagged = () => screen.getByRole("button", { name: /likely flagged/i });
+
+    const step = screen.getByRole("button", { name: "⏭ Step" });
+    await waitFor(() => expect(step).toBeEnabled(), { timeout: 20_000 });
+    fireEvent.click(step);
+
+    // Its own wording, not the Run one: Reset is disabled mid-step, so the
+    // hint must not send the reader there. Both assertions run in one tick —
+    // the hint element is reused, and its text changes the moment the step
+    // lands and `canResume` takes over.
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/locked while this step finishes/i),
+        ).not.toHaveTextContent(/Reset/);
+      },
+      { timeout: 20_000 },
+    );
+    expect(flagged()).toBeDisabled();
+
+    await app.settle();
+  }, 40_000);
+
+  /**
+   * The case that actually bit: a run that parks on a human task is still
+   * *resumable*, so the next Run continues that instance instead of starting a
+   * new one — and the input, which only ever seeds a new instance, reaches
+   * nothing. Before this the pills stayed live, so picking the other shipment
+   * moved the pill and the form and then changed nothing at all. A live model
+   * parks far more often than the scripted stand-in, which is why this showed
+   * up under Qwen and not under Scripted.
+   */
+  it("stays locked while a parked run is still resumable", async () => {
+    const app = await renderExample(seedExportCompliance);
+    const cleared = () => screen.getByRole("button", { name: /likely cleared/i });
+
+    // The flagged shipment ends on the human task rather than completing.
+    fireEvent.click(screen.getByRole("button", { name: /likely flagged/i }));
+    await app.run();
+
+    expect(app.status()).toBe("Waiting for a human");
+    expect(cleared()).toBeDisabled();
+    expect(screen.getByText(/still open — press ↺ Reset/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "↺ Reset" }));
+
+    await waitFor(() => expect(cleared()).toBeEnabled());
+    expect(screen.queryByText(/still open — press ↺ Reset/i)).not.toBeInTheDocument();
   }, 40_000);
 });

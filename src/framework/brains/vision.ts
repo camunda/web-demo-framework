@@ -38,17 +38,22 @@ export interface VisionModel {
  * of WebGPU adapters. The `large-ft` build stays in the shortlist as the
  * higher-quality, heavier alternative behind the same `VisionBrain` seam; other
  * families (Moondream2, SmolVLM2 ONNX builds) plug in the same way.
+ *
+ * `downloadLabel` is the fp32 total of the four sessions Transformers.js
+ * actually fetches for a `Florence2ForConditionalGeneration` — `embed_tokens`,
+ * `vision_encoder`, `encoder_model` and `decoder_model_merged` — not the repo's
+ * whole `onnx/` directory, and not a quantized build this never asks for.
  */
 const CURATED_VISION_MODELS: VisionModel[] = [
   {
     id: "onnx-community/Florence-2-base-ft",
     label: "Florence-2 base",
-    downloadLabel: "~0.4 GB",
+    downloadLabel: "~1 GB",
   },
   {
     id: "onnx-community/Florence-2-large-ft",
     label: "Florence-2 large (higher quality)",
-    downloadLabel: "~1.6 GB",
+    downloadLabel: "~3 GB",
   },
 ];
 
@@ -136,6 +141,90 @@ export function makeScriptedVisionBrain(
   return new ScriptedVisionBrain(lookup);
 }
 
+/** One Transformers.js load report. `loaded`/`total` are bytes, `progress` a percent. */
+export interface LoadReport {
+  status?: string;
+  progress?: number;
+  file?: string;
+  loaded?: number;
+  total?: number;
+}
+
+/**
+ * Folds Transformers.js's **per-file** load reports into one overall figure.
+ *
+ * Florence-2 is four ONNX sessions fetched at once, and every one of them
+ * reports independently. Forwarding each report as it arrives shows whichever
+ * file happened to report last, so a gigabyte-scale download renders as a bar
+ * flickering between 0% and 1% while cycling the same filenames — with no way
+ * to tell a stalled fetch from a working one.
+ *
+ * Transformers.js 4.2 already does this properly when it can: before each
+ * per-file `progress` it emits a `progress_total` whose denominator comes from
+ * a metadata pass over *every* expected file (`DefaultProgressCallback`, seeded
+ * in `from_pretrained`), so it is complete from the first event and never steps
+ * back. Prefer it, and ignore the raw `progress` that follows — forwarding both
+ * is two updates per chunk, the second of them worse.
+ *
+ * The byte-summing below is the fallback for when that metadata pass fails or
+ * returns nothing, which Transformers.js warns about and carries on from. It
+ * counts a file only once the file announces itself, so its denominator grows
+ * and the figure can step back; the byte totals ride along in the text
+ * precisely so that reads as "more to fetch" rather than as lost ground.
+ *
+ * Returns `null` when there is nothing new to show.
+ */
+export function createLoadAggregator(): (report: LoadReport) => {
+  progress: number;
+  text: string;
+} | null {
+  const files = new Map<string, { loaded: number; total: number }>();
+  let haveAggregate = false;
+
+  const describe = (loaded: number, total: number) => ({
+    progress: loaded / total,
+    text: `downloading ${megabytes(loaded)} of ${megabytes(total)} MB`,
+  });
+
+  return (report) => {
+    if (report.status === "progress_total") {
+      haveAggregate = true;
+      const total = report.total ?? 0;
+      return total > 0 ? describe(report.loaded ?? 0, total) : null;
+    }
+    // Every file event is already covered by the aggregate that preceded it.
+    if (haveAggregate) return null;
+
+    if (report.file) {
+      const seen = files.get(report.file);
+      // `done` carries no byte counts, so it can only complete a file already
+      // counted — it must not reset one to zero.
+      if (report.status === "done" && seen) {
+        seen.loaded = seen.total;
+      } else if (typeof report.total === "number" && report.total > 0) {
+        files.set(report.file, {
+          total: report.total,
+          loaded: Math.min(report.loaded ?? 0, report.total),
+        });
+      }
+    }
+
+    let loaded = 0;
+    let total = 0;
+    for (const file of files.values()) {
+      loaded += file.loaded;
+      total += file.total;
+    }
+
+    if (total === 0) return { progress: 0, text: report.status ?? "loading" };
+    return describe(loaded, total);
+  };
+}
+
+function megabytes(bytes: number): string {
+  return Math.round(bytes / 1e6).toLocaleString();
+}
+
 // The minimal slice of the Transformers.js surface this brain uses, typed
 // locally so the module has no *static* type-import of `@huggingface/transformers`
 // (which would pull it onto the initial bundle). The real objects come from the
@@ -183,16 +272,11 @@ export class BrowserVisionBrain implements VisionBrain {
     if (this.modelHandle && this.model === modelId) return modelId;
 
     const myGeneration = ++this.generation;
-    const progress_callback = (report: {
-      status?: string;
-      progress?: number;
-      file?: string;
-    }) => {
+    const tally = createLoadAggregator();
+    const progress_callback = (report: LoadReport) => {
       if (myGeneration !== this.generation) return; // superseded by cancel/reconnect
-      onProgress?.({
-        progress: (report.progress ?? 0) / 100,
-        text: report.file ? `${report.status ?? "loading"} ${report.file}` : (report.status ?? ""),
-      });
+      const update = tally(report);
+      if (update) onProgress?.(update);
     };
 
     this.teardown();

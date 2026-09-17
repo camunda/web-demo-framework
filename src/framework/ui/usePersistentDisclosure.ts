@@ -10,8 +10,11 @@ import { useCallback, useEffect, useState } from "react";
  * rearranged enough that stored choices no longer describe the current layout,
  * otherwise a returning reader keeps a preference for a panel that has moved,
  * changed meaning, or gone — and never sees the new defaults. `v2` retires the
- * pre-restructure keys: `variables` no longer names a panel of its own, `start`
- * became the inline input editor, and `code`/`tools` now default to collapsed.
+ * pre-restructure keys: `start` became the inline input editor, and
+ * `code`/`tools` now default to collapsed. `variables` was retired with them
+ * and is reused by the disclosure inside the activity card — safe precisely
+ * because nothing has ever written that id under this prefix, so the reuse
+ * cannot inherit a choice made about the panel it used to name.
  */
 const STORAGE_PREFIX = "wdf:section:v2:";
 

@@ -174,10 +174,12 @@ body {
 /* Gallery nav as a row of pills, matching the demo's scenario toggle. A
    segmented track would be wrong here: there are enough examples to wrap onto
    several rows, which a single 999px-radius container can't sit around. The
-   children stay design-system `Button`s. */
+   children stay design-system `Button`s. Centred, so a part-filled last row
+   reads as the end of a set rather than as a ragged edge. */
 .example-picker {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 .example-picker button {
@@ -208,6 +210,7 @@ body {
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ink-muted-2);
+  text-align: center;
 }
 
 .example-meta {
@@ -545,21 +548,51 @@ body {
 }
 
 /* The live instance payload, as the activity panel's footer (see the
-   `variables` slot on TraceTimeline). */
+   `variables` slot on TraceTimeline). A <details> rather than a nested
+   CollapsibleCard, same reasoning as `.engine-view` below. */
 .vars-block {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 .vars-head {
-  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ink-muted-2);
 }
+.vars-head::-webkit-details-marker {
+  display: none;
+}
+.vars-head::before {
+  content: "▸";
+  font-size: 10px;
+  transition: transform 0.18s ease;
+}
+.vars-block[open] > .vars-head::before {
+  transform: rotate(90deg);
+}
+.vars-head:hover {
+  color: var(--ink);
+}
+.vars-head:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vars-head::before {
+    transition: none;
+  }
+}
 .vars-block .vars {
+  margin-top: 8px;
   min-height: 0;
   max-height: 180px;
   font-size: 11.5px;
@@ -969,8 +1002,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Inline "edit the input" affordance: a text button previewing the starting
-   payload, which discloses the start form below the row. */
+/* Inline "edit the input" affordance: a text button that discloses the start
+   form below the row. A fixed label rather than a preview of the payload — the
+   preview was long enough to wrap this row onto a second line. */
 .scenario-input-button {
   display: inline-flex;
   align-items: center;
@@ -983,21 +1017,11 @@ body {
   font-size: 12px;
   cursor: pointer;
   min-width: 0;
+  white-space: nowrap;
 }
 .scenario-input-button:hover {
   color: var(--ink);
   text-decoration: underline;
-}
-.scenario-input-button code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--ui-mono);
-  font-size: 0.9em;
-  background: var(--surface-3);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  padding: 1px 5px;
 }
 .scenario-edit-icon {
   opacity: 0.85;

@@ -117,8 +117,15 @@ function userMessage(
   variables: Record<string, unknown>,
   history: string[],
   remaining: ToolSpec[],
-  /** Set after a premature "done" — see `requiredTools` in {@link LiveAgentOptions}. */
+  /** Set after a premature "done" or a jam — see `requiredTools` in {@link LiveAgentOptions}. */
   outstanding: string[] = [],
+  /**
+   * Whether `outstanding` follows the model reporting itself done. A jam gets
+   * the same reminder without that claim: it did not say it was finished, it
+   * repeated a spent tool, and telling it otherwise contradicts the rejection
+   * printed alongside.
+   */
+  outstandingAfterDone = false,
   /** Why the previous reply in this same turn sequence was rejected, if it was. */
   rejected: string[] = [],
   /**
@@ -173,14 +180,16 @@ function userMessage(
     );
   }
   if (outstanding.length) {
-    // Stated plainly, because the model has already claimed to be finished
-    // once: repeating the general instruction doesn't work, naming the
-    // outstanding call does.
+    // Stated plainly, because the general instruction has already not worked
+    // once: naming the outstanding call is what gets through.
+    const one = outstanding.length === 1;
     parts.push(
-      `You reported that you are done, but ${outstanding.join(" and ")} ` +
-        `${outstanding.length === 1 ? "has" : "have"} not run. ` +
+      (outstandingAfterDone
+        ? `You reported that you are done, but ${outstanding.join(" and ")} `
+        : `${outstanding.join(" and ")} `) +
+        `${one ? "has" : "have"} not run. ` +
         `Passing those values as another tool's arguments does not count. ` +
-        `Call ${outstanding.length === 1 ? "it" : "them"} now.`,
+        `Call ${one ? "it" : "them"} now.`,
     );
   }
   parts.push("Which tool should run next? Reply with JSON only.");
@@ -401,8 +410,16 @@ export interface LiveAgentOptions {
    * exactly as before.
    */
   requiredTools?: string[];
-  /** How many premature "done" replies to answer with a reminder. Default 1. */
-  maxEarlyDoneNudges?: number;
+  /**
+   * How many times a run may be told that a required tool has not run.
+   * Default 1.
+   *
+   * One budget covering both triggers — a premature `done`, and a jam that the
+   * unproductive-turn cap is about to end — because it is one policy: nudge a
+   * forgetful model once, don't argue with a determined one. Set it to 0 and
+   * neither reminder is sent.
+   */
+  maxRequiredToolNudges?: number;
   /**
    * How many turns in a row may activate nothing before the agent completes.
    * Default 3.
@@ -431,7 +448,7 @@ export function makeLiveAgent(
     allowMultiToolTurns = false,
     turnRef,
     requiredTools = [],
-    maxEarlyDoneNudges = 1,
+    maxRequiredToolNudges = 1,
     maxUnproductiveTurns = 3,
   } = opts;
 
@@ -440,9 +457,11 @@ export function makeLiveAgent(
   let turn = 0;
   const called = new Set<string>();
   const history: string[] = [];
-  let earlyDoneNudges = 0;
+  let requiredToolNudges = 0;
   /** Named in the next prompt after a premature "done"; cleared once used. */
   let outstanding: string[] = [];
+  /** Whether that list came from a premature "done" rather than a jam. */
+  let outstandingAfterDone = false;
   /** Why the previous reply was rejected, fed back so the retry differs; cleared once used. */
   let rejected: string[] = [];
 
@@ -479,11 +498,40 @@ export function makeLiveAgent(
       if (outcome) return outcome;
       unproductive += 1;
       if (unproductive >= maxUnproductiveTurns) {
+        // A streak means the model has lost the format, not that it is
+        // finished — a required tool can still be unrun. The `saysDone` path
+        // answers that with a pointed "it has not run, call it now", which is
+        // far more directive than the generic rejection these turns produce,
+        // so spend one of the same nudges here before giving up. Without it a
+        // run whose decision tool never ran ends looking like a business
+        // outcome rather than the infrastructure failure it is.
+        const missing = requiredTools.filter((id) => !called.has(id));
+        // `turn` is the last one taken, and `runTurn` refuses `turn + 1` once
+        // it passes `maxModelCalls` — so without this the nudge announces a
+        // retry that the budget check kills on entry, and the run ends on
+        // "Turn budget spent" with nothing said about what never ran.
+        if (
+          missing.length &&
+          requiredToolNudges < maxRequiredToolNudges &&
+          turn < spec.maxModelCalls
+        ) {
+          requiredToolNudges += 1;
+          outstanding = missing;
+          outstandingAfterDone = false;
+          unproductive = 0;
+          trace({
+            kind: "agent",
+            text: `🤖 ${maxUnproductiveTurns} turns activated nothing and ${missing.join(", ")} ${missing.length === 1 ? "hasn't" : "haven't"} run — asking once more`,
+            turn,
+          });
+          continue;
+        }
         trace({
           kind: "error",
           text:
             `🤖 ${unproductive} turns in a row activated nothing — completing the agent. ` +
-            "The model has lost the reply format; whatever it has already run stands.",
+            "The model has lost the reply format; whatever it has already run stands." +
+            (missing.length ? ` ${missing.join(", ")} never ran.` : ""),
           turn,
         });
         return { completionConditionFulfilled: true };
@@ -496,9 +544,12 @@ export function makeLiveAgent(
     if (turnRef) turnRef.current = turn;
 
     if (turn > spec.maxModelCalls) {
+      const missing = requiredTools.filter((id) => !called.has(id));
       trace({
         kind: "error",
-        text: `Turn budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.`,
+        text:
+          `Turn budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.` +
+          (missing.length ? ` ${missing.join(", ")} never ran.` : ""),
         turn,
       });
       return { completionConditionFulfilled: true };
@@ -536,12 +587,14 @@ export function makeLiveAgent(
           history,
           remaining,
           outstanding,
+          outstandingAfterDone,
           rejected,
           allowRepeats,
         ),
       },
     ];
     outstanding = [];
+    outstandingAfterDone = false;
     rejected = [];
 
     let raw: string;
@@ -566,9 +619,10 @@ export function makeLiveAgent(
     const json = extractJson(raw);
     if (saysDone(json) && collectToolCalls(json).length === 0) {
       const missing = requiredTools.filter((id) => !called.has(id));
-      if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
-        earlyDoneNudges += 1;
+      if (missing.length && requiredToolNudges < maxRequiredToolNudges) {
+        requiredToolNudges += 1;
         outstanding = missing;
+        outstandingAfterDone = true;
         trace({
           kind: "agent",
           text: `🤖 model says it is done, but ${missing.join(", ")} hasn't run — asking once more`,

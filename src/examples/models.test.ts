@@ -117,6 +117,93 @@ describe("example models", () => {
   );
 
   /**
+   * A `fromAi(...)` description is the spec the model is given for a value it
+   * has to produce. Illustrating one with a value lifted from a *particular*
+   * scenario turns it into a worked example of that scenario's answer, and a
+   * small model copies it: `seed-export-compliance` advertised "(e.g. TP53)"
+   * and "(e.g. BR for Brazil)" — the cleared shipment's own marker and country
+   * — so Qwen2.5 1.5B produced the Brazil result for the German shipment too,
+   * every time. Nothing else catches it: both scenarios run, and the leaked
+   * one looks perfect.
+   *
+   * Only tokens that tell one scenario apart from the others count. Wording
+   * shared by all of them describes the task rather than an answer. That also
+   * bounds this: a value merely *derived* from a scenario — a capital city, a
+   * character count — appears in no scenario's text and passes here.
+   */
+  it.each(EXAMPLES.map((e) => e.id))(
+    "%s describes its tool arguments without quoting one scenario's answer",
+    async (id) => {
+      const example = await loadExample(id);
+      const scenarios = example.scenarios ?? [];
+      if (scenarios.length < 2) return;
+
+      // One tokenizer for both sides. They have to agree on decimals: split
+      // `6.5` on one side only and a rate quoted from a scenario never matches
+      // the scenario it came from. Digit-grouping commas go the same way —
+      // `$240,000` in a scenario against `240000` in a description tokenized
+      // to `240`/`000` versus `240000`, which never intersect.
+      const TOKEN = /\d+(?:\.\d+)+|[\w-]+/g;
+      const tokens = (text: string) =>
+        Array.from(text.replace(/(?<=\d),(?=\d)/g, "").matchAll(TOKEN), (m) => m[0]);
+      const wordsIn = (text: string) =>
+        new Set(tokens(text).map((word) => word.toLowerCase()));
+      // Only data-looking words. A capital marks a name or a code, of any
+      // length — `BR` must not be exempt just for being short. A bare single
+      // digit is not a value though: `bin`'s "the first 6 to 8 digits" is
+      // prose, and it collides with any scenario that mentions a 6. Two or
+      // more digits, or a decimal, is a value again.
+      const dataWordsIn = (text: string) =>
+        new Set(
+          tokens(text)
+            .filter((word) => /[A-Z]/.test(word) || /\d\d|\d\.\d/.test(word))
+            .map((word) => word.toLowerCase()),
+        );
+      const perScenario = scenarios.map((s) =>
+        dataWordsIn(
+          // Numbers and booleans count too: `.filter(typeof v === "string")`
+          // silently exempted every numeric scenario value, which is most of
+          // what invoice-payment's scenarios differ by.
+          Object.values(s.variables)
+            .filter((v) => v !== null && typeof v !== "object")
+            .map((v) => String(v))
+            .join(" "),
+        ),
+      );
+      const distinctive = new Set(
+        perScenario.flatMap((words, i) =>
+          [...words].filter((w) =>
+            perScenario.every((other, j) => j === i || !other.has(w)),
+          ),
+        ),
+      );
+
+      const { result: xml } = substituteTemplates(
+        example.bpmn,
+        createTemplateMap(example.templates),
+        "xml",
+      );
+      for (const agent of parseModel(xml).agents) {
+        for (const tool of agent.tools) {
+          for (const arg of tool.args) {
+            // Naming the *concept* being asked for is not a leak, even when
+            // only one scenario happens to exercise it — an `iban` argument
+            // saying "IBAN" describes the field, not an answer.
+            const named = wordsIn(`${tool.elementId} ${arg.name}`);
+            const leaked = [...wordsIn(arg.description)].filter(
+              (w) => distinctive.has(w) && !named.has(w),
+            );
+            expect(
+              leaked,
+              `${tool.elementId}.${arg.name} describes itself with ${leaked.join(", ")}`,
+            ).toEqual([]);
+          }
+        }
+      }
+    },
+  );
+
+  /**
    * The gallery reads `meta.ts` and the runner reads `index.ts`, so a card
    * could advertise one thing and the page open another. Nothing else would
    * catch that: both halves typecheck fine while disagreeing.

@@ -18,6 +18,9 @@ function stubLanguageModel(api: unknown): void {
   vi.stubGlobal("LanguageModel", api);
 }
 
+/** What every Prompt API call declares — see the describe block below. */
+const ENGLISH = [{ type: "text", languages: ["en"] }];
+
 /** A stand-in session whose stream yields `chunks` as deltas. */
 function fakeSession(chunks: string[], destroyed: { count: number }) {
   return {
@@ -65,6 +68,60 @@ describe("chromeAiUnavailableReason", () => {
       expect(chromeAiSupported()).toBe(true);
       expect(await chromeAiUnavailableReason()).toBeNull();
     }
+  });
+});
+
+/**
+ * Chrome logs a warning on any Prompt API request that doesn't declare one —
+ * "an output language should be specified to ensure optimal output quality and
+ * properly attest to output safety" — and the availability probe runs on every
+ * page load, so it appeared even for readers who never picked this brain.
+ */
+describe("every Prompt API request declares its output language", () => {
+  const english = ENGLISH;
+
+  it("declares it when probing availability", async () => {
+    const availability = vi.fn(() => Promise.resolve("available"));
+    stubLanguageModel({ availability, create: () => Promise.reject(new Error("unused")) });
+
+    await chromeAiUnavailableReason();
+
+    expect(availability).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedInputs: english, expectedOutputs: english }),
+    );
+  });
+
+  it("declares it when creating the session connect() holds open", async () => {
+    const destroyed = { count: 0 };
+    const create = vi.fn(() => Promise.resolve(fakeSession([], destroyed)));
+    stubLanguageModel({ availability: () => Promise.resolve("available"), create });
+
+    await new ChromeBrain().connect();
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedInputs: english, expectedOutputs: english }),
+    );
+  });
+
+  it("declares it on a chat session, alongside the system prompt", async () => {
+    const destroyed = { count: 0 };
+    const create = vi.fn(() => Promise.resolve(fakeSession(["ok"], destroyed)));
+    stubLanguageModel({ availability: () => Promise.resolve("available"), create });
+
+    const brain = new ChromeBrain();
+    await brain.connect();
+    await brain.chat([
+      { role: "system", content: "be brief" },
+      { role: "user", content: "hello" },
+    ]);
+
+    expect(create).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedInputs: english,
+        expectedOutputs: english,
+        initialPrompts: [{ role: "system", content: "be brief" }],
+      }),
+    );
   });
 });
 
@@ -129,6 +186,8 @@ describe("ChromeBrain", () => {
     // The per-turn session carries the system prompt and is destroyed after
     // the turn, so no context leaks into the next one.
     expect(created[1]).toEqual({
+      expectedInputs: ENGLISH,
+      expectedOutputs: ENGLISH,
       initialPrompts: [{ role: "system", content: "Be terse." }],
     });
     expect(destroyed.count).toBe(1);

@@ -36,16 +36,66 @@ export interface RuntimeDiagramProps {
   className?: string;
 }
 
-interface CanvasLike {
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CanvasLike {
   addMarker: (id: string, cls: string) => void;
   removeMarker: (id: string, cls: string) => void;
   resized: () => void;
   zoom: (mode: string) => void;
+  viewbox: (box?: Box) => { inner: Box; outer: Box };
 }
 
 interface OverlaysLike {
   add: (id: string, overlay: { position: unknown; html: string }) => string;
   remove: (id: string) => void;
+}
+
+/**
+ * Room left around the model when fitting, in diagram units.
+ *
+ * `fit-viewport` fits the element bounding box exactly, but the live token is
+ * an overlay anchored 12 units above and left of its element's corner (plus a
+ * glow), so a token on the topmost or leftmost element lands outside the box
+ * that was fitted and the container edge cuts it off. Padding the box the
+ * canvas fits to is what gives it somewhere to sit. Diagram units rather than
+ * pixels, because bpmn-js scales overlay offsets with the zoom too — a pixel
+ * value would over- or under-shoot at every scale but one.
+ */
+const FIT_PADDING = 16;
+
+/** `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides. */
+export function fitWithPadding(canvas: CanvasLike) {
+  canvas.zoom("fit-viewport");
+  const { inner, outer } = canvas.viewbox();
+  // An empty diagram has nothing to pad, and its zero-sized box would make the
+  // scale this derives from meaningless.
+  if (!inner?.width || !inner.height) return;
+
+  const padded = {
+    x: inner.x - FIT_PADDING,
+    y: inner.y - FIT_PADDING,
+    width: inner.width + FIT_PADDING * 2,
+    height: inner.height + FIT_PADDING * 2,
+  };
+  // `fit-viewport` caps its scale at 1 (`Math.min(1, …)` in diagram-js's
+  // `_fitViewport`) so a small model is never blown up to fill the container.
+  // The `viewbox(box)` setter has no such cap — it takes whatever scale the box
+  // implies — so the box has to carry the cap instead: never smaller than the
+  // viewport, grown about its own centre so the padding stays even.
+  const width = Math.max(padded.width, outer?.width ?? 0);
+  const height = Math.max(padded.height, outer?.height ?? 0);
+  canvas.viewbox({
+    x: padded.x - (width - padded.width) / 2,
+    y: padded.y - (height - padded.height) / 2,
+    width,
+    height,
+  });
 }
 
 export function RuntimeDiagram({
@@ -137,7 +187,7 @@ export function RuntimeDiagram({
       .importXML(xml)
       .then(() => {
         if (!current) return;
-        viewer.get<CanvasLike>("canvas").zoom("fit-viewport");
+        fitWithPadding(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
         applyMarkers();
         if (containerRef.current)
@@ -168,7 +218,7 @@ export function RuntimeDiagram({
       const canvas = viewer.get<CanvasLike>("canvas");
       try {
         canvas.resized();
-        canvas.zoom("fit-viewport");
+        fitWithPadding(canvas);
       } catch {
         /* nothing imported yet — the import fits the viewport itself */
       }

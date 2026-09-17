@@ -37,14 +37,41 @@ interface LanguageModelSession {
   destroy(): void;
 }
 
-interface LanguageModelStatic {
-  availability(): Promise<Availability>;
-  create(options?: {
-    initialPrompts?: { role: string; content: string }[];
-    monitor?(m: CreateMonitor): void;
-    signal?: AbortSignal;
-  }): Promise<LanguageModelSession>;
+interface LanguageModelExpectation {
+  type: "text";
+  languages: string[];
 }
+
+interface LanguageModelOptions {
+  expectedInputs?: LanguageModelExpectation[];
+  expectedOutputs?: LanguageModelExpectation[];
+}
+
+interface LanguageModelStatic {
+  availability(options?: LanguageModelOptions): Promise<Availability>;
+  create(
+    options?: LanguageModelOptions & {
+      initialPrompts?: { role: string; content: string }[];
+      monitor?(m: CreateMonitor): void;
+      signal?: AbortSignal;
+    },
+  ): Promise<LanguageModelSession>;
+}
+
+/**
+ * Declared on every Prompt API call. Chrome warns on any request that omits
+ * it — "an output language should be specified to ensure optimal output
+ * quality and properly attest to output safety" — and it can only be one of
+ * `[de, en, es, fr, ja]`. Every prompt, tool description and example in this
+ * repo is English, so there is nothing to negotiate.
+ */
+const TEXT_IN_ENGLISH: LanguageModelExpectation[] = [
+  { type: "text", languages: ["en"] },
+];
+const LANGUAGE_OPTIONS: LanguageModelOptions = {
+  expectedInputs: TEXT_IN_ENGLISH,
+  expectedOutputs: TEXT_IN_ENGLISH,
+};
 
 /** The model id shown once connected — Chrome exposes no version string. */
 export const CHROME_MODEL_ID = "gemini-nano";
@@ -80,7 +107,7 @@ export async function chromeAiUnavailableReason(): Promise<string | null> {
   }
   let availability: Availability;
   try {
-    availability = await api.availability();
+    availability = await api.availability(LANGUAGE_OPTIONS);
   } catch (e) {
     return `Chrome couldn't report on its built-in model (${e instanceof Error ? e.message : String(e)}).`;
   }
@@ -123,6 +150,7 @@ export class ChromeBrain {
     this.connecting = controller;
     try {
       this.warm = await api.create({
+        ...LANGUAGE_OPTIONS,
         signal: controller.signal,
         monitor: (m) => {
           m.addEventListener("downloadprogress", (e) => {
@@ -165,9 +193,10 @@ export class ChromeBrain {
 
     const system = messages.filter((m) => m.role === "system");
     const turns = messages.filter((m) => m.role !== "system");
-    const session = await api.create(
-      system.length ? { initialPrompts: system } : undefined,
-    );
+    const session = await api.create({
+      ...LANGUAGE_OPTIONS,
+      ...(system.length ? { initialPrompts: system } : {}),
+    });
     try {
       // Read with a reader rather than `for await`: `lib.dom` still types
       // `ReadableStream` as non-async-iterable, even though Chrome's is.
