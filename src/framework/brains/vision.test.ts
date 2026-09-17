@@ -140,7 +140,39 @@ describe("region task token is available for a bounding box", () => {
  * ~1 GB download rendering as a bar flickering between 0% and 1% while cycling
  * the same filenames, indistinguishable from a stalled fetch.
  */
-describe("load progress is aggregated across files, not reported per file", () => {
+describe("load progress prefers the library's own aggregate", () => {
+  /**
+   * 4.2's `DefaultProgressCallback` seeds its denominator from a metadata pass
+   * over every expected file, so `progress_total` is complete from the first
+   * event — unlike the fallback below, whose total grows as files announce
+   * themselves. It emits the aggregate and *then* the raw per-file event.
+   */
+  it("uses progress_total and drops the raw event that follows it", () => {
+    const tally = createLoadAggregator();
+
+    expect(
+      tally({ status: "progress_total", loaded: 250e6, total: 1000e6, progress: 25 }),
+    ).toEqual({ progress: 0.25, text: "downloading 250 of 1,000 MB" });
+    // Same bytes again, one file at a time — already counted.
+    expect(
+      tally({ status: "progress", file: "onnx/vision_encoder.onnx", loaded: 250e6, total: 350e6 }),
+    ).toBeNull();
+    expect(tally({ status: "done", file: "onnx/vision_encoder.onnx" })).toBeNull();
+  });
+
+  it("does not let the per-file fallback take over once an aggregate has arrived", () => {
+    const tally = createLoadAggregator();
+    tally({ status: "progress", file: "a.onnx", loaded: 10e6, total: 100e6 });
+    tally({ status: "progress_total", loaded: 10e6, total: 900e6, progress: 1.1 });
+
+    // The fallback would say 10/100; the aggregate knows about 900.
+    expect(
+      tally({ status: "progress", file: "a.onnx", loaded: 20e6, total: 100e6 }),
+    ).toBeNull();
+  });
+});
+
+describe("load progress falls back to summing files when there is no aggregate", () => {
   /** Interleaved, the way four parallel fetches actually arrive. */
   const INTERLEAVED: LoadReport[] = [
     { status: "initiate", file: "onnx/embed_tokens.onnx" },
@@ -154,7 +186,7 @@ describe("load progress is aggregated across files, not reported per file", () =
 
   it("reports total bytes fetched over total bytes known", () => {
     const tally = createLoadAggregator();
-    const reported = INTERLEAVED.map((r) => tally(r).progress);
+    const reported = INTERLEAVED.map((r) => tally(r)!.progress);
 
     // 0, 0 (no sizes yet), 75/150, 110/500, 185/500, 185/500 (done is a no-op
     // for an already-complete file), 500/500.
@@ -166,7 +198,7 @@ describe("load progress is aggregated across files, not reported per file", () =
   it("never reports the last file's own progress as the whole download", () => {
     const tally = createLoadAggregator();
     let last = { progress: 0, text: "" };
-    for (const report of INTERLEAVED) last = tally(report);
+    for (const report of INTERLEAVED) last = tally(report)!;
 
     // The raw stream's final event says vision_encoder is at 100%; the whole
     // download only is because embed_tokens finished too.
@@ -177,7 +209,7 @@ describe("load progress is aggregated across files, not reported per file", () =
   it("completes a file on `done`, which carries no byte counts", () => {
     const tally = createLoadAggregator();
     tally({ status: "progress", file: "a.onnx", loaded: 10e6, total: 100e6 });
-    expect(tally({ status: "done", file: "a.onnx" }).progress).toBe(1);
+    expect(tally({ status: "done", file: "a.onnx" })!.progress).toBe(1);
   });
 
   it("falls back to the status while no file has announced a size", () => {

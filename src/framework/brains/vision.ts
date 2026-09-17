@@ -157,21 +157,44 @@ export interface LoadReport {
  * reports independently. Forwarding each report as it arrives shows whichever
  * file happened to report last, so a gigabyte-scale download renders as a bar
  * flickering between 0% and 1% while cycling the same filenames — with no way
- * to tell a stalled fetch from a working one. Summing bytes across every file
- * seen so far gives a single number that tracks the whole download.
+ * to tell a stalled fetch from a working one.
  *
- * It can still step backwards, once: a file is only counted after it announces
- * its size, so discovering a large one raises the denominator. The byte totals
- * ride along in the text precisely so that reads as "more to fetch" rather than
- * as lost ground.
+ * Transformers.js 4.2 already does this properly when it can: before each
+ * per-file `progress` it emits a `progress_total` whose denominator comes from
+ * a metadata pass over *every* expected file (`DefaultProgressCallback`, seeded
+ * in `from_pretrained`), so it is complete from the first event and never steps
+ * back. Prefer it, and ignore the raw `progress` that follows — forwarding both
+ * is two updates per chunk, the second of them worse.
+ *
+ * The byte-summing below is the fallback for when that metadata pass fails or
+ * returns nothing, which Transformers.js warns about and carries on from. It
+ * counts a file only once the file announces itself, so its denominator grows
+ * and the figure can step back; the byte totals ride along in the text
+ * precisely so that reads as "more to fetch" rather than as lost ground.
+ *
+ * Returns `null` when there is nothing new to show.
  */
 export function createLoadAggregator(): (report: LoadReport) => {
   progress: number;
   text: string;
-} {
+} | null {
   const files = new Map<string, { loaded: number; total: number }>();
+  let haveAggregate = false;
+
+  const describe = (loaded: number, total: number) => ({
+    progress: loaded / total,
+    text: `downloading ${megabytes(loaded)} of ${megabytes(total)} MB`,
+  });
 
   return (report) => {
+    if (report.status === "progress_total") {
+      haveAggregate = true;
+      const total = report.total ?? 0;
+      return total > 0 ? describe(report.loaded ?? 0, total) : null;
+    }
+    // Every file event is already covered by the aggregate that preceded it.
+    if (haveAggregate) return null;
+
     if (report.file) {
       const seen = files.get(report.file);
       // `done` carries no byte counts, so it can only complete a file already
@@ -194,10 +217,7 @@ export function createLoadAggregator(): (report: LoadReport) => {
     }
 
     if (total === 0) return { progress: 0, text: report.status ?? "loading" };
-    return {
-      progress: loaded / total,
-      text: `downloading ${megabytes(loaded)} of ${megabytes(total)} MB`,
-    };
+    return describe(loaded, total);
   };
 }
 
@@ -255,7 +275,8 @@ export class BrowserVisionBrain implements VisionBrain {
     const tally = createLoadAggregator();
     const progress_callback = (report: LoadReport) => {
       if (myGeneration !== this.generation) return; // superseded by cancel/reconnect
-      onProgress?.(tally(report));
+      const update = tally(report);
+      if (update) onProgress?.(update);
     };
 
     this.teardown();
