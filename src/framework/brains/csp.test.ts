@@ -5,26 +5,28 @@ import { prebuiltAppConfig } from "@mlc-ai/web-llm";
 import html from "../../../index.html?raw";
 
 /**
- * Guards `index.html`'s `connect-src` against the hosts the in-browser brain
- * actually fetches from.
+ * Guards `index.html`'s CSP against what the brains actually need: the hosts
+ * the in-browser brain fetches from, and the `blob:` script source the vision
+ * brain's ONNX Runtime backend loads itself from.
  *
- * This is worth a test because the failure is silent and misattributed: a
+ * This is worth a test because the failures are silent and misattributed: a
  * CSP-blocked `fetch` throws the same `TypeError: Failed to fetch` as being
- * offline, so the UI says "check your connection" and the reader believes it.
- * Nothing in dev catches it either — `vite.config.ts`'s `strip-dev-csp` removes
- * the tag from `npm run dev`, so the policy only ever applies to a built,
- * deployed page.
+ * offline, so the UI says "check your connection" and the reader believes it,
+ * and a CSP-blocked module import surfaces as ORT's "no available backend
+ * found", which reads like the GPU's fault. Nothing in dev catches either —
+ * `vite.config.ts`'s `strip-dev-csp` removes the tag from `npm run dev`, so the
+ * policy only ever applies to a built, deployed page.
  */
 
-function connectSrc(): string[] {
+function sourcesFor(name: string): string[] {
   const csp = /content="([^"]*Content-Security|[^"]*default-src[^"]*)"/.exec(html);
   const content = csp?.[1] ?? "";
   const directive = content
     .split(";")
     .map((part) => part.trim())
-    .find((part) => part.startsWith("connect-src "));
-  expect(directive, "index.html has a connect-src directive").toBeTruthy();
-  return directive!.slice("connect-src ".length).split(/\s+/);
+    .find((part) => part.startsWith(`${name} `));
+  expect(directive, `index.html has a ${name} directive`).toBeTruthy();
+  return directive!.slice(name.length + 1).split(/\s+/);
 }
 
 /**
@@ -42,8 +44,26 @@ function allowed(sources: string[], url: string): boolean {
   });
 }
 
+describe("index.html script-src", () => {
+  const sources = sourcesFor("script-src");
+
+  it("allows blob:, which the vision brain's ONNX Runtime backend needs", () => {
+    // ORT brings up its WebGPU backend by `import()`ing its wasm glue module
+    // from a `URL.createObjectURL` blob, on the main thread. Drop this source
+    // and Florence-2 never loads — while every other brain keeps working, and
+    // while the weight downloads already in flight carry on in the background,
+    // so the reader watches a progress bar for a model that has already failed.
+    //
+    // `worker-src 'self' blob:` does not stand in for it, which is the part
+    // that makes this worth asserting: a main-thread module import is matched
+    // by `script-src-elem`, and with `script-src-elem` unset that falls back to
+    // `script-src` — a different directive from the one already allowing blobs.
+    expect(sources).toContain("blob:");
+  });
+});
+
 describe("index.html connect-src", () => {
-  const sources = connectSrc();
+  const sources = sourcesFor("connect-src");
 
   it("allows every host WebLLM's prebuilt config points at", () => {
     const hosts = new Set<string>();

@@ -862,6 +862,25 @@ body {
   overflow: hidden;
 }
 
+/* The Code panel gets one tab per handler, so its tab strip is as wide as the
+   example is big — past the card on anything but a short example. The design
+   system's list is `inline-flex w-fit` with no overflow of its own, and the
+   card clips (`overflow-hidden`), so without this the tabs beyond the edge
+   are not merely off-screen but unreachable: nothing scrolls to them.
+   Constraining the list is what turns it into its own scroll container. */
+.editors [role="tablist"] {
+  max-width: 100%;
+  overflow-x: auto;
+  /* Not cosmetic, and not optional next to `overflow-x`. The list ships
+     `justify-content: center`, and centred content that outgrows its box
+     overflows *both* sides — the left half then sits before `scrollLeft: 0`,
+     where no amount of scrolling reaches it. Scrolling alone would just move
+     which end is unreachable. */
+  justify-content: flex-start;
+  /* Don't hand a horizontal flick to the page once the strip is at its end. */
+  overscroll-behavior-x: contain;
+}
+
 /* The visual bpmn-js Modeler behind the model-editing seam (ModelEditor.tsx)
    — matches the fixed height the Monaco XML editor it replaced used. */
 .model-editor-canvas {

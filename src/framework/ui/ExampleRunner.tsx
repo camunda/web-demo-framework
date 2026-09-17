@@ -1822,10 +1822,17 @@ export function ExampleRunner({
           >
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
-                  <TabsTrigger value={MODEL_TAB}>model</TabsTrigger>
+                  {/*
+                   * Sentence case, because the tabs either side of these are
+                   * BPMN element names ("Verify genetic marker") and template
+                   * substitution keys (`system-prompt`, shown verbatim so it
+                   * still matches the `{{system-prompt}}` it stands in for).
+                   * Only these two are ours to style.
+                   */}
+                  <TabsTrigger value={MODEL_TAB}>Model</TabsTrigger>
                   {displayAgent && (
                     <TabsTrigger value={AGENT_TAB}>
-                      agent (scripted)
+                      Agent (scripted)
                     </TabsTrigger>
                   )}
                   {example.handlers.map((h) => (

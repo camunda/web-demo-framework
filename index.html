@@ -32,10 +32,19 @@
       stand in for it — a page on `http://localhost:5174` and a server on
       `:11434` are different origins — so a built page previewed from localhost
       needs a real response header allowing that port if it wants Ollama.
+
+      `script-src` needs `blob:` for the vision brain. ONNX Runtime Web — which
+      Transformers.js runs Florence-2 on — instantiates its WebGPU backend by
+      `import()`ing its wasm glue module from a `URL.createObjectURL` blob.
+      Without `blob:` that import is refused, and the only thing the page sees
+      is ORT's "no available backend found" with a `Failed to fetch dynamically
+      imported module: blob:…` — which reads like a network problem and isn't.
+      `worker-src blob:` does not cover it: this is a main-thread module import,
+      matched by `script-src-elem` falling back to `script-src`.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'"
     />
     <title>Runnable Camunda examples</title>
     <meta

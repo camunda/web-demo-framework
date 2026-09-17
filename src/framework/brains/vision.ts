@@ -225,6 +225,46 @@ function megabytes(bytes: number): string {
   return Math.round(bytes / 1e6).toLocaleString();
 }
 
+/**
+ * Whether a load failed bringing up the ONNX Runtime **backend**, rather than
+ * fetching or running the model itself.
+ *
+ * The distinction matters because the two need opposite advice and look alike.
+ * ORT reports a backend it couldn't start as `no available backend found. ERR:
+ * [webgpu] TypeError: Failed to fetch dynamically imported module: blob:…` —
+ * which reads as a download problem, and isn't one. The default advice (try the
+ * smaller model, check your connection) is then actively wrong: every model
+ * fails here identically, so it only costs the reader another gigabyte.
+ *
+ * The `blob:` in the dynamic-import branch is load-bearing, not incidental.
+ * `connect()` also `import()`s the Transformers.js chunk inside the same `try`,
+ * and a chunk that genuinely failed to download says `Failed to fetch
+ * dynamically imported module: /assets/transformers.web-….js` — the same
+ * sentence, a real network or deployment fault, and the one case where "check
+ * your connection" is the right thing to say. Only ORT loads its wasm glue from
+ * a `URL.createObjectURL` blob, so the scheme is what tells them apart.
+ */
+export function isBackendInitError(message: string): boolean {
+  return /no available backend|backend not found|dynamically imported module:\s*blob:/i.test(
+    message,
+  );
+}
+
+/** Advice for a failure that happened before the model was ever given to the GPU. */
+export function backendInitAdvice(): string {
+  return (
+    "The download isn't the problem — ONNX Runtime couldn't start its WebGPU backend, so " +
+    "every model fails here the same way and a smaller one won't help. A blob: URL in the " +
+    "message points at the page's Content-Security-Policy first: `script-src` has to allow " +
+    "`blob:`, which is where the backend loads its wasm module from (see docs/security.md). " +
+    "Check that rather than assume it — the same import fails the same way when the policy " +
+    "already allows it. If `blob:` is allowed, or the message names no URL at all, the cause " +
+    "isn't narrowed down: connecting already confirmed a WebGPU adapter exists, so what's " +
+    "left is that adapter's driver, or ONNX Runtime's own WebGPU build refusing it. Use the " +
+    "scripted-vision fallback meanwhile — it needs neither the GPU nor the network."
+  );
+}
+
 // The minimal slice of the Transformers.js surface this brain uses, typed
 // locally so the module has no *static* type-import of `@huggingface/transformers`
 // (which would pull it onto the initial bundle). The real objects come from the
@@ -321,7 +361,9 @@ export class BrowserVisionBrain implements VisionBrain {
       const message = e instanceof Error ? e.message : String(e);
       throw new Error(
         `Couldn't load ${modelId} in the browser (${message}). ` +
-          "Try the smaller Florence-2 base model, check your connection, or use the scripted-vision fallback.",
+          (isBackendInitError(message)
+            ? backendInitAdvice()
+            : "Try the smaller Florence-2 base model, check your connection, or use the scripted-vision fallback."),
       );
     }
     if (myGeneration !== this.generation) {
