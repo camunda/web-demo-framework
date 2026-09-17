@@ -140,10 +140,14 @@ describe("example models", () => {
 
       // One tokenizer for both sides. They have to agree on decimals: split
       // `6.5` on one side only and a rate quoted from a scenario never matches
-      // the scenario it came from.
+      // the scenario it came from. Digit-grouping commas go the same way —
+      // `$240,000` in a scenario against `240000` in a description tokenized
+      // to `240`/`000` versus `240000`, which never intersect.
       const TOKEN = /\d+(?:\.\d+)+|[\w-]+/g;
+      const tokens = (text: string) =>
+        Array.from(text.replace(/(?<=\d),(?=\d)/g, "").matchAll(TOKEN), (m) => m[0]);
       const wordsIn = (text: string) =>
-        new Set(Array.from(text.matchAll(TOKEN), (m) => m[0].toLowerCase()));
+        new Set(tokens(text).map((word) => word.toLowerCase()));
       // Only data-looking words. A capital marks a name or a code, of any
       // length — `BR` must not be exempt just for being short. A bare single
       // digit is not a value though: `bin`'s "the first 6 to 8 digits" is
@@ -151,7 +155,7 @@ describe("example models", () => {
       // more digits, or a decimal, is a value again.
       const dataWordsIn = (text: string) =>
         new Set(
-          Array.from(text.matchAll(TOKEN), (m) => m[0])
+          tokens(text)
             .filter((word) => /[A-Z]/.test(word) || /\d\d|\d\.\d/.test(word))
             .map((word) => word.toLowerCase()),
         );
