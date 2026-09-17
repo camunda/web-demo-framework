@@ -410,8 +410,16 @@ export interface LiveAgentOptions {
    * exactly as before.
    */
   requiredTools?: string[];
-  /** How many premature "done" replies to answer with a reminder. Default 1. */
-  maxEarlyDoneNudges?: number;
+  /**
+   * How many times a run may be told that a required tool has not run.
+   * Default 1.
+   *
+   * One budget covering both triggers — a premature `done`, and a jam that the
+   * unproductive-turn cap is about to end — because it is one policy: nudge a
+   * forgetful model once, don't argue with a determined one. Set it to 0 and
+   * neither reminder is sent.
+   */
+  maxRequiredToolNudges?: number;
   /**
    * How many turns in a row may activate nothing before the agent completes.
    * Default 3.
@@ -440,7 +448,7 @@ export function makeLiveAgent(
     allowMultiToolTurns = false,
     turnRef,
     requiredTools = [],
-    maxEarlyDoneNudges = 1,
+    maxRequiredToolNudges = 1,
     maxUnproductiveTurns = 3,
   } = opts;
 
@@ -449,7 +457,7 @@ export function makeLiveAgent(
   let turn = 0;
   const called = new Set<string>();
   const history: string[] = [];
-  let earlyDoneNudges = 0;
+  let requiredToolNudges = 0;
   /** Named in the next prompt after a premature "done"; cleared once used. */
   let outstanding: string[] = [];
   /** Whether that list came from a premature "done" rather than a jam. */
@@ -504,10 +512,10 @@ export function makeLiveAgent(
         // "Turn budget spent" with nothing said about what never ran.
         if (
           missing.length &&
-          earlyDoneNudges < maxEarlyDoneNudges &&
+          requiredToolNudges < maxRequiredToolNudges &&
           turn < spec.maxModelCalls
         ) {
-          earlyDoneNudges += 1;
+          requiredToolNudges += 1;
           outstanding = missing;
           outstandingAfterDone = false;
           unproductive = 0;
@@ -611,8 +619,8 @@ export function makeLiveAgent(
     const json = extractJson(raw);
     if (saysDone(json) && collectToolCalls(json).length === 0) {
       const missing = requiredTools.filter((id) => !called.has(id));
-      if (missing.length && earlyDoneNudges < maxEarlyDoneNudges) {
-        earlyDoneNudges += 1;
+      if (missing.length && requiredToolNudges < maxRequiredToolNudges) {
+        requiredToolNudges += 1;
         outstanding = missing;
         outstandingAfterDone = true;
         trace({

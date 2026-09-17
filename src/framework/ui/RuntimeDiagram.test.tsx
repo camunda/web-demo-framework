@@ -152,7 +152,10 @@ describe("RuntimeDiagram", () => {
  * anchored outside its element's top-left corner.
  */
 describe("fitWithPadding", () => {
-  const fakeCanvas = (inner: { x: number; y: number; width: number; height: number }) => {
+  const fakeCanvas = (
+    inner: { x: number; y: number; width: number; height: number },
+    outer = { x: 0, y: 0, width: 200, height: 100 },
+  ) => {
     const zoomed: string[] = [];
     const set: unknown[] = [];
     const canvas: CanvasLike = {
@@ -164,7 +167,7 @@ describe("fitWithPadding", () => {
       },
       viewbox: (box) => {
         if (box) set.push(box);
-        return { inner };
+        return { inner, outer };
       },
     };
     return { canvas, zoomed, set };
@@ -177,6 +180,28 @@ describe("fitWithPadding", () => {
 
     expect(zoomed).toEqual(["fit-viewport"]);
     expect(set).toEqual([{ x: 84, y: 34, width: 432, height: 232 }]);
+  });
+
+  /**
+   * `fit-viewport` caps its scale at 1, so a model smaller than its container
+   * renders at 100% rather than being blown up. The `viewbox(box)` setter takes
+   * whatever scale the box implies, so padding alone would have magnified it.
+   */
+  it("never magnifies a diagram smaller than its container", () => {
+    const { canvas, set } = fakeCanvas(
+      { x: 0, y: 0, width: 100, height: 50 },
+      { x: 0, y: 0, width: 800, height: 400 },
+    );
+
+    fitWithPadding(canvas);
+
+    const box = set[0] as { x: number; y: number; width: number; height: number };
+    // The setter's scale is min(outer/box) per axis — at least as big as the
+    // viewport on both means it can never exceed 1.
+    expect(Math.min(800 / box.width, 400 / box.height)).toBeLessThanOrEqual(1);
+    // ...and the content stays centred rather than pinned to a corner.
+    expect(box.x + box.width / 2).toBe(50);
+    expect(box.y + box.height / 2).toBe(25);
   });
 
   it("leaves an empty diagram to plain fit-viewport", () => {

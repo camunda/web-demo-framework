@@ -48,7 +48,7 @@ export interface CanvasLike {
   removeMarker: (id: string, cls: string) => void;
   resized: () => void;
   zoom: (mode: string) => void;
-  viewbox: (box?: Box) => { inner: Box };
+  viewbox: (box?: Box) => { inner: Box; outer: Box };
 }
 
 interface OverlaysLike {
@@ -72,15 +72,29 @@ const FIT_PADDING = 16;
 /** `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides. */
 export function fitWithPadding(canvas: CanvasLike) {
   canvas.zoom("fit-viewport");
-  const { inner } = canvas.viewbox();
+  const { inner, outer } = canvas.viewbox();
   // An empty diagram has nothing to pad, and its zero-sized box would make the
   // scale this derives from meaningless.
   if (!inner?.width || !inner.height) return;
-  canvas.viewbox({
+
+  const padded = {
     x: inner.x - FIT_PADDING,
     y: inner.y - FIT_PADDING,
     width: inner.width + FIT_PADDING * 2,
     height: inner.height + FIT_PADDING * 2,
+  };
+  // `fit-viewport` caps its scale at 1 (`Math.min(1, …)` in diagram-js's
+  // `_fitViewport`) so a small model is never blown up to fill the container.
+  // The `viewbox(box)` setter has no such cap — it takes whatever scale the box
+  // implies — so the box has to carry the cap instead: never smaller than the
+  // viewport, grown about its own centre so the padding stays even.
+  const width = Math.max(padded.width, outer?.width ?? 0);
+  const height = Math.max(padded.height, outer?.height ?? 0);
+  canvas.viewbox({
+    x: padded.x - (width - padded.width) / 2,
+    y: padded.y - (height - padded.height) / 2,
+    width,
+    height,
   });
 }
 
