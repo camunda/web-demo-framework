@@ -246,6 +246,25 @@ describe("ExampleRunner — a tour step pointing at a collapsible panel", () => 
   }, 30_000);
 });
 
+describe("ExampleRunner — the example input toggle", () => {
+  /**
+   * The panel it opens renders the start form when the model declares one, and
+   * a read-only `<pre>` when it doesn't — so a single "Edit input" label
+   * promises an action half the examples can't perform.
+   */
+  it("offers to edit only where there is a form to edit", async () => {
+    await renderExample(seedExportCompliance);
+    expect(screen.getByRole("button", { name: /edit input/i })).toBeInTheDocument();
+
+    cleanup();
+
+    // order-process has no start-event form, so its payload is display-only.
+    await renderExample(orderProcess);
+    expect(screen.getByRole("button", { name: /view input/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit input/i })).not.toBeInTheDocument();
+  }, 40_000);
+});
+
 describe("ExampleRunner — changing the example input mid-run", () => {
   /**
    * The scenario pills and the start form are disabled while a run is in

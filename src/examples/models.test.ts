@@ -138,17 +138,21 @@ describe("example models", () => {
       const scenarios = example.scenarios ?? [];
       if (scenarios.length < 2) return;
 
+      // One tokenizer for both sides. They have to agree on decimals: split
+      // `6.5` on one side only and a rate quoted from a scenario never matches
+      // the scenario it came from.
+      const TOKEN = /\d+(?:\.\d+)+|[\w-]+/g;
       const wordsIn = (text: string) =>
-        new Set(Array.from(text.toLowerCase().matchAll(/[a-z0-9][\w-]*/g), (m) => m[0]));
-      // Only data-looking words: something bearing a capital or a digit, which
-      // mid-sentence prose lacks. Without this, an ordinary word one scenario's
-      // sentence happens not to use ("the") reads as distinctive. A bare
-      // number qualifies — an invoice amount is exactly the kind of answer
-      // that must not appear in the description of the argument carrying it.
+        new Set(Array.from(text.matchAll(TOKEN), (m) => m[0].toLowerCase()));
+      // Only data-looking words. A capital marks a name or a code, of any
+      // length — `BR` must not be exempt just for being short. A bare single
+      // digit is not a value though: `bin`'s "the first 6 to 8 digits" is
+      // prose, and it collides with any scenario that mentions a 6. Two or
+      // more digits, or a decimal, is a value again.
       const dataWordsIn = (text: string) =>
         new Set(
-          Array.from(text.matchAll(/[\w-]{3,}/g), (m) => m[0])
-            .filter((word) => /[A-Z0-9]/.test(word))
+          Array.from(text.matchAll(TOKEN), (m) => m[0])
+            .filter((word) => /[A-Z]/.test(word) || /\d\d|\d\.\d/.test(word))
             .map((word) => word.toLowerCase()),
         );
       const perScenario = scenarios.map((s) =>

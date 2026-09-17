@@ -1467,12 +1467,22 @@ export function ExampleRunner({
           onClick={() => setStartEditorOpen(!startEditorOpen)}
           aria-expanded={startEditorOpen}
           aria-controls="start-input-editor"
-          title="Edit the starting payload"
+          title={
+            startSchema
+              ? "Edit the starting payload"
+              : "Show the starting payload"
+          }
         >
-          <span className="scenario-edit-icon" aria-hidden>
-            ✎
-          </span>{" "}
-          Edit input
+          {/* Without a start form the panel below is a read-only <pre>, so
+              offering to edit it promises something this example can't do. */}
+          {startSchema && (
+            <>
+              <span className="scenario-edit-icon" aria-hidden>
+                ✎
+              </span>{" "}
+            </>
+          )}
+          {startSchema ? "Edit input" : "View input"}
         </button>
         {inputLocked ? (
           <span className="scenario-hint">
