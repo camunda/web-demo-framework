@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  backendInitAdvice,
   BrowserVisionBrain,
   createLoadAggregator,
   DEFAULT_VISION_MODEL,
+  isBackendInitError,
   type LoadReport,
   makeScriptedVisionBrain,
   OCR_TASK,
@@ -279,5 +281,45 @@ describe("index.html connect-src covers the vision model host", () => {
     ]) {
       expect(allowed(sources, url), url).toBe(true);
     }
+  });
+});
+
+/**
+ * A backend that never started and a download that failed reach the same catch,
+ * and the advice for one is wrong for the other: "try the smaller model" costs
+ * a reader another gigabyte to reproduce a failure that has nothing to do with
+ * the model. The real message below is the one a CSP without `blob:` in
+ * `script-src` produces — recorded verbatim so the classifier is tested against
+ * what ORT actually emits rather than a paraphrase of it.
+ */
+describe("backend-init failures are told apart from download failures", () => {
+  const ortBlockedByCsp =
+    "no available backend found. ERR: [webgpu] TypeError: Failed to fetch " +
+    "dynamically imported module: blob:http://localhost:3000/32414a2e-e2a4-46a9-a553-996715057eaa";
+
+  it("recognises ORT's blocked-backend message", () => {
+    expect(isBackendInitError(ortBlockedByCsp)).toBe(true);
+  });
+
+  it("does not claim a genuine download failure", () => {
+    // These must keep the default advice: here a smaller model and checking the
+    // connection are exactly the right things to suggest.
+    expect(isBackendInitError("Failed to fetch")).toBe(false);
+    expect(
+      isBackendInitError("Unauthorized access to file: onnx/model.onnx"),
+    ).toBe(false);
+    expect(
+      isBackendInitError(
+        "TypeError: Failed to execute 'add' on 'Cache': Request failed",
+      ),
+    ).toBe(false);
+  });
+
+  it("steers away from re-downloading, and names the CSP directive that fixes it", () => {
+    const advice = backendInitAdvice();
+    expect(advice).toContain("script-src");
+    expect(advice).toContain("blob:");
+    // The specific claim being guarded: it must not repeat the default advice.
+    expect(advice).not.toMatch(/try the smaller/i);
   });
 });

@@ -225,6 +225,38 @@ function megabytes(bytes: number): string {
   return Math.round(bytes / 1e6).toLocaleString();
 }
 
+/**
+ * Whether a load failed bringing up the ONNX Runtime **backend**, rather than
+ * fetching or running the model itself.
+ *
+ * The distinction matters because the two need opposite advice and look alike.
+ * ORT reports a backend it couldn't start as `no available backend found. ERR:
+ * [webgpu] TypeError: Failed to fetch dynamically imported module: blob:…` —
+ * which reads as a download problem, and isn't one. The default advice (try the
+ * smaller model, check your connection) is then actively wrong: every model
+ * fails here identically, so it only costs the reader another gigabyte.
+ *
+ * `dynamically imported module` is matched on its own because that half of the
+ * message is the specific, diagnosable case — ORT loads its wasm glue from a
+ * `URL.createObjectURL` blob, so a CSP without `blob:` in `script-src` blocks
+ * it (see `docs/security.md` and `csp.test.ts`).
+ */
+export function isBackendInitError(message: string): boolean {
+  return /no available backend|backend not found|dynamically imported module/i.test(message);
+}
+
+/** Advice for a failure that happened before the model was ever given to the GPU. */
+export function backendInitAdvice(): string {
+  return (
+    "The download isn't the problem — ONNX Runtime couldn't start its WebGPU backend, so " +
+    "every model fails here the same way and a smaller one won't help. If the message " +
+    "mentions a blob: URL, the page's Content-Security-Policy is missing `blob:` from " +
+    "`script-src`, which is where the backend loads its wasm module from. Otherwise this " +
+    "browser's WebGPU support is too old. Use the scripted-vision fallback meanwhile — it " +
+    "needs neither the GPU nor the network."
+  );
+}
+
 // The minimal slice of the Transformers.js surface this brain uses, typed
 // locally so the module has no *static* type-import of `@huggingface/transformers`
 // (which would pull it onto the initial bundle). The real objects come from the
@@ -321,7 +353,9 @@ export class BrowserVisionBrain implements VisionBrain {
       const message = e instanceof Error ? e.message : String(e);
       throw new Error(
         `Couldn't load ${modelId} in the browser (${message}). ` +
-          "Try the smaller Florence-2 base model, check your connection, or use the scripted-vision fallback.",
+          (isBackendInitError(message)
+            ? backendInitAdvice()
+            : "Try the smaller Florence-2 base model, check your connection, or use the scripted-vision fallback."),
       );
     }
     if (myGeneration !== this.generation) {

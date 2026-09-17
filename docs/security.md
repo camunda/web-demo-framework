@@ -173,6 +173,28 @@ governs *what is allowed to run*, but the actual containment here is the
 opaque-origin iframe boundary above, which governs *what running code can
 reach*. Loosening the former doesn't weaken the latter.
 
+**Why `script-src` also allows `blob:`.** The vision brain needs it, and
+nothing else in the policy substitutes. ONNX Runtime Web — which
+Transformers.js runs Florence-2 on — brings up its WebGPU backend by
+`import()`ing its wasm glue module from a `URL.createObjectURL` blob, on the
+main thread. That is a script *element* load, so `script-src-elem` matches it
+and falls back to `script-src`; the `worker-src 'self' blob:` already in the
+policy covers a different directive entirely and does nothing for it.
+
+This is worth knowing because of how it fails. CSP refuses the import, ORT
+reports `no available backend found` with a `Failed to fetch dynamically
+imported module: blob:…` — wording that reads as a network problem — and the
+weight downloads already in flight carry on in the background, so the reader
+watches a progress bar for a model that has already failed to load. Anyone
+setting the real response header (issue #19) must carry `blob:` across, or the
+vision brain breaks in exactly this hard-to-read way while every other brain
+keeps working.
+
+As a widening it is the mildest one here: `'unsafe-eval'` and
+`'unsafe-inline'` above already permit strictly more than a same-origin blob
+URL can, and a blob URL is only creatable by script already running on this
+origin.
+
 ## Editing inside an embed
 
 **Decision:** embed mode is **read-only**, with a visible "open full page" link
