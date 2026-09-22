@@ -1574,13 +1574,17 @@ export function ExampleRunner({
         <Button
           variant="secondary"
           onClick={() => void step()}
+          // Deliberately not disabled once the root instance has completed.
+          // Run isn't, and `step()` handles that state the same way Run does —
+          // `beginRun` starts a fresh instance and this takes its first round.
+          // Disabling it here stranded the embed, which autostarts: the reader
+          // arrives after the run has finished, so Step was never once usable.
           disabled={
             run.phase !== "ready" ||
             running ||
             stepping ||
             draft.hasErrors ||
-            needsStartForm ||
-            rootCompleted(run.snapshot, rootInstanceKeyRef.current)
+            needsStartForm
           }
         >
           ⏭ Step

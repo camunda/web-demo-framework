@@ -66,6 +66,38 @@ describe("ExampleRunner — a run with no human in it", () => {
     expect(app.status()).toBe("Completed");
     expect(app.trace().at(-1)).toContain("process instance completed");
   }, 30_000);
+
+  /**
+   * Run restarts a finished run rather than going dead, and Step has to do the
+   * same. Disabling Step at completion looked harmless on the full page, where
+   * a reader can press Reset first — but the embed autostarts, so by the time
+   * anyone sees it the run is over and Step has never been usable at all.
+   *
+   * Asserting the click, not just the `disabled` prop: React reads `disabled`
+   * from props rather than the DOM, so a Step that is merely enabled proves
+   * nothing about whether pressing it does anything.
+   */
+  it("keeps Step usable after completion, starting a fresh run like Run does", async () => {
+    const app = await renderExample(orderProcess);
+    await app.run();
+    expect(app.status()).toBe("Completed");
+
+    const step = screen.getByRole("button", { name: "⏭ Step" });
+    expect(step).toBeEnabled();
+
+    fireEvent.click(step);
+
+    // A fresh instance, advanced by exactly one dispatch round — so the trace
+    // has been replaced by that round rather than still holding the last run.
+    await waitFor(
+      () => expect(app.trace().join("\n")).toMatch(/round handled/i),
+      { timeout: 20_000 },
+    );
+    expect(app.status()).not.toBe("Completed");
+    expect(app.trace().at(-1)).not.toContain("process instance completed");
+
+    await app.settle();
+  }, 40_000);
 });
 
 describe("ExampleRunner — a human task inside the agent's tool loop", () => {
