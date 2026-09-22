@@ -1503,7 +1503,16 @@ export function ExampleRunner({
           <span className="scenario-hint">
             Fill in the input to enable Run
           </span>
-        ) : null}
+        ) : (
+          // The resting state used to say nothing, which left the row looking
+          // like a display filter rather than the payload the instance is
+          // created with — readers didn't connect it to the run at all.
+          <span className="scenario-hint">
+            {example.scenarios
+              ? "Pick the input this process instance starts with, then press ▶ Run"
+              : "The input this process instance starts with"}
+          </span>
+        )}
       </div>
 
       {/* Hidden rather than unmounted while collapsed: the start form reports

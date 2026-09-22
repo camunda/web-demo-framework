@@ -296,6 +296,18 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(screen.getByRole("button", { name: /view input/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /edit input/i })).not.toBeInTheDocument();
   }, 40_000);
+
+  /**
+   * Reader feedback: "it was not completely clear to me that the EXAMPLE
+   * SHIPMENT was the actual input for the process instance". The row said
+   * nothing at rest — the hint slot only filled in once the input was locked —
+   * so a domain label like "Example shipment" read as a display filter rather
+   * than the payload the instance is created with.
+   */
+  it("says what the input is for before a run has started", async () => {
+    await renderExample(seedExportCompliance);
+    expect(screen.getByText(/process instance starts with/i)).toBeInTheDocument();
+  }, 40_000);
 });
 
 describe("ExampleRunner — changing the example input mid-run", () => {
