@@ -1005,7 +1005,7 @@ body {
   margin: 0 0 6px;
 }
 
-/* Example-shipment picker — an uppercase label beside a segmented pill track
+/* Example-input picker — an uppercase label beside a segmented pill track
    of the example's preset payloads (ExampleDef.scenarios). */
 .scenario {
   display: flex;

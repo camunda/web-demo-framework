@@ -296,6 +296,56 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(screen.getByRole("button", { name: /view input/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /edit input/i })).not.toBeInTheDocument();
   }, 40_000);
+
+  /**
+   * Reader feedback: "it was not completely clear to me that the EXAMPLE
+   * SHIPMENT was the actual input for the process instance". The row said
+   * nothing at rest — the hint slot only filled in once the input was locked —
+   * so a domain label like "Example shipment" read as a display filter rather
+   * than the payload the instance is created with.
+   *
+   * Both halves of the answer are asserted here. The heading prefix is the
+   * load-bearing one: an example supplies only the domain noun, so a
+   * regression in the runner puts "Example shipment" back with nothing else
+   * failing.
+   */
+  it("says what the input is for before a run has started", async () => {
+    await renderExample(seedExportCompliance);
+    // The example contributes "Example shipment"; the runner adds the prefix.
+    expect(screen.getByText("Input: Example shipment")).toBeInTheDocument();
+    expect(
+      screen.getByText(/pick the input this process instance starts with/i),
+    ).toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * order-process has no `scenarios` and no `scenariosLabel`, so it exercises
+   * both fallbacks: the unprefixed heading, and the hint with its "pick one"
+   * half dropped — there are no pills to pick from.
+   */
+  it("drops the prefix and the pick-one wording when there is nothing to pick", async () => {
+    await renderExample(orderProcess);
+    expect(screen.getByText("Example input")).toBeInTheDocument();
+    expect(screen.queryByText(/^Input:/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The input this process instance starts with"),
+    ).toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * `scenarios: []` is a truthy empty array, so keying the picker off the
+   * property rather than its length rendered an empty labelled group and told
+   * the reader to pick from it.
+   */
+  it("treats an empty scenarios array as no picker at all", async () => {
+    await renderExample({ ...orderProcess, scenarios: [] });
+    expect(
+      screen.queryByRole("group", { name: /example input/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The input this process instance starts with"),
+    ).toBeInTheDocument();
+  }, 40_000);
 });
 
 describe("ExampleRunner — changing the example input mid-run", () => {

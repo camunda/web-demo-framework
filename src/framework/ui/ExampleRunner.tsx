@@ -377,6 +377,9 @@ export function ExampleRunner({
     );
     return i === -1 ? null : i;
   }, [example.scenarios, startValues]);
+  // Length, not truthiness: `scenarios: []` is a truthy empty array, which
+  // rendered an empty labelled group and told the reader to pick from it.
+  const hasScenarios = !!example.scenarios?.length;
   // An example with a real start form opens it on a first visit — its fields
   // may be required, and Run stays disabled until they're filled. Compact is
   // the exception: an embed on a marketing page should read as "press play",
@@ -1437,15 +1440,21 @@ export function ExampleRunner({
 
       <div className="scenario">
         <span className="scenario-label" id="scenario-label">
-          {example.scenariosLabel ?? "Example input"}
+          {/* An example's own label is a domain noun ("Example shipment"), which
+              on its own reads as a filter rather than the payload the instance
+              is created with — a reader told us as much. The prefix is what
+              says which it is, so it belongs here rather than in each example. */}
+          {example.scenariosLabel
+            ? `Input: ${example.scenariosLabel}`
+            : "Example input"}
         </span>
-        {example.scenarios && (
+        {hasScenarios && (
           <div
             className="scenario-toggle"
             role="group"
             aria-labelledby="scenario-label"
           >
-            {example.scenarios.map((s, i) => (
+            {(example.scenarios ?? []).map((s, i) => (
               <Button
                 key={s.label}
                 size="sm"
@@ -1497,7 +1506,16 @@ export function ExampleRunner({
           <span className="scenario-hint">
             Fill in the input to enable Run
           </span>
-        ) : null}
+        ) : (
+          // The resting state used to say nothing, which left the row looking
+          // like a display filter rather than the payload the instance is
+          // created with — readers didn't connect it to the run at all.
+          <span className="scenario-hint">
+            {hasScenarios
+              ? "Pick the input this process instance starts with, then press ▶ Run"
+              : "The input this process instance starts with"}
+          </span>
+        )}
       </div>
 
       {/* Hidden rather than unmounted while collapsed: the start form reports
