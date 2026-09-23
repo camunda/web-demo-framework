@@ -377,6 +377,9 @@ export function ExampleRunner({
     );
     return i === -1 ? null : i;
   }, [example.scenarios, startValues]);
+  // Length, not truthiness: `scenarios: []` is a truthy empty array, which
+  // rendered an empty labelled group and told the reader to pick from it.
+  const hasScenarios = !!example.scenarios?.length;
   // An example with a real start form opens it on a first visit — its fields
   // may be required, and Run stays disabled until they're filled. Compact is
   // the exception: an embed on a marketing page should read as "press play",
@@ -1445,13 +1448,13 @@ export function ExampleRunner({
             ? `Input: ${example.scenariosLabel}`
             : "Example input"}
         </span>
-        {example.scenarios && (
+        {hasScenarios && (
           <div
             className="scenario-toggle"
             role="group"
             aria-labelledby="scenario-label"
           >
-            {example.scenarios.map((s, i) => (
+            {(example.scenarios ?? []).map((s, i) => (
               <Button
                 key={s.label}
                 size="sm"
@@ -1508,7 +1511,7 @@ export function ExampleRunner({
           // like a display filter rather than the payload the instance is
           // created with — readers didn't connect it to the run at all.
           <span className="scenario-hint">
-            {example.scenarios
+            {hasScenarios
               ? "Pick the input this process instance starts with, then press ▶ Run"
               : "The input this process instance starts with"}
           </span>
