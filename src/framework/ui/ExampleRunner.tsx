@@ -1437,7 +1437,13 @@ export function ExampleRunner({
 
       <div className="scenario">
         <span className="scenario-label" id="scenario-label">
-          {example.scenariosLabel ?? "Example input"}
+          {/* An example's own label is a domain noun ("Example shipment"), which
+              on its own reads as a filter rather than the payload the instance
+              is created with — a reader told us as much. The prefix is what
+              says which it is, so it belongs here rather than in each example. */}
+          {example.scenariosLabel
+            ? `Input: ${example.scenariosLabel}`
+            : "Example input"}
         </span>
         {example.scenarios && (
           <div
