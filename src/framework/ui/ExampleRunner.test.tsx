@@ -342,6 +342,18 @@ describe("ExampleRunner — the example input toggle", () => {
       screen.getByText("The input this process instance starts with"),
     ).toBeInTheDocument();
   }, 40_000);
+
+  /**
+   * An empty `scenariosLabel` is a valid string, and `??` would let it through
+   * as a blank heading — taking the pills group's accessible name with it,
+   * since the group is `aria-labelledby` that element.
+   */
+  it("falls back to the default heading when the label is empty", async () => {
+    await renderExample({ ...seedExportCompliance, scenariosLabel: "" });
+    expect(
+      screen.getByRole("group", { name: "Example input" }),
+    ).toBeInTheDocument();
+  }, 40_000);
 });
 
 describe("ExampleRunner — changing the example input mid-run", () => {

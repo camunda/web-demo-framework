@@ -1440,7 +1440,10 @@ export function ExampleRunner({
 
       <div className="scenario">
         <span className="scenario-label" id="scenario-label">
-          {example.scenariosLabel ?? "Example input"}
+          {/* `||`, not `??`: an empty label would render an empty heading, and
+              the pills group is `aria-labelledby` this element — so it would
+              lose its accessible name too. */}
+          {example.scenariosLabel || "Example input"}
         </span>
         {hasScenarios && (
           <div
