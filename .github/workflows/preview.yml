@@ -123,6 +123,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # The teardown itself only needs `contents`, but the action signs off
+      # with a sticky PR comment the same way `publish` does — without this it
+      # removes the preview, then fails the job on "Resource not accessible by
+      # integration", so every merge reports a red run over a cleanup that
+      # actually worked.
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
