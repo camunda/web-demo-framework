@@ -1025,6 +1025,11 @@ body {
   font-size: 12px;
   color: var(--ink-muted-2);
   font-variant-numeric: tabular-nums;
+  /* Always its own line under the picker. As an ordinary flex item it trailed
+     the pills whenever the row happened to have space, so the same sentence
+     sat beside the input on a wide screen and beneath it on a narrow one. */
+  flex-basis: 100%;
+  margin-top: -4px;
 }
 
 /* Inline "edit the input" affordance: a text button that discloses the start
