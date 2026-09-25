@@ -248,9 +248,9 @@ export interface ExampleDef extends ExampleMeta {
   /** Optional preset scenarios offered above the start form. */
   scenarios?: Scenario[];
   /**
-   * Domain noun for the scenario picker, e.g. "Invoice to review". Rendered as
-   * "Input: <label>" — supply the noun alone, not the prefix. Omit it and the
-   * heading is just "Example input".
+   * Heading for the scenario picker, e.g. "Invoice to review". Defaults to
+   * "Example input". Whichever it is, the hint under the row is what tells the
+   * reader it's the payload the instance starts with.
    */
   scenariosLabel?: string;
   /** Editable handlers, keyed by element id — or a task listener's key (see `HandlerDef`). */

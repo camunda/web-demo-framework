@@ -304,15 +304,12 @@ describe("ExampleRunner — the example input toggle", () => {
    * so a domain label like "Example shipment" read as a display filter rather
    * than the payload the instance is created with.
    *
-   * Both halves of the answer are asserted here. The heading prefix is the
-   * load-bearing one: an example supplies only the domain noun, so a
-   * regression in the runner puts "Example shipment" back with nothing else
-   * failing.
+   * The heading keeps the example's own domain noun, so this hint is the only
+   * thing making that connection. Losing it silently puts the confusion back.
    */
   it("says what the input is for before a run has started", async () => {
     await renderExample(seedExportCompliance);
-    // The example contributes "Example shipment"; the runner adds the prefix.
-    expect(screen.getByText("Input: Example shipment")).toBeInTheDocument();
+    expect(screen.getByText("Example shipment")).toBeInTheDocument();
     expect(
       screen.getByText(/pick the input this process instance starts with/i),
     ).toBeInTheDocument();
@@ -320,13 +317,12 @@ describe("ExampleRunner — the example input toggle", () => {
 
   /**
    * order-process has no `scenarios` and no `scenariosLabel`, so it exercises
-   * both fallbacks: the unprefixed heading, and the hint with its "pick one"
-   * half dropped — there are no pills to pick from.
+   * both fallbacks: the default heading, and the hint with its "pick one" half
+   * dropped — there are no pills to pick from.
    */
-  it("drops the prefix and the pick-one wording when there is nothing to pick", async () => {
+  it("drops the pick-one wording when there is nothing to pick", async () => {
     await renderExample(orderProcess);
     expect(screen.getByText("Example input")).toBeInTheDocument();
-    expect(screen.queryByText(/^Input:/)).not.toBeInTheDocument();
     expect(
       screen.getByText("The input this process instance starts with"),
     ).toBeInTheDocument();
