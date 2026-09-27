@@ -7,6 +7,7 @@ import orderProcessBoundaryEventsMeta from "./order-process-boundary-events/meta
 import plateRecognitionMeta from "./plate-recognition/meta";
 import invoicePaymentMeta from "./invoice-payment/meta";
 import bankSupportMeta from "./bank-support/meta";
+import fraudAlertTriageMeta from "./fraud-alert-triage/meta";
 
 /**
  * The gallery is a list of cards; only the example a reader actually opens
@@ -29,6 +30,7 @@ const scenarioMeta: ExampleMeta[] = [
   loanOriginationMeta,
   invoicePaymentMeta,
   bankSupportMeta,
+  fraudAlertTriageMeta,
   orderProcessMeta,
   orderProcessBoundaryEventsMeta,
   plateRecognitionMeta,
