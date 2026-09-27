@@ -8,6 +8,7 @@ import plateRecognitionMeta from "./plate-recognition/meta";
 import invoicePaymentMeta from "./invoice-payment/meta";
 import bankSupportMeta from "./bank-support/meta";
 import fraudAlertTriageMeta from "./fraud-alert-triage/meta";
+import creditLineIncreaseMeta from "./credit-line-increase/meta";
 
 /**
  * The gallery is a list of cards; only the example a reader actually opens
@@ -31,6 +32,7 @@ const scenarioMeta: ExampleMeta[] = [
   invoicePaymentMeta,
   bankSupportMeta,
   fraudAlertTriageMeta,
+  creditLineIncreaseMeta,
   orderProcessMeta,
   orderProcessBoundaryEventsMeta,
   plateRecognitionMeta,
