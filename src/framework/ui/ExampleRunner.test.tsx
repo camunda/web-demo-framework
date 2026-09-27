@@ -5,6 +5,7 @@ import { messageStartFixture } from "../testing/messageStartFixture";
 import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
 import { seedExportCompliance } from "../../examples/seed-export-compliance";
+import { creditLineIncrease } from "../../examples/credit-line-increase";
 
 // Stands in for driver.js, whose every layout pass is scheduled on
 // `requestAnimationFrame` — so what it draws can't be asserted here anyway.
@@ -211,6 +212,43 @@ describe("ExampleRunner — a process only a message can start", () => {
     expect(escalated).toContain("escalated to tier-2");
     expect(escalated).not.toContain("alert-withdrawn");
   }, 40_000);
+});
+
+describe("ExampleRunner — a timer racing an event the reader was offered", () => {
+  /**
+   * An SLA timer bounding a wait for an external reply is a race, and the
+   * engine reports the settled round as `"timers"` whenever one is due — so a
+   * drive loop that fast-forwards on that reason alone decides the race every
+   * run, and the reply can never arrive in time to be sent. That made three of
+   * `credit-line-increase`'s four scenarios unreachable in the runner while
+   * its engine test, which correlates directly, stayed green.
+   */
+  it("parks on the race instead of fast-forwarding the clock", async () => {
+    const app = await renderExample(creditLineIncrease);
+    await app.run();
+
+    const trace = app.trace().join("\n");
+    expect(trace).toContain("or send the event below");
+    // The mechanism, not the outcome: "the timer didn't fire" would also be
+    // satisfied by the run never reaching the wait at all.
+    expect(trace).toContain("now waiting for the reply");
+    expect(trace).not.toContain("the clock advanced");
+    expect(app.status()).toBe("Paused");
+  }, 30_000);
+
+  it("lets the reply through, and still lapses into the timeout if it never comes", async () => {
+    const app = await renderExample(creditLineIncrease);
+    await app.run();
+
+    fireEvent.click(screen.getByRole("button", { name: "📨 The credit bureau replies" }));
+    await app.settle();
+
+    const trace = app.trace().join("\n");
+    expect(trace).toContain('published "bureau-report"');
+    expect(trace).toContain("bureau replied");
+    // The reply beat the SLA, so the timeout note must never have been written.
+    expect(trace).not.toContain("No credit bureau reply within the SLA window");
+  }, 30_000);
 });
 
 describe("ExampleRunner — when the agent really does give up early", () => {

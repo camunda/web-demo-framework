@@ -425,6 +425,23 @@ export const creditLineIncrease: ExampleDef = {
     },
   ],
   scriptedAgent: SCRIPTED_AGENT,
+  // The bureau's reply is the reader's to send, standing in for the webhook
+  // post upstream's README walks you through. It has to be a button rather
+  // than something the run resolves on its own: the reply and the SLA timer
+  // are racing, and whichever the runner picked automatically would be the
+  // only outcome this example could ever show. Press it and the agent resumes
+  // with the report; leave it and the SLA lapses into the escalation path.
+  //
+  // No `variables`: `RecordBureauReport` looks the file up by `customerId`,
+  // so each scenario gets its own report — which is what makes "approved as
+  // requested", "reduced limit" and "denied" three different runs rather than
+  // three labels on the same one.
+  messageEvents: [
+    {
+      elementId: "BureauReportArrived",
+      label: "📨 The credit bureau replies",
+    },
+  ],
   // Every threshold in the prompt reads the bureau's report, and the only way
   // to that report — or to being told there isn't one — is this call. A "done"
   // before it has run is a decision made on the application form alone.

@@ -19,7 +19,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@camunda/design-system";
-import type { AgentSpec } from "../model";
+import type { AgentSpec, BoundaryEventSpec } from "../model";
 import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
@@ -40,7 +40,7 @@ import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
-import type { ExampleDef, TraceEntry } from "../types";
+import type { ExampleDef, MessageEventDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
 import { useAutostart } from "../useAutostart";
@@ -61,6 +61,34 @@ const TEMPLATE_TAB_PREFIX = "__template__:";
  */
 function isBoundarySubscription(sub: { kind: string }): boolean {
   return sub.kind.toLowerCase().includes("boundary");
+}
+
+/**
+ * Which of an example's declared {@link MessageEventDef}s have an open
+ * subscription right now — the ones the reader is being offered as buttons.
+ *
+ * A boundary event's subscription is reported against the activity it is
+ * attached to, so an example names the event and this resolves it. The message
+ * name is matched too: one activity can carry several message boundaries, and
+ * the host alone would bind every button to whichever subscription came first.
+ */
+function matchReadyMessageEvents(
+  declared: MessageEventDef[] | undefined,
+  snapshot: Snapshot | null,
+  boundaryEvents: BoundaryEventSpec[],
+): { event: MessageEventDef; sub: Snapshot["messageSubscriptions"][number] }[] {
+  if (!declared?.length || !snapshot) return [];
+  return declared.flatMap((event) => {
+    const spec = boundaryEvents.find((b) => b.elementId === event.elementId);
+    const sub = snapshot.messageSubscriptions.find((m) =>
+      m.elementId === event.elementId
+        ? true
+        : !!spec &&
+          m.elementId === spec.attachedTo &&
+          (!spec.messageName || m.messageName === spec.messageName),
+    );
+    return sub ? [{ event, sub }] : [];
+  });
 }
 
 /**
@@ -740,6 +768,24 @@ export function ExampleRunner({
           // hand (see `resolveManualControl` below), just applied
           // automatically.
           if (round.reason === "timers") {
+            // …unless the timer is racing an event the reader has been offered
+            // a button for. An SLA timer bounding a wait for an external reply
+            // is exactly that race, and the engine reports the round as
+            // "timers" whenever one is due — so fast-forwarding here would
+            // decide it every run, and the reply would never arrive in time to
+            // be sent. Park instead and let the reader answer or let it lapse.
+            const offered = matchReadyMessageEvents(
+              example.messageEvents,
+              snap,
+              model.boundaryEvents,
+            );
+            if (offered.length > 0) {
+              trace({
+                kind: "step",
+                text: `⏳ parked — ${(Math.max(snap.timers.reduce((min, t) => Math.min(min, t.dueInMs), Infinity), 0) / 1000).toFixed(1)}s left on the clock, or send the event below`,
+              });
+              break;
+            }
             const due = snap.timers.reduce(
               (min, t) => Math.min(min, t.dueInMs),
               Infinity,
@@ -784,7 +830,7 @@ export function ExampleRunner({
         });
       return snap;
     },
-    [run, trace],
+    [run, trace, example.messageEvents, model.boundaryEvents],
   );
 
   /**
@@ -1279,26 +1325,10 @@ export function ExampleRunner({
    * to reach one — and it has to work while the process is parked on a human
    * task, which is exactly when the interesting interrupts arrive.
    */
-  const readyMessageEvents = useMemo(() => {
-    const declared = example.messageEvents;
-    if (!declared?.length || !run.snapshot) return [];
-    return declared.flatMap((event) => {
-      // A boundary event's subscription is reported against the activity it is
-      // attached to, so an example names the event and this resolves it. Match
-      // the message name too: one activity can carry several message
-      // boundaries, and the host alone would bind every button to whichever
-      // subscription came first.
-      const spec = model.boundaryEvents.find((b) => b.elementId === event.elementId);
-      const sub = run.snapshot!.messageSubscriptions.find((m) =>
-        m.elementId === event.elementId
-          ? true
-          : !!spec &&
-            m.elementId === spec.attachedTo &&
-            (!spec.messageName || m.messageName === spec.messageName),
-      );
-      return sub ? [{ event, sub }] : [];
-    });
-  }, [example.messageEvents, run.snapshot, model.boundaryEvents]);
+  const readyMessageEvents = useMemo(
+    () => matchReadyMessageEvents(example.messageEvents, run.snapshot, model.boundaryEvents),
+    [example.messageEvents, run.snapshot, model.boundaryEvents],
+  );
 
   /** Publish one, then keep driving — the interrupt is mid-run, not a restart. */
   const publishMessageEvent = useCallback(
