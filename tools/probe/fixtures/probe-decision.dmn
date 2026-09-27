@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The decision `tools/probe/fixtures/dmn-business-rule.bpmn` calls. A FIRST-hit
+  table so the second rule can only win when the first does not match, which is
+  what makes the check able to tell "the engine evaluated the table" apart from
+  "something wrote the first output it found".
+-->
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             id="Definitions_ProbeDecision"
+             name="Probe decision"
+             namespace="http://camunda.org/schema/1.0/dmn">
+  <decision id="probe-decision" name="Probe decision">
+    <decisionTable id="DecisionTable_Probe" hitPolicy="FIRST">
+      <input id="Input_Amount" label="Amount">
+        <inputExpression id="InputExpression_Amount" typeRef="number">
+          <text>amount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_Verdict" label="Verdict" name="verdict" typeRef="string" />
+      <rule id="Rule_Over100">
+        <inputEntry id="InputEntry_Over100"><text>&gt; 100</text></inputEntry>
+        <outputEntry id="OutputEntry_Over100"><text>"over"</text></outputEntry>
+      </rule>
+      <rule id="Rule_Otherwise">
+        <inputEntry id="InputEntry_Otherwise"><text></text></inputEntry>
+        <outputEntry id="OutputEntry_Otherwise"><text>"under"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_Probe">
+      <dmndi:DMNShape id="DMNShape_Probe" dmnElementRef="probe-decision">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

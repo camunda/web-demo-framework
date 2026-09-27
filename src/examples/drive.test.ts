@@ -282,6 +282,9 @@ describe("every example goes somewhere", () => {
     }
 
     session.reset();
+    // Decisions first, exactly as the runner deploys them — a business rule
+    // task whose decision is missing incidents instead of routing.
+    for (const dmn of Object.values(example.decisions ?? {})) session.deployDecision(dmn);
     session.deploy(bpmn);
     // What the runner would actually start with: the seed plus the start form's
     // own defaults. An example whose required start value comes from a

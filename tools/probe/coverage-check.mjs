@@ -93,6 +93,7 @@ export const PROVEN_CONSTRUCTS = {
   manualTask: "abstract task and manual task (pass-through)",
   eventBasedGateway: "event-based gateway (race, loser cancelled)",
   scriptTask: "script task (job typed as its element id)",
+  businessRuleTask: "DMN business rule task (decision deployed and evaluated)",
   userTask: "user task (parks until completed)",
 };
 
@@ -290,21 +291,59 @@ async function runExclusiveGatewayFixture() {
 }
 
 async function runDmnFixture() {
-  // No .dmn deploy path exists in this framework yet (see issue-23's finding),
-  // so this deliberately deploys the BPMN alone and expects a business-rule
-  // incident rather than a completion — recording that absence is the point.
-  const report = await probe(path.join(fixturesDir, "dmn-business-rule.bpmn"), "{}");
-  const r = report.results[0];
-  const hasIncident = r?.snapshot.incidents.length > 0;
-  record(
-    "DMN business rule task (no decision deployed)",
-    hasIncident && !r?.completed,
-    hasIncident
-      ? `raises an incident as expected: ${r.snapshot.incidents[0]?.reason}`
-      : r?.completed
-        ? "unexpectedly completed with no decision deployed — investigate"
-        : "did not complete and raised no incident — investigate",
-  );
+  const name = "DMN business rule task (decision deployed and evaluated)";
+  const bpmn = readFileSync(path.join(fixturesDir, "dmn-business-rule.bpmn"), "utf8");
+  const dmn = readFileSync(path.join(fixturesDir, "probe-decision.dmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    session.deployDecision(dmn);
+    session.deploy(bpmn);
+    // Two runs against a FIRST-hit table, either side of its only threshold.
+    // "The task completed" is a side effect — an engine that skipped the table
+    // entirely would satisfy it just as well. What proves the decision was
+    // *evaluated* is the two inputs producing the two different verdicts under
+    // the `resultVariable` the model names.
+    const verdicts = [];
+    for (const amount of [150, 20]) {
+      session.reset();
+      session.deployDecision(dmn);
+      session.deploy(bpmn);
+      session.createInstance("probe-dmn", JSON.stringify({ amount }));
+      // Read the verdict off the job that runs *after* the decision, not off
+      // the finished instance: a completed instance reports no variables at
+      // all, so asserting against its snapshot passes on `undefined` forever.
+      let saw = null;
+      const { snapshot: snap } = await driveToQuiescence(
+        session,
+        {
+          "probe-read-verdict": (job) => {
+            saw = job.variables?.probeResult ?? null;
+            return {};
+          },
+        },
+        {},
+        20,
+      );
+      const incidents = snap.incidents ?? [];
+      if (incidents.length) {
+        record(name, false, `incident on amount=${amount}: ${incidents[0]?.reason}`);
+        return;
+      }
+      verdicts.push(saw?.verdict ?? saw ?? null);
+    }
+    const ok = verdicts[0] === "over" && verdicts[1] === "under";
+    record(
+      name,
+      ok,
+      ok
+        ? 'the table was evaluated: amount 150 → "over", amount 20 → "under", both under the `resultVariable` probeResult'
+        : `the table did not decide: got ${JSON.stringify(verdicts)}, expected ["over","under"]`,
+    );
+  } catch (e) {
+    record(name, false, `threw: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
+  } finally {
+    session.free();
+  }
 }
 
 /** A message start event has no `createInstance` entry point — publishing the

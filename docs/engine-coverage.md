@@ -100,70 +100,35 @@ the day this doc gets updated rather than quietly drifting out of date.
 | Embedded sub-process on an ordinary sequence flow | ✅ Verified | `tools/probe/fixtures/adhoc-call-activity.bpmn` (`probe-plain-subprocess`) — a plain `bpmn:subProcess` on a sequence flow runs its inner flow and the outer process completes after it. Probed separately from the ad-hoc rows above, which used to supply this claim's evidence while containing no such sub-process. |
 | Signal **start** event | ❌ **Not subscribed (never starts anything)** | `tools/probe/fixtures/signal-start.bpmn` — deploying a process whose start event carries a `signalEventDefinition` opens **no** signal subscription, and `session.broadcastSignal` creates no instance. No incident, no deploy rejection: the process simply has no entry point. Contrast the message start event above, which does create an instance. `coverage-check.mjs` asserts both halves (zero subscriptions *and* zero instances after the broadcast) so the row turns red the day either changes. |
 | Receive task (`bpmn:receiveTask` waiting on a message) | ❌ **Not supported (silently skipped)** | `tools/probe/fixtures/receive-task.bpmn` — a receive task with the same `messageRef` and `zeebe:subscription correlationKey` an intermediate message catch event would use. It opens **no** subscription, waits for nothing, and completes the moment the token arrives; the instance finishes without the message ever being published. No incident, no deploy rejection — the worst failure shape, because a model built on it appears to work while skipping its wait entirely. Tracked upstream in **Magikcraft/nano-bpm#1009** (the `parsed-not-executed` epic, which names `bpmn.rs:1096-1098` as the cause). **Workaround:** model the wait as an intermediate message catch event, which is verified above. |
-| DMN business rule task / decision evaluation | ❌ **Not supported end-to-end from this framework** | `tools/probe/fixtures/dmn-business-rule.bpmn` — a `businessRuleTask` with a `zeebe:calledDecision` deploys fine at the BPMN level, but with no matching decision deployed (there is currently no `.dmn` deploy path in this repo's tooling — see issue #23's finding), the task raises an immediate incident: `no deployed decision with id '…' for business rule task '…'`. This confirms the engine *does* have decision-evaluation machinery (the incident names a decision id it looked for, and `Snapshot.decisionInstances` exists in the type surface) — but this repo has no way to get a compiled decision table into it yet. **A DMN example task should not proceed until a `.dmn` deploy path exists.** |
+| DMN business rule task / decision evaluation | ✅ Verified | `tools/probe/fixtures/dmn-business-rule.bpmn` + `tools/probe/fixtures/probe-decision.dmn` — `session.deployDecision(dmn)` registers the table, and a `businessRuleTask` with a `zeebe:calledDecision` then evaluates it and writes the result to its `resultVariable`. The check runs the same FIRST-hit table twice, either side of its only threshold, and requires the two inputs to produce the two different verdicts: "the task completed" would be satisfied just as well by an engine that skipped the table. It reads the verdict off the job *after* the decision, because a completed instance reports no variables at all. `src/examples/expense-decision` is the example built on this. |
 | Compensation across multiple activities, cancel-on-compensate, nested sub-processes | ⚠️ Assumed | Not probed. The single-activity compensation path is verified above from engine-wasm 0.9.3, but broader compensation semantics (compensating a whole sub-process, `cancelRemainingInstances`, more than one handler per throw) have no fixture — one working path must not stand for the construct. |
 | Escalation events | ❌ **Not modelled (rejected at deploy)** | `tools/probe/fixtures/reject-escalation.bpmn` — still rejected on **engine-wasm 0.9.3**: `parse error: invalid boundary event in process probe-reject-escalation: escalation…`. The last of the three constructs **Magikcraft/nano-bpm#1168** covered; the other two, send tasks and inclusive gateways, now run (rows above). `coverage-check.mjs` asserts the refusal, and goes red — naming the element — the day the deploy succeeds. |
 | Non-interrupting boundary events, event sub-processes | ⚠️ Assumed | Not probed — no candidate fixture built yet. Probe before relying on these in an example. |
 
-## Issue #15 finding: DMN business rule example — not pursued
+## Issue #15: DMN business rule example — now shipped
 
-Issue #15 asked for a DMN business-rule example to be brought into the repo,
-contingent on DMN evaluation working end-to-end. It does not, and this section
-records the independent re-verification (done at the time against the
-then-pinned `@nanobpm/engine-wasm@0.3.0` / `@nanobpm/bojtos-kit@0.4.0`)
-confirming the row above rather than superseding it. The finding still holds on
-the currently-pinned engine — the coverage harness continues to report the same
-"no deployed decision" incident (there is still no `.dmn` deploy path in this
-repo's tooling).
+Issue #15 asked for a DMN business-rule example, contingent on DMN evaluation
+working end-to-end. It was closed without one because it did not: the session
+API exposed only `deploy(xml)` for BPMN, so nothing in this repo could get a
+compiled decision table into the engine, and a `businessRuleTask` raised
+`no deployed decision with id '…'` regardless of the model built around it.
 
-Re-running the existing fixture reproduces the same incident:
+Both halves of that have since changed, and the row above records the current
+state:
 
-```
-$ npm run probe -- tools/probe/fixtures/dmn-business-rule.bpmn
+- `@nanobpm/bojtos-kit` exposes `deployDecision(xml)` (and `deploy` routes a
+  DMN resource by content), so a decision table can reach the engine.
+- `ExampleDef.decisions` carries DMN resources by name, and the runner
+  (`useExampleRun.ts`'s `deployInto`) registers each one **before** every
+  deploy of the BPMN — on reset and redeploy too, since `session.reset()`
+  clears registrations along with the run.
 
-=== tools/probe/fixtures/dmn-business-rule.bpmn ===
-process ids: probe-dmn
-
-job types by element:
-  (none)
-
-user tasks:
-  (none)
-
-timers:
-  (none)
-
-message subscriptions:
-  (none)
-
-signal subscriptions:
-  (none)
-
-business rule (DMN) tasks:
-  - Decide → decision "probe-decision"
-
-run result:
-  - probe-dmn: completed=false rounds=1 incidents=1
-      ⚠ incident on Decide (decisionEvaluation): no deployed decision with id 'probe-decision' for business rule task 'probe-decision'
-```
-
-Inspecting `@nanobpm/bojtos-kit`'s `BojtosSession` interface directly confirms
-why: `deploy(xml: string): { processIds: string[] }` accepts only BPMN XML —
-there is no `.dmn` (or combined-resource) argument anywhere in the session API
-that a compiled decision table could travel through. The engine's own
-decision-evaluation machinery is real (the incident names the decision id it
-looked for), but nothing in this repo's tooling can get a decision *into* it,
-so a `businessRuleTask` will always raise this incident regardless of the
-model or manifest built around it.
-
-**Decision: closing #15 without adding an example.** Bringing in a `.dmn` file,
-a business rule task, and a manifest as the issue describes would only
-reproduce this same incident in the browser — there is no way to make the
-acceptance criteria's "the decision evaluates in the browser" branch true
-without first building a `.dmn` deploy path, which is out of scope for this
-task (and is the same gap issue #23's spike separately identified for Urban
-app resources). Revisit this example once a `.dmn` deploy path exists in
-`@nanobpm/bojtos-kit` or this repo's tooling.
+`src/examples/expense-decision` is the example the issue asked for. Its DMN is
+upstream's, verbatim, and all four of upstream's scenarios reach upstream's
+verdicts: `FIRST` hit policy, `(75..150]` ranges and `not("USD")` all behave.
+The `deployDecision`-then-`deploy` ordering is what the claim rests on — a
+business rule task whose decision is not registered still incidents, which is
+the failure an example that forgets `decisions` will see.
 
 ## Using the probe on a new example
 

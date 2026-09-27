@@ -241,6 +241,16 @@ export interface ExampleMeta {
 export interface ExampleDef extends ExampleMeta {
   /** The BPMN XML. */
   bpmn: string;
+  /**
+   * DMN decision-requirements XML by resource name, deployed *before* `bpmn`
+   * so a `bpmn:businessRuleTask` finds its decision already registered.
+   *
+   * A business rule task whose decision is not deployed raises an incident
+   * naming it, so an example that ships one without this field fails loudly
+   * rather than quietly routing as if the table had said nothing. Optional and
+   * additive: an example with no `decisions` deploys exactly as before.
+   */
+  decisions?: Record<string, string>;
   /** Camunda `.form` schemas by form id, for the start and user-task forms. */
   forms?: Record<string, unknown>;
   /** The starting payload. */

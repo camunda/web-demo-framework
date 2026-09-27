@@ -15,9 +15,17 @@
       <bpmn:incoming>ToDecision</bpmn:incoming>
       <bpmn:outgoing>ToEnd</bpmn:outgoing>
     </bpmn:businessRuleTask>
-    <bpmn:sequenceFlow id="ToEnd" sourceRef="Decide" targetRef="End" />
-    <bpmn:endEvent id="End">
+    <bpmn:sequenceFlow id="ToEnd" sourceRef="Decide" targetRef="ReadVerdict" />
+    <bpmn:serviceTask id="ReadVerdict" name="Read the verdict back">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-read-verdict" />
+      </bpmn:extensionElements>
       <bpmn:incoming>ToEnd</bpmn:incoming>
+      <bpmn:outgoing>ToFinish</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="ToFinish" sourceRef="ReadVerdict" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>ToFinish</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
 </bpmn:definitions>

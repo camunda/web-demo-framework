@@ -311,7 +311,7 @@ export function ExampleRunner({
   // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
   // not `example.bpmn` directly — so what runs and what's shown is exactly
   // what the diagnostics above are about.
-  const run = useExampleRun({ bpmn: draft.resolvedBpmn });
+  const run = useExampleRun({ bpmn: draft.resolvedBpmn, decisions: example.decisions });
 
   // Tell an embedding host the runner is actually usable — the engine has
   // loaded and the model deployed (phase "ready"), not merely that the shell
