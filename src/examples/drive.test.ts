@@ -9,6 +9,7 @@ import {
 } from "@nanobpm/bojtos-kit";
 import { resolveCorrelationKey } from "../framework/model";
 import { buildWorkers } from "../framework/compile";
+import { withToolCallArgs } from "../framework/agent/activation";
 import { buildDraftRunDefinition } from "../framework/draft";
 import {
   imageRefVariables,
@@ -268,11 +269,15 @@ describe("every example goes somewhere", () => {
     const agents: Record<string, AgentHandler> = {};
     if (example.scriptedAgent) {
       const agent = compile(example.scriptedAgent);
+      const tools = model.agents.flatMap((a) => a.tools);
       for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
-        agents[jobType] = (job) =>
-          agent(job, helpersFor(job.variables, job.instanceKey, vision)) as
-            | AgentResult
-            | Promise<AgentResult>;
+        agents[jobType] = withToolCallArgs(
+          (job) =>
+            agent(job, helpersFor(job.variables, job.instanceKey, vision)) as
+              | AgentResult
+              | Promise<AgentResult>,
+          tools,
+        );
       }
     }
 

@@ -9,6 +9,7 @@ import {
   type ReadModelBojtosSession,
 } from "@nanobpm/bojtos-kit";
 import { parseModel } from "../../framework/model";
+import { withToolCallArgs } from "../../framework/agent/activation";
 import type { ExampleHandler, HandlerHelpers } from "../../framework/types";
 import { loadReadModelWasm } from "../../framework/testing/readModelWasm";
 import { bankSupport } from "./index";
@@ -50,6 +51,7 @@ function helpersFor(variables: Record<string, unknown>): HandlerHelpers {
 
 const model = parseModel(bankSupport.bpmn);
 const ORCHESTRATOR = model.processId;
+const tools = model.agents.flatMap((a) => a.tools);
 const handlerByElementId = new Map(
   bankSupport.handlers.map((h) => [h.elementId, compile(h.source)]),
 );
@@ -86,8 +88,10 @@ function buildAgents(): Record<string, AgentHandler> {
   const agent = compile(bankSupport.scriptedAgent);
   const agents: Record<string, AgentHandler> = {};
   for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
-    agents[jobType] = (job) =>
-      agent(job, helpersFor(job.variables)) as AgentResult | Promise<AgentResult>;
+    agents[jobType] = withToolCallArgs(
+      (job) => agent(job, helpersFor(job.variables)) as AgentResult | Promise<AgentResult>,
+      tools,
+    );
   }
   return agents;
 }
@@ -103,7 +107,7 @@ function buildAgentsWithNoStructuredAnswer(): Record<string, AgentHandler> {
   const scripted = compile(bankSupport.scriptedAgent!);
   const agents: Record<string, AgentHandler> = {};
   for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
-    agents[jobType] = async (job) => {
+    agents[jobType] = withToolCallArgs(async (job) => {
       const result = (await scripted(
         job,
         helpersFor(job.variables),
@@ -113,7 +117,7 @@ function buildAgentsWithNoStructuredAnswer(): Record<string, AgentHandler> {
       return result.completionConditionFulfilled
         ? { completionConditionFulfilled: true }
         : result;
-    };
+    }, tools);
   }
   return agents;
 }
@@ -477,13 +481,13 @@ describe("bank-support — what each specialist is given, and what it refuses", 
     const scripted = compile(bankSupport.scriptedAgent!);
     const halfAnswering: Record<string, AgentHandler> = {};
     for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
-      halfAnswering[jobType] = async (job) => {
+      halfAnswering[jobType] = withToolCallArgs(async (job) => {
         const r = (await scripted(job, helpersFor(job.variables))) as AgentResult;
         if (job.elementId === "CustomerSupportOrchestrator") return r;
         return r.completionConditionFulfilled
           ? { completionConditionFulfilled: true, variables: { status: "resolved" } }
           : r;
-      };
+      }, tools);
     }
     await dispatchWorkers(session, workers, { agents: halfAnswering });
 

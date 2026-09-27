@@ -11,6 +11,7 @@ import {
 import { assertThatInstance, assertThatUserTask, byProcessId } from "@nanobpm/engine-testkit";
 import type { EngineReadModel } from "@nanobpm/engine-testkit";
 import { parseModel } from "../../framework/model";
+import { withToolCallArgs } from "../../framework/agent/activation";
 import type { ExampleHandler, HandlerHelpers } from "../../framework/types";
 import { bojtosReadModel } from "../../framework/testing/engineReadModel";
 import { loadReadModelWasm } from "../../framework/testing/readModelWasm";
@@ -81,8 +82,10 @@ function buildAgents(): Record<string, AgentHandler> {
   }
   const agent = compile(invoicePayment.scriptedAgent);
   return {
-    [model.agent.jobType]: (job) =>
-      agent(job, helpersFor(job.variables)) as AgentResult | Promise<AgentResult>,
+    [model.agent.jobType]: withToolCallArgs(
+      (job) => agent(job, helpersFor(job.variables)) as AgentResult | Promise<AgentResult>,
+      model.agent.tools,
+    ),
   };
 }
 

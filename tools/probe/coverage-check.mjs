@@ -24,6 +24,25 @@ const fixturesDir = path.join(here, "fixtures");
 const results = [];
 
 /**
+ * The version these findings were produced against. Read from the *installed*
+ * package, not the `^` range in package.json: the range admits several
+ * versions and the whole point of this harness is to say which one actually
+ * ran. Exported so docs and the audit can quote the same number.
+ */
+export function engineVersion() {
+  try {
+    return JSON.parse(
+      readFileSync(
+        path.join(here, "..", "..", "node_modules", "@nanobpm", "engine-wasm", "package.json"),
+        "utf8",
+      ),
+    ).version;
+  } catch {
+    return "(not installed)";
+  }
+}
+
+/**
  * Which check(s) prove each construct, for `tools/audit/construct-coverage.mjs`
  * to read instead of keeping its own list. A hand-maintained "verified" column
  * drifts the moment a check is renamed or deleted, and a stale one is worse
@@ -34,9 +53,10 @@ const results = [];
  * event, and one passing check must not stand for the other two.
  *
  * Some constructs are keyed `name[variant]` because the variants are different
- * engine paths with different verdicts — a call activity works on a sequence
- * flow and is silently broken as an ad-hoc tool (#1159). The audit records the
- * same qualified names, so the bare tag never collects a blanket verdict.
+ * engine paths with different verdicts — an embedded sub-process behaves one
+ * way on a sequence flow and another activated as an ad-hoc tool. The audit
+ * records the same qualified names, so the bare tag never collects a blanket
+ * verdict.
  *
  * Validated at the end of every run — a name here that no check records is a
  * hard error, not a quiet mismatch.
@@ -51,10 +71,20 @@ export const PROVEN_CONSTRUCTS = {
   "intermediateCatchEvent[message]": "message correlation",
   "intermediateCatchEvent[signal]": "signal broadcast",
   "boundaryEvent[error]": "error boundary event",
-  "boundaryEvent[message]": "message boundary event (interrupting)",
+  // Two engine paths: attached to an ordinary activity, and attached to an
+  // ad-hoc sub-process with a tool activated (broken until 0.9.3, #1155).
+  "boundaryEvent[message]": [
+    "message boundary event (interrupting)",
+    "ad-hoc sub-process: interrupting boundary cancels an activated tool",
+  ],
+  "boundaryEvent[compensate]": "compensation (boundary handler triggered by a throw)",
+  "intermediateThrowEvent[compensate]": "compensation (boundary handler triggered by a throw)",
   "multiInstanceLoopCharacteristics[parallel]": "multi-instance (parallel)",
   "callActivity[sequenceFlow]": "call activity (on a sequence flow)",
+  "callActivity[adHocTool]": "ad-hoc sub-process: call activity as a tool",
   exclusiveGateway: "exclusive gateway (conditional + default flow)",
+  inclusiveGateway: "inclusive gateway (diverging subset, converging join)",
+  sendTask: "send task (job typed by its taskDefinition)",
   "subProcess[sequenceFlow]": "embedded sub-process on a sequence flow",
   "subProcess[adHocTool]": "ad-hoc sub-process: embedded sub-process as a compound tool",
   adHocSubProcess: "ad-hoc sub-process: embedded sub-process as a compound tool",
@@ -90,28 +120,69 @@ async function runGenericFixture(name, file) {
   return report;
 }
 
-// Compensation is not modelled yet (Magikcraft/nano-bpm#886). The engine's
-// deploy-validation parity (#850) correctly *rejects* `compensateEventDefinition`
-// rather than silently degrading it — so the honest coverage assertion today is
-// "deploy is rejected with UnsupportedElement", not "it runs". Flip this back to
-// runGenericFixture once #886 lands and the fixture actually executes.
-async function runCompensationRejection() {
-  const name = "compensation (rejected at deploy — not modelled, #886)";
+/**
+ * Compensation: a boundary `compensateEventDefinition` whose associated handler
+ * is triggered by an intermediate throw. Modelled and executed from engine-wasm
+ * 0.9.3 (Magikcraft/nano-bpm#886); until then the whole definition was rejected
+ * at deploy, and this check asserted that refusal.
+ *
+ * "The handler ran" is a side effect, so the fixture carries a negative control:
+ * the same model with the throw removed, where the handler must stay unreached.
+ * Without it a parser that mistook the `bpmn:association` for a sequence flow
+ * would look identical.
+ */
+async function runCompensationFixture() {
+  const name = "compensation (boundary handler triggered by a throw)";
   const xml = readFileSync(path.join(fixturesDir, "compensation.bpmn"), "utf8");
-  const wasm = loadWasm();
-  const session = await createBojtosSession({ wasm });
-  try {
-    session.deploy(xml);
-    record(name, false, "unexpectedly deployed — compensation may now be modelled; restore runGenericFixture and update the coverage doc (#886)");
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const rejected =
-      /compensateEventDefinition/.test(msg) &&
-      /(does not model this construct|unsupported element)/i.test(msg);
-    record(name, rejected, rejected ? "deploy correctly rejected: unsupported <compensateEventDefinition>" : `deploy threw unexpectedly: ${msg.slice(0, 120)}`);
-  } finally {
-    session.free();
-  }
+
+  const run = async (processId) => {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance(processId, "{}");
+      const order = [];
+      const { snapshot } = await driveToQuiescence(
+        session,
+        {
+          "probe-book-thing": (job) => { order.push(job.elementId); return {}; },
+          "probe-undo-booking": (job) => { order.push(job.elementId); return {}; },
+        },
+        {},
+        30,
+      );
+      return { order, snapshot };
+    } finally {
+      session.free();
+    }
+  };
+
+  const triggered = await run("probe-compensation");
+  const control = await run("probe-compensation-nothrow");
+
+  // Order, not mere presence: compensation undoes work already done, so a
+  // handler that ran *before* the activity it compensates would be a different
+  // construct wearing the same shape.
+  const compensated =
+    triggered.order.join(">") === "BookThing>UndoBooking" &&
+    triggered.snapshot.takenSequenceFlows.some(
+      (f) => f.from === "ThrowCompensation" && f.to === "End",
+    ) &&
+    triggered.snapshot.completedInstances === 1 &&
+    triggered.snapshot.incidents.length === 0;
+  const controlClean =
+    control.order.join(">") === "NoThrow_BookThing" &&
+    control.snapshot.completedInstances === 1 &&
+    control.snapshot.incidents.length === 0;
+
+  record(
+    name,
+    compensated && controlClean,
+    !compensated
+      ? `the throw did not compensate: jobs ${JSON.stringify(triggered.order)}, completed ${triggered.snapshot.completedInstances}, incidents ${JSON.stringify(triggered.snapshot.incidents)}`
+      : !controlClean
+        ? `the handler is not gated on the throw: with no throw event, jobs ${JSON.stringify(control.order)}, completed ${control.snapshot.completedInstances}`
+        : "the throw ran the associated handler after the activity it compensates, and the same model without the throw never reached it",
+  );
 }
 
 async function runErrorBoundaryFixture() {
@@ -368,11 +439,11 @@ async function runReceiveTaskFixture() {
 }
 
 /**
- * Two ways to give an ad-hoc tool a follow-up step. Camunda documents chained
- * sequence flows between an ad-hoc sub-process's children as supported; this
- * engine drops them, treating an activated tool as a leaf. An embedded
- * sub-process used as one compound tool does get its inner flow driven, which
- * is the workaround every example in this repo uses.
+ * Two ways to give an ad-hoc tool a follow-up step, side by side. Camunda
+ * documents chained sequence flows between an ad-hoc sub-process's children as
+ * supported; engine-wasm dropped them until 0.9.3 (Magikcraft/nano-bpm#1154),
+ * treating an activated tool as a leaf. Both shapes now run — the embedded
+ * sub-process is no longer a workaround, just the other way of modelling it.
  */
 async function runAdHocInnerFlowFixture() {
   const xml = readFileSync(path.join(fixturesDir, "adhoc-inner-flow.bpmn"), "utf8");
@@ -410,25 +481,37 @@ async function runAdHocInnerFlowFixture() {
       50,
     );
 
-    // The recorded failure is specifically "the activated tool runs, only its
-    // outgoing flow is dropped" — so assert the tool ran too. Checking only
-    // the follow-up's absence would stay green if activation broke entirely.
+    const completedCount = (id) =>
+      snapshot.elementStats.find((e) => e.elementId === id)?.completed ?? 0;
+    // The mechanism is the *flow*, not the follow-up merely running: the agent
+    // activated `ChainedTool` only, so the only thing that can have reached
+    // `ChainedFollowUp` is its incoming sequence flow being followed. Assert
+    // that edge is in `takenSequenceFlows` and that the follow-up completed
+    // exactly once — a tool re-activated by some other route would show up as
+    // the element completing without the edge, or as more than one completion.
     const chainedRan = seen.has("ChainedTool");
-    const followUpRan = seen.has("ChainedFollowUp");
-    record(
-      "ad-hoc sub-process: chained sequence flow between tools — NOT followed",
-      chainedRan && !followUpRan,
-      !chainedRan
-        ? "the activated tool itself never ran — this check no longer measures what it claims"
-        : followUpRan
-          ? "the follow-up now runs — engine fixed; update the coverage doc and drop the sub-process workaround"
-          : "the activated tool ran, its outgoing sequence flow was dropped",
+    const edgeFollowed = snapshot.takenSequenceFlows.some(
+      (f) => f.from === "ChainedTool" && f.to === "ChainedFollowUp",
     );
-    // Both inner workers running isn't the claim — the workaround relies on
-    // the compound tool *finishing* and handing control back, so a run that
-    // ran both tasks and then stalled or incidented has to fail this.
+    const followUpCompletedOnce = completedCount("ChainedFollowUp") === 1;
     const finishedCleanly =
       snapshot.completedInstances >= 1 && snapshot.incidents.length === 0;
+    record(
+      "ad-hoc sub-process: chained sequence flow between tools",
+      chainedRan && edgeFollowed && followUpCompletedOnce && finishedCleanly,
+      !chainedRan
+        ? "the activated tool itself never ran — this check no longer measures what it claims"
+        : !edgeFollowed
+          ? "the activated tool ran but its outgoing sequence flow was dropped (#1154 is back)"
+          : !followUpCompletedOnce
+            ? `the flow was taken but the follow-up completed ${completedCount("ChainedFollowUp")} time(s)`
+            : finishedCleanly
+              ? "the activated tool's outgoing sequence flow was followed and the chained follow-up completed once"
+              : `the chain ran but the instance did not complete cleanly: ${JSON.stringify(snapshot.incidents)}`,
+    );
+    // Both inner workers running isn't the claim — a compound tool has to
+    // *finish* and hand control back, so a run that ran both tasks and then
+    // stalled or incidented has to fail this.
     const compoundDrove = seen.has("CompoundInner") && seen.has("CompoundFollowUp");
     record(
       "ad-hoc sub-process: embedded sub-process as a compound tool",
@@ -445,15 +528,16 @@ async function runAdHocInnerFlowFixture() {
 }
 
 /**
- * An interrupting boundary event on an ad-hoc sub-process fires, but leaves the
- * tool the agent had activated — and the ad-hoc `#innerInstance` — running, so
- * the instance never completes (Magikcraft/nano-bpm#1155). The same boundary on
- * a plain sub-process wrapper tears the whole scope down, which is the
- * workaround; `runAgentInterruptFixture` below asserts that half still works.
+ * An interrupting boundary event attached directly to an ad-hoc sub-process,
+ * with one of the agent's tools activated when the message arrives. Until
+ * engine-wasm 0.9.3 the boundary fired but the activated tool and the ad-hoc
+ * `#innerInstance` survived it, leaving the instance permanently Active
+ * (Magikcraft/nano-bpm#1155). It now tears the whole scope down, so the plain
+ * sub-process wrapper `agent-interrupt.bpmn` uses is no longer required.
  */
 async function runAdHocBoundaryCancelFixture() {
   const name =
-    "ad-hoc sub-process: interrupting boundary — does NOT cancel an activated tool (#1155)";
+    "ad-hoc sub-process: interrupting boundary cancels an activated tool";
   const xml = readFileSync(path.join(fixturesDir, "adhoc-boundary-cancel.bpmn"), "utf8");
   const session = await createBojtosSession({ wasm: loadWasm() });
   try {
@@ -468,36 +552,53 @@ async function runAdHocBoundaryCancelFixture() {
       activateElements: [{ elementId: "AskHuman", variables: {} }],
     });
 
-    // The bug only appears with a tool actually activated, so a silent
-    // activation regression would otherwise let this check report the gap as
-    // still present while exercising nothing.
-    const armed = session
-      .snapshot()
-      .userTasks.some((t) => t.elementId === "AskHuman" && t.state === "Created");
-    if (!armed) {
-      record(name, false, "the agent's tool never opened, so nothing was there to survive the boundary");
+    // The cancellation only means anything with a tool actually activated, so a
+    // silent activation regression would otherwise let this check report a
+    // clean teardown of nothing.
+    const armed = session.snapshot();
+    const openTask = armed.userTasks.find(
+      (t) => t.elementId === "AskHuman" && t.state === "Created",
+    );
+    const innerArmed = (armed.instances[0]?.activeElements ?? []).some(
+      (e) => (e.elementId ?? e) === "Agent#innerInstance",
+    );
+    if (!openTask || !innerArmed) {
+      record(
+        name,
+        false,
+        `nothing was there to cancel — open task: ${!!openTask}, ad-hoc inner instance active: ${innerArmed}`,
+      );
       return;
     }
 
     const snap = session.correlateMessage("probe-cancel", "PROBE-11", "{}");
-    const fired = snap.takenSequenceFlows.some((f) => f.from === "Interrupt");
     const active = (snap.instances[0]?.activeElements ?? []).map(
       (e) => e.elementId ?? e,
     );
-    // The recorded failure is specific: the boundary *does* fire, and what
-    // survives it is the inner scope. Asserting only "did not complete" would
-    // stay green if the boundary stopped firing at all, which is a different
-    // and worse bug.
-    const stillBroken =
-      fired && active.includes("AskHuman") && snap.completedInstances === 0;
+    const taskState = snap.userTasks.find((t) => t.key === openTask.key)?.state ?? "(gone)";
+    // Four separate claims, because #1155 satisfied the first two on its own:
+    // the boundary path was taken, the happy path was not, the tool the agent
+    // had opened is torn down (gone from the scope *and* reported Canceled
+    // rather than still Created), and the instance actually finished.
+    const tookBoundary = snap.takenSequenceFlows.some(
+      (f) => f.from === "Interrupt" && f.to === "EndInterrupted",
+    );
+    const tookHappyPath = snap.takenSequenceFlows.some((f) => f.from === "Agent");
+    const toolTornDown = active.length === 0 && taskState === "Canceled";
+    const completed = snap.completedInstances === 1;
+    const ok = tookBoundary && !tookHappyPath && toolTornDown && completed;
     record(
       name,
-      stillBroken,
-      !fired
-        ? "the boundary did not fire at all — this check no longer measures what it claims"
-        : stillBroken
-          ? `boundary fired but left ${JSON.stringify(active)} active; instance never completes`
-          : `behaviour changed — active after: ${JSON.stringify(active)}, completed: ${snap.completedInstances}. If it now cancels cleanly, #1155 is fixed: drop the sub-process wrapper from the event-driven agent example`,
+      ok,
+      !tookBoundary
+        ? "the boundary did not take its own outgoing flow"
+        : tookHappyPath
+          ? "the ad-hoc sub-process also completed normally — the boundary is not interrupting"
+          : !toolTornDown
+            ? `the boundary fired but the activated tool survived it: still active ${JSON.stringify(active)}, user task "${taskState}" (#1155 is back)`
+            : !completed
+              ? `torn down but ${snap.completedInstances} instance(s) completed`
+              : `the boundary cancelled the activated tool (user task "${taskState}", nothing left active) and completed through EndInterrupted`,
     );
   } finally {
     session.free();
@@ -507,11 +608,15 @@ async function runAdHocBoundaryCancelFixture() {
 /**
  * The event-driven agent's premise: one message name, subscribed to by both a
  * message start event and an interrupting boundary on the running case. Zeebe
- * correlates a published message once and prefers the open subscription; this
- * engine satisfies both, interrupting the case *and* opening a duplicate
- * (Magikcraft/nano-bpm#1156). That is what parks the example.
+ * correlates a published message once and prefers the open subscription;
+ * engine-wasm satisfied both until 0.9.3, interrupting the case *and* opening a
+ * duplicate instance from the same call (Magikcraft/nano-bpm#1156).
  */
 async function runAgentInterruptFixture() {
+  const wrapperCheck =
+    "sub-process wrapper: interrupting boundary cancels the agent inside it";
+  const correlationCheck =
+    "message start event + open boundary subscription — one publish, one correlation";
   const xml = readFileSync(path.join(fixturesDir, "agent-interrupt.bpmn"), "utf8");
   const session = await createBojtosSession({ wasm: loadWasm() });
   try {
@@ -523,18 +628,18 @@ async function runAgentInterruptFixture() {
     );
     const jobs = session.activateJobs("probe-agent", 1, 1000, "coverage-check");
     if (jobs.length === 0) {
-      record("event-driven agent fixture", false, "no agent job after the start message");
+      record(wrapperCheck, false, "no agent job after the start message");
       return;
     }
     session.completeAgentJob(jobs[0].key, {
       activateElements: [{ elementId: "AskHuman", variables: {} }],
     });
 
-    // Pin the case that is meant to be interrupted, and its open task, *before*
-    // publishing. #1156 means the same publish also opens a second instance, so
-    // looking for "an instance that completed" afterwards could find either —
-    // and a silent activation regression would leave nothing to cancel, which
-    // the wrapper would then "pass" by completing normally.
+    // Pin the case, its open task and its boundary subscription *before*
+    // publishing again. A silent activation regression would leave nothing to
+    // cancel, which the wrapper check would then "pass" by completing normally;
+    // and without the subscription the second publish would have no open
+    // subscription to prefer, so the correlation check would prove nothing.
     const armed = session.snapshot();
     const caseKey = armed.instances[0]?.key;
     const askHuman = armed.userTasks.find(
@@ -543,11 +648,25 @@ async function runAgentInterruptFixture() {
         t.instanceKey === caseKey &&
         t.state === "Created",
     );
+    const boundarySub = armed.messageSubscriptions.find(
+      (s) =>
+        s.messageName === "probe-alert" &&
+        s.correlationKey === "PROBE-12" &&
+        (s.kind ?? "").toLowerCase().includes("boundary"),
+    );
     if (!caseKey || !askHuman) {
       record(
-        "sub-process wrapper: interrupting boundary cancels the agent inside it (#1155 workaround)",
+        wrapperCheck,
         false,
         "the agent's user task never opened, so there was nothing to cancel",
+      );
+      return;
+    }
+    if (!boundarySub) {
+      record(
+        correlationCheck,
+        false,
+        `no open boundary subscription to prefer: ${JSON.stringify(armed.messageSubscriptions)}`,
       );
       return;
     }
@@ -560,34 +679,42 @@ async function runAgentInterruptFixture() {
     const fired = snap.takenSequenceFlows.some((f) => f.from === "SecondAlert");
     const interrupted = snap.instances.find((i) => i.key === caseKey);
     const active = (interrupted?.activeElements ?? []).map((e) => e.elementId ?? e);
-    // "Cancelled" by the definition `ExampleRunner.openUserTasksOf` uses: gone
-    // from the instance's active elements. Asserting on the task's own `state`
-    // would fail — the engine still reports it `Created` after the instance has
-    // completed, which is the reporting wart noted on #1155.
     const taskState =
       snap.userTasks.find((t) => t.key === askHuman.key)?.state ?? "(gone)";
     const cancelled =
       fired && interrupted?.state === "Completed" && active.length === 0;
     record(
-      "sub-process wrapper: interrupting boundary cancels the agent inside it (#1155 workaround)",
+      wrapperCheck,
       cancelled,
       !fired
         ? "the boundary did not fire — this check no longer measures what it claims"
         : cancelled
-          ? `the boundary tore down the ad-hoc sub-process and its open user task (which the engine still reports as "${taskState}" — #1155)`
+          ? `the boundary tore down the wrapped ad-hoc sub-process and its open user task (now "${taskState}")`
           : `the wrapped agent was not cancelled: instance ${interrupted?.state ?? "(gone)"}, still active ${JSON.stringify(active)}`,
     );
 
-    // One publish, two subscriptions satisfied. Counting instances is the whole
-    // assertion: the boundary firing is already covered above, so what is left
-    // to detect is the duplicate case the same call opened.
-    const duplicated = snap.instances.length === 2;
+    // One publish, one correlation. "Still one instance" alone would also be
+    // satisfied by a message start event that had stopped working altogether —
+    // the worse bug — so a third publish under a key nothing is subscribed to
+    // has to still create an instance. That is what makes this a statement
+    // about *preference* rather than about a dead start event.
+    const noDuplicate = snap.instances.length === 1;
+    const fresh = session.correlateMessage(
+      "probe-alert",
+      "PROBE-13",
+      JSON.stringify({ customerId: "PROBE-13" }),
+    );
+    const startStillLive =
+      fresh.instances.length === 2 &&
+      fresh.instances.some((i) => i.key !== caseKey && i.state === "Active");
     record(
-      "message start event + open boundary subscription — one publish hits BOTH (#1156)",
-      duplicated,
-      duplicated
-        ? "the follow-up interrupted the open case and started a second instance from the same publish"
-        : `behaviour changed — ${snap.instances.length} instance(s). If correlation now prefers the open subscription, #1156 is fixed: the event-driven agent example can be un-parked`,
+      correlationCheck,
+      noDuplicate && startStillLive,
+      !noDuplicate
+        ? `the same publish opened ${snap.instances.length} instance(s) — the boundary and the start event both consumed it (#1156 is back)`
+        : !startStillLive
+          ? `correlation preferred the open subscription, but an unmatched key no longer starts anything: ${fresh.instances.length} instance(s) after publishing PROBE-13`
+          : "the publish was consumed by the open boundary subscription alone, while an unmatched key still starts a fresh instance",
     );
   } finally {
     session.free();
@@ -876,7 +1003,9 @@ export async function runChecks() {
  * much as probing a success: without it, the day one of these starts deploying,
  * the audit keeps reporting "rejected-at-deploy" for something that now runs —
  * and an unsupported construct quietly becoming supported is exactly the kind
- * of change a coverage tool exists to notice.
+ * of change a coverage tool exists to notice. `sendTask` and `inclusiveGateway`
+ * were both on this list until engine-wasm 0.9.3; they now have execution
+ * fixtures of their own below.
  *
  * The refusal is not an "unsupported element" message: the parser doesn't model
  * these at all, so the element simply isn't there and the sequence flow into it
@@ -886,11 +1015,7 @@ export async function runChecks() {
  * green).
  */
 async function runDeployRejections() {
-  const cases = [
-    ["sendTask", "reject-send-task.bpmn", "Send"],
-    ["inclusiveGateway", "reject-inclusive-gateway.bpmn", "Fork"],
-    ["escalationEventDefinition", "reject-escalation.bpmn", "EscBoundary"],
-  ];
+  const cases = [["escalationEventDefinition", "reject-escalation.bpmn", "EscBoundary"]];
   for (const [construct, file, elementId] of cases) {
     const name = `${construct} (not modelled — rejected at deploy, #1168)`;
     const xml = readFileSync(path.join(fixturesDir, file), "utf8");
@@ -915,10 +1040,118 @@ async function runDeployRejections() {
 }
 
 /**
- * The two claims the wrapped ad-hoc fixture next door does *not* back: a call
- * activity activated directly as a tool (#1159), and an ordinary sub-process on
- * a sequence flow. Both were previously reported on that fixture's evidence,
- * which contains neither.
+ * A `bpmn:sendTask`, executed as an ordinary job from engine-wasm 0.9.3 —
+ * rejected at deploy before that (#1168). Completion alone would also be
+ * satisfied by the engine skipping the element, so the fixture puts a task
+ * after it that reads back what the send task's handler produced.
+ */
+async function runSendTaskFixture() {
+  const name = "send task (job typed by its taskDefinition)";
+  const xml = readFileSync(path.join(fixturesDir, "send-task.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], "{}");
+    let sendElement = null;
+    let observed = null;
+    const { snapshot } = await driveToQuiescence(
+      session,
+      {
+        "probe-send": (job) => {
+          sendElement = job.elementId;
+          return { deliveredTo: "broker" };
+        },
+        "probe-send-observe": (job) => {
+          observed = job.variables?.deliveredTo ?? null;
+          return {};
+        },
+      },
+      {},
+      20,
+    );
+    const ok =
+      sendElement === "Send" &&
+      observed === "broker" &&
+      snapshot.takenSequenceFlows.some((f) => f.from === "Send" && f.to === "Observe") &&
+      snapshot.completedInstances === 1 &&
+      snapshot.incidents.length === 0;
+    record(
+      name,
+      ok,
+      sendElement !== "Send"
+        ? `no job was offered for the send task (element seen: ${sendElement ?? "none"})`
+        : observed !== "broker"
+          ? `the send task ran but its output never reached instance scope (downstream read: ${JSON.stringify(observed)})`
+          : ok
+            ? "offered a job under its declared type, its output reached instance scope, and the token carried on through its outgoing flow"
+            : `completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
+ * An inclusive gateway, modelled from engine-wasm 0.9.3 — rejected at deploy
+ * before that (#1168). Three branches and a task after the join, because the
+ * construct's whole meaning is "the subset whose conditions hold, and a join
+ * that waits for exactly that subset": two branches can't tell it apart from a
+ * parallel gateway, and without a task after the join a converging gateway that
+ * let every token through would still report one completed instance.
+ */
+async function runInclusiveGatewayFixture() {
+  const name = "inclusive gateway (diverging subset, converging join)";
+  const xml = readFileSync(path.join(fixturesDir, "inclusive-gateway.bpmn"), "utf8");
+  const cases = [
+    { label: "both conditions", vars: { byCard: true, byBank: true }, expect: ["BankCheck", "CardCheck"] },
+    { label: "one condition", vars: { byCard: true, byBank: false }, expect: ["CardCheck"] },
+    { label: "neither (default flow)", vars: { byCard: false, byBank: false }, expect: ["ManualCheck"] },
+  ];
+  const summary = [];
+  for (const c of cases) {
+    const session = await createBojtosSession({ wasm: loadWasm() });
+    try {
+      session.deploy(xml);
+      session.createInstance("probe-inclusive", JSON.stringify(c.vars));
+      const ran = [];
+      let settled = 0;
+      const { snapshot } = await driveToQuiescence(
+        session,
+        {
+          "probe-inclusive-branch": (job) => { ran.push(job.elementId); return {}; },
+          "probe-inclusive-settle": () => { settled += 1; return {}; },
+        },
+        {},
+        30,
+      );
+      const took = [...ran].sort();
+      // `settled === 1` is the join's half of the claim: one token out of the
+      // converging gateway however many went in.
+      const ok =
+        took.join(",") === c.expect.join(",") &&
+        settled === 1 &&
+        snapshot.completedInstances === 1 &&
+        snapshot.incidents.length === 0;
+      if (!ok) {
+        record(
+          name,
+          false,
+          `${c.label}: ran ${JSON.stringify(took)} (expected ${JSON.stringify(c.expect)}), the join fired ${settled} time(s), completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
+        );
+        return;
+      }
+      summary.push(`${c.label} → ${took.join(" + ")}`);
+    } finally {
+      session.free();
+    }
+  }
+  record(name, true, `${summary.join(", ")}; the join fired exactly once in each`);
+}
+
+/**
+ * A call activity activated directly as an ad-hoc tool (#1159), and an ordinary
+ * sub-process on a sequence flow. Both were previously reported on the wrapped
+ * ad-hoc fixture's evidence, which contains neither.
  */
 async function runAdHocCallActivityFixture() {
   const xml = readFileSync(path.join(fixturesDir, "adhoc-call-activity.bpmn"), "utf8");
@@ -929,10 +1162,20 @@ async function runAdHocCallActivityFixture() {
       session.deploy(xml);
       session.createInstance("probe-adhoc-call", "{}");
       let childRan = false;
+      let mappedBack = null;
       let turn = 0;
       const { snapshot } = await driveToQuiescence(
         session,
-        { "probe-adhoc-child-work": () => { childRan = true; return {}; } },
+        {
+          "probe-adhoc-child-work": () => {
+            childRan = true;
+            return { childVerdict: "answered" };
+          },
+          "probe-adhoc-after-host": (job) => {
+            mappedBack = job.variables?.toolVerdict ?? null;
+            return {};
+          },
+        },
         {
           "io.camunda.agenticai:aiagent-job-worker:1": () => {
             turn += 1;
@@ -943,18 +1186,34 @@ async function runAdHocCallActivityFixture() {
         },
         40,
       );
-      // The recorded failure: the child never starts, and nothing complains.
-      const childInstances = snapshot.instances.filter(
-        (i) => i.processId === "probe-adhoc-child",
-      ).length;
-      const stillBroken =
-        !childRan && childInstances === 0 && snapshot.incidents.length === 0;
+      // #1159's signature was a *shaped but empty* answer — the child never
+      // started, yet the output mapping still evaluated, so the agent read
+      // nulls as if a specialist had replied. Each of the three links in that
+      // chain is asserted separately: the child instance exists and finished,
+      // its job ran, and the value the job produced reached the caller's scope
+      // under the mapped name.
+      const child = snapshot.instances.filter((i) => i.processId === "probe-adhoc-child");
+      const ok =
+        childRan &&
+        child.length === 1 &&
+        child[0].state === "Completed" &&
+        mappedBack === "answered" &&
+        snapshot.instances.some(
+          (i) => i.processId === "probe-adhoc-call" && i.state === "Completed",
+        ) &&
+        snapshot.incidents.length === 0;
       record(
-        "ad-hoc sub-process: call activity as a tool — child never starts (#1159)",
-        stillBroken,
-        stillBroken
-          ? "the tool was activated, no child instance was created, and no incident was raised"
-          : `behaviour changed — child job ran: ${childRan}, child instances: ${childInstances}, incidents ${JSON.stringify(snapshot.incidents)}; re-check the engine and update the coverage doc`,
+        "ad-hoc sub-process: call activity as a tool",
+        ok,
+        child.length !== 1
+          ? `${child.length} child instance(s) — the activated call activity did not instantiate its called process exactly once (#1159 is back)`
+          : !childRan
+            ? "a child instance was created but its job never ran"
+            : mappedBack !== "answered"
+              ? `the child ran but its result did not map back: the caller read ${JSON.stringify(mappedBack)}`
+              : ok
+                ? "the activated call activity started its child, the child's job ran, and its result mapped back into the caller's scope"
+                : `completed ${snapshot.completedInstances}, incidents ${JSON.stringify(snapshot.incidents)}`,
       );
     } finally {
       session.free();
@@ -1013,15 +1272,17 @@ async function runSignalStartFixture() {
 }
 
 async function main() {
-  console.log(`Engine coverage check — @nanobpm/engine-wasm (see package.json for the pinned version)\n`);
+  console.log(`Engine coverage check — @nanobpm/engine-wasm ${engineVersion()}\n`);
   checkFixtureIds();
   await runGenericFixture("timer (timeDuration)", "timer.bpmn");
   await runGenericFixture("message correlation", "message.bpmn");
   await runGenericFixture("signal broadcast", "signal.bpmn");
-  await runCompensationRejection();
+  await runCompensationFixture();
   await runMultiInstanceFixture();
   await runErrorBoundaryFixture();
   await runExclusiveGatewayFixture();
+  await runInclusiveGatewayFixture();
+  await runSendTaskFixture();
   await runDmnFixture();
   await runMessageStartFixture();
   await runMessageBoundaryFixture();

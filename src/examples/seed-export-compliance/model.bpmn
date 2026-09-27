@@ -107,11 +107,11 @@
       <bpmn:scriptTask id="RecordComplianceDecision" name="Record compliance decision">
         <bpmn:documentation>Captures the agent's clearance decision as a process variable</bpmn:documentation>
         <bpmn:extensionElements>
-          <zeebe:script expression="=decision" resultVariable="decision" />
+          <zeebe:script expression="=policyDecision" resultVariable="policyDecision" />
           <zeebe:ioMapping>
             <zeebe:input source="=fromAi(toolCall.decision, &#34;The clearance decision: &#39;cleared&#39; if the compliance score is even, &#39;flagged-for-review&#39; if it&#39;s odd.&#34;, &#34;string&#34;)" target="decision" />
-            <zeebe:output source="=decision" target="decision" />
-            <zeebe:output source="=decision" target="toolCallResult" />
+            <zeebe:output source="=policyDecision" target="decision" />
+            <zeebe:output source="=policyDecision" target="toolCallResult" />
           </zeebe:ioMapping>
         </bpmn:extensionElements>
       </bpmn:scriptTask>

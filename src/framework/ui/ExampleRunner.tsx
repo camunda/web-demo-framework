@@ -24,6 +24,7 @@ import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
+import { withToolCallArgs } from "../agent/activation";
 import { useExampleRun } from "../useExampleRun";
 import { useEmbedReadyReporter } from "../embedHeight";
 import { describeRound, newSequenceFlows } from "../stepSummary";
@@ -939,6 +940,11 @@ export function ExampleRunner({
           };
         }
       }
+      // Whichever brain produced it, an activation still has to carry the
+      // `toolCall` context the model's `fromAi(...)` inputs read.
+      const tools = model.agents.flatMap((a) => a.tools);
+      for (const [jobType, handler] of Object.entries(agents))
+        agents[jobType] = withToolCallArgs(handler, tools);
     }
 
     setLog([]);

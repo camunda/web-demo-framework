@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  A `bpmn:callActivity` activated *directly* as an ad-hoc tool — the broken use
-  in Magikcraft/nano-bpm#1159. Distinct from the wrapped form in
-  adhoc-inner-flow.bpmn, which is the workaround and works: the audit reports
-  these as different variants, so each needs its own evidence.
+  A `bpmn:callActivity` activated *directly* as an ad-hoc tool. Broken in
+  engine-wasm 0.7.x (Magikcraft/nano-bpm#1159: no child instance, no job, no
+  incident, and the output mapping evaluated anyway so the agent read a
+  well-shaped answer nobody produced); executed from 0.9.3.
+
+  `DirectCallTool` carries an output mapping and `AfterHost` reads the result
+  back out, so the check can assert the child's answer actually travelled —
+  #1159's signature was a *shaped but empty* result, which "the tool completed"
+  alone would not have caught.
 
   Plus an ordinary sequence-flow sub-process, which nothing else here proves.
 -->
@@ -19,11 +24,19 @@
       <bpmn:callActivity id="DirectCallTool" name="Delegate directly">
         <bpmn:extensionElements>
           <zeebe:calledElement processId="probe-adhoc-child" propagateAllChildVariables="true" />
+          <zeebe:ioMapping>
+            <zeebe:output source="=childVerdict" target="toolVerdict" />
+          </zeebe:ioMapping>
         </bpmn:extensionElements>
       </bpmn:callActivity>
     </bpmn:adHocSubProcess>
-    <bpmn:sequenceFlow id="af2" sourceRef="Host" targetRef="AE" />
-    <bpmn:endEvent id="AE"><bpmn:incoming>af2</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="af2" sourceRef="Host" targetRef="AfterHost" />
+    <bpmn:serviceTask id="AfterHost" name="Read the tool's answer back">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-adhoc-after-host" /></bpmn:extensionElements>
+      <bpmn:incoming>af2</bpmn:incoming><bpmn:outgoing>af3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="af3" sourceRef="AfterHost" targetRef="AE" />
+    <bpmn:endEvent id="AE"><bpmn:incoming>af3</bpmn:incoming></bpmn:endEvent>
   </bpmn:process>
 
   <bpmn:process id="probe-adhoc-child" isExecutable="true">

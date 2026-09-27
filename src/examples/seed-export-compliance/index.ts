@@ -105,10 +105,11 @@ const SCRIPTED_AGENT = `async (job) => {
   }
 
   // Turn 4 — recommend a decision. (A live model recommends here instead; the
-  // handler below is what actually decides.)
+  // handler below is what actually decides.) The recommendation rides under
+  // the tool's own declared argument name, which is what a live brain supplies.
   if (!v.decision) {
     return {
-      variables: { decisionRecommendation: Number(v.complianceScore) % 2 === 0 ? "cleared" : "flagged-for-review" },
+      variables: { decision: Number(v.complianceScore) % 2 === 0 ? "cleared" : "flagged-for-review" },
       activateElements: [{ elementId: "RecordComplianceDecision" }],
     };
   }
@@ -180,15 +181,21 @@ const RECORD_COMPLIANCE_DECISION = `async (job, { text, trace }) => {
   // The script task inside the agent — and the place where policy beats the
   // model. The score's parity decides; a recommendation that disagrees is
   // overridden and the disagreement is logged.
+  //
+  // It answers under 'policyDecision', not 'decision': 'decision' is this
+  // element's own fromAi argument, so a value returned under that name is
+  // discarded in favour of what the model supplied (docs/engine-coverage.md).
+  // The element's output mapping is what carries 'policyDecision' out as the
+  // process's 'decision'.
   const score = Number(job.variables.complianceScore);
   const decision = score % 2 === 0 ? "cleared" : "flagged-for-review";
-  const recommended = text("decisionRecommendation", "");
+  const recommended = text("decision", "");
 
   if (recommended && recommended !== decision) {
     trace("model recommended '" + recommended + "' — policy says '" + decision + "'; policy wins");
   }
 
-  return { decision: decision, toolCallResult: decision };
+  return { policyDecision: decision, toolCallResult: decision };
 }`;
 
 const NOTIFY_EXPORT_TEAM = `async (job, { sleep }) => {
