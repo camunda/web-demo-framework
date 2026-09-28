@@ -1098,7 +1098,12 @@ body {
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  /* Half the track's single-row height, not 999px. At one row that is still a
+     capsule; wrapped, it is a rounded block instead of a lozenge stretched
+     around four rows. Four ~40-character scenario labels need about 1250px,
+     so any embed narrower than that wraps — the multi-row state is the normal
+     one here, not the exception. The pills stay 999px. */
+  border-radius: 20px;
   background: var(--surface-3);
   max-width: 100%;
   flex-wrap: wrap;
