@@ -5,6 +5,8 @@ import { messageStartFixture } from "../testing/messageStartFixture";
 import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
 import { seedExportCompliance } from "../../examples/seed-export-compliance";
+import { creditLineIncrease } from "../../examples/credit-line-increase";
+import { expenseDecision } from "../../examples/expense-decision";
 
 // Stands in for driver.js, whose every layout pass is scheduled on
 // `requestAnimationFrame` — so what it draws can't be asserted here anyway.
@@ -65,6 +67,29 @@ describe("ExampleRunner — a run with no human in it", () => {
 
     expect(app.status()).toBe("Completed");
     expect(app.trace().at(-1)).toContain("process instance completed");
+  }, 30_000);
+
+  /**
+   * #15's acceptance criterion: a reader must see which DMN rule matched. The
+   * engine evaluates the table (drive.test.ts / coverage-check prove that);
+   * this is the part that only the mounted runner can show — that the matched
+   * output reaches the inspector.
+   */
+  it("surfaces the matched DMN decision in the run inspector", async () => {
+    const app = await renderExample(expenseDecision);
+    await app.run();
+
+    const decisions = document.querySelector(".decisions");
+    expect(decisions).not.toBeNull();
+    // The clear-approve default: the table decides it and the agent never runs.
+    expect(decisions!.textContent).toContain("Evaluate expense policy");
+    expect(decisions!.textContent).toContain("approved");
+  }, 30_000);
+
+  it("shows no decisions panel for a model without a business rule task", async () => {
+    const app = await renderExample(orderProcess);
+    await app.run();
+    expect(document.querySelector(".decisions")).toBeNull();
   }, 30_000);
 
   /**
@@ -130,8 +155,31 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     expect(screen.getByRole("button", { name: "Complete task" })).toBeDisabled();
   }, 40_000);
 
-  it("does not accuse the agent of giving up while it is still asking", async () => {
-    // `invoicePayment` declares no `requiredTools`, so the alert could never
+  /**
+   * Run and Step *resume* an open run, and the drive loop breaks the moment it
+   * sees an open user task — so while the form is up they can only re-enter
+   * the loop and break again. Left enabled, Run read as available, did
+   * nothing, and appended a second "waiting for a human" line for doing it.
+   */
+  it("offers no Run or Step while the form is the only thing that can advance", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+
+    expect(app.status()).toBe("Waiting for a human");
+    expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Step/ })).toBeDisabled();
+    // Reset is the way out of a parked run, so it must stay live.
+    expect(screen.getByRole("button", { name: /Reset/ })).toBeEnabled();
+
+    // And completing the form still hands the run back — the guard must not
+    // have stranded it.
+    await app.completeUserTask(() => {
+      fireEvent.click(screen.getByText("Approve release"));
+    });
+    expect(app.trace().join("\n")).toContain("Release payment");
+  }, 40_000);
+
+  it("does not accuse the agent of giving up while it is still asking", async () => {    // `invoicePayment` declares no `requiredTools`, so the alert could never
     // fire for it and asserting its absence would prove nothing. Mark a tool
     // the clean-match scenario legitimately skips — a USD invoice needs no
     // currency conversion — so the alert *would* show if the mid-loop
@@ -211,6 +259,67 @@ describe("ExampleRunner — a process only a message can start", () => {
     expect(escalated).toContain("escalated to tier-2");
     expect(escalated).not.toContain("alert-withdrawn");
   }, 40_000);
+});
+
+describe("ExampleRunner — a timer racing an event the reader was offered", () => {
+  /**
+   * An SLA timer bounding a wait for an external reply is a race, and the
+   * engine reports the settled round as `"timers"` whenever one is due — so a
+   * drive loop that fast-forwards on that reason alone decides the race every
+   * run, and the reply can never arrive in time to be sent. That made three of
+   * `credit-line-increase`'s four scenarios unreachable in the runner while
+   * its engine test, which correlates directly, stayed green.
+   */
+  it("parks on the race instead of fast-forwarding the clock", async () => {
+    const app = await renderExample(creditLineIncrease);
+    await app.run();
+
+    const trace = app.trace().join("\n");
+    expect(trace).toContain("or send the event below");
+    // The mechanism, not the outcome: "the timer didn't fire" would also be
+    // satisfied by the run never reaching the wait at all.
+    expect(trace).toContain("now waiting for the reply");
+    expect(trace).not.toContain("the clock advanced");
+    expect(app.status()).toBe("Paused");
+  }, 30_000);
+
+  it("lets the reply through, and still lapses into the timeout if it never comes", async () => {
+    const app = await renderExample(creditLineIncrease);
+    await app.run();
+
+    fireEvent.click(screen.getByRole("button", { name: "📨 The credit bureau replies" }));
+    await app.settle();
+
+    const trace = app.trace().join("\n");
+    expect(trace).toContain('published "bureau-report"');
+    expect(trace).toContain("bureau replied");
+    // The reply beat the SLA, so the timeout note must never have been written.
+    expect(trace).not.toContain("No credit bureau reply within the SLA window");
+  }, 30_000);
+
+  /**
+   * The other side of the race, and the reason it can't just fast-forward: the
+   * documented "leave it and let the SLA lapse" outcome has to be reachable
+   * from the UI. With only the reply button it wasn't — pressing Run re-parked
+   * on the same guard — so the escalation scenario was browser-unreachable.
+   */
+  it("lets the reader lapse the SLA into the escalation path", async () => {
+    const app = await renderExample(creditLineIncrease);
+    await app.run();
+
+    fireEvent.click(screen.getByRole("button", { name: "⏳ Let the timer lapse" }));
+    await app.settle();
+
+    const trace = app.trace().join("\n");
+    expect(trace).toContain("the clock advanced");
+    // The timeout reports back into the agent's loop, which then escalates to a
+    // human — the outcome the "bureau never answers" scenario promises.
+    expect(trace).toContain("No credit bureau reply within the SLA window");
+    expect(app.status()).toBe("Waiting for a human");
+    expect(app.showsOutsideDiagram("Escalate to underwriting ops")).toBe(true);
+    // And the reply button is gone — the race is resolved the other way now.
+    expect(screen.queryByRole("button", { name: "📨 The credit bureau replies" })).toBeNull();
+  }, 30_000);
 });
 
 describe("ExampleRunner — when the agent really does give up early", () => {

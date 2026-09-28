@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A `bpmn:sendTask`, which engine-wasm 0.9.3 executes as an ordinary job typed
+  by its `zeebe:taskDefinition`. 0.7.x rejected it at deploy
+  (Magikcraft/nano-bpm#1168), which is what this fixture used to assert.
+
+  `Observe` exists so the check can assert the send task's *output* reached
+  instance scope. Completion alone would also be satisfied by the engine
+  skipping the element, which is the shape a silently-unmodelled construct
+  fails in.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_SendTask" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-send-task" isExecutable="true">
+    <bpmn:startEvent id="RS"><bpmn:outgoing>rf1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="rf1" sourceRef="RS" targetRef="Send" />
+    <bpmn:sendTask id="Send" name="Send something">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-send" /></bpmn:extensionElements>
+      <bpmn:incoming>rf1</bpmn:incoming><bpmn:outgoing>rf2</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:sequenceFlow id="rf2" sourceRef="Send" targetRef="Observe" />
+    <bpmn:serviceTask id="Observe" name="Observe what the send task produced">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-send-observe" /></bpmn:extensionElements>
+      <bpmn:incoming>rf2</bpmn:incoming><bpmn:outgoing>rf3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="rf3" sourceRef="Observe" targetRef="RE" />
+    <bpmn:endEvent id="RE"><bpmn:incoming>rf3</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

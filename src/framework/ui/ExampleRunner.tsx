@@ -24,6 +24,8 @@ import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
+import { withToolCallArgs } from "../agent/activation";
+import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { useEmbedReadyReporter } from "../embedHeight";
 import { describeRound, newSequenceFlows } from "../stepSummary";
@@ -310,7 +312,7 @@ export function ExampleRunner({
   // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
   // not `example.bpmn` directly — so what runs and what's shown is exactly
   // what the diagnostics above are about.
-  const run = useExampleRun({ bpmn: draft.resolvedBpmn });
+  const run = useExampleRun({ bpmn: draft.resolvedBpmn, decisions: example.decisions });
 
   // Tell an embedding host the runner is actually usable — the engine has
   // loaded and the model deployed (phase "ready"), not merely that the shell
@@ -329,6 +331,9 @@ export function ExampleRunner({
   // it holds, which would otherwise highlight a closed summary. Opening it
   // whenever a tour starts is what keeps that step worth reading.
   const [varsOpen, setVarsOpen] = usePersistentDisclosure("variables", false);
+  // Open by default: a decision is the point of a business-rule example, and
+  // it only shows when one actually evaluated (see `decisionInstances` below).
+  const [decisionsOpen, setDecisionsOpen] = usePersistentDisclosure("decisions", true);
   // Held apart from the persisted preference on purpose, exactly as
   // `forcedStartOpen` is: the tour opening this panel is tour state, not a
   // choice the reader made, and writing it through would leave every later
@@ -470,6 +475,21 @@ export function ExampleRunner({
     }
     return (elementId: string) => map.get(elementId) ?? elementId;
   }, [model]);
+
+  // Business rule tasks aren't job-bearing, so `parseModel` doesn't carry
+  // them and `elementLabels` doesn't know their names. The decisions panel
+  // wants the friendly name the diagram shows, so read it straight off the
+  // resolved XML — cheap, and scoped to the one construct that needs it.
+  const decisionLabelFor = useMemo(() => {
+    const map = new Map<string, string>();
+    const doc = new DOMParser().parseFromString(draft.resolvedBpmn, "application/xml");
+    const BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    for (const el of Array.from(doc.getElementsByTagNameNS(BPMN_NS, "businessRuleTask"))) {
+      const id = el.getAttribute("id");
+      if (id) map.set(id, el.getAttribute("name") || id);
+    }
+    return (elementId: string) => map.get(elementId) ?? elementLabels(elementId);
+  }, [draft.resolvedBpmn, elementLabels]);
 
   /** Append a trace line — or update in place when it carries a `key`. */
   const trace = useCallback((entry: TraceEntry) => {
@@ -739,6 +759,24 @@ export function ExampleRunner({
           // hand (see `resolveManualControl` below), just applied
           // automatically.
           if (round.reason === "timers") {
+            // …unless the timer is racing an event the reader has been offered
+            // a button for. An SLA timer bounding a wait for an external reply
+            // is exactly that race, and the engine reports the round as
+            // "timers" whenever one is due — so fast-forwarding here would
+            // decide it every run, and the reply would never arrive in time to
+            // be sent. Park instead and let the reader answer or let it lapse.
+            const offered = matchReadyMessageEvents(
+              example.messageEvents,
+              snap,
+              model.boundaryEvents,
+            );
+            if (offered.length > 0) {
+              trace({
+                kind: "step",
+                text: `⏳ parked — ${(Math.max(snap.timers.reduce((min, t) => Math.min(min, t.dueInMs), Infinity), 0) / 1000).toFixed(1)}s left on the clock, or send the event below`,
+              });
+              break;
+            }
             const due = snap.timers.reduce(
               (min, t) => Math.min(min, t.dueInMs),
               Infinity,
@@ -783,7 +821,7 @@ export function ExampleRunner({
         });
       return snap;
     },
-    [run, trace],
+    [run, trace, example.messageEvents, model.boundaryEvents],
   );
 
   /**
@@ -939,6 +977,11 @@ export function ExampleRunner({
           };
         }
       }
+      // Whichever brain produced it, an activation still has to carry the
+      // `toolCall` context the model's `fromAi(...)` inputs read.
+      const tools = model.agents.flatMap((a) => a.tools);
+      for (const [jobType, handler] of Object.entries(agents))
+        agents[jobType] = withToolCallArgs(handler, tools);
     }
 
     setLog([]);
@@ -1097,7 +1140,7 @@ export function ExampleRunner({
     // but re-check here too: `draft.hasErrors` is the single source of truth
     // for "safe to run", not just a button prop. Same for the start form's
     // validity — the button being disabled isn't the actual guarantee.
-    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors)
+    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors || openUserTask)
       return;
 
     // Set the in-flight lock *before* the first `await` (matching
@@ -1136,19 +1179,30 @@ export function ExampleRunner({
         setRunning(false);
       }
     }
-  }, [run, stepping, draft.hasErrors, canResume, beginRun, driveLoop]);
+  }, [run, stepping, draft.hasErrors, canResume, openUserTask, beginRun, driveLoop]);
 
   // Same conditions as the Run button's `disabled`, deliberately duplicated
   // from one place rather than inverted by hand at each call site.
+  //
+  // `openUserTask` is in here because Run and Step *resume* an open run rather
+  // than restarting it, and the drive loop breaks the moment it sees an open
+  // user task. Pressing either while the form is up therefore re-entered the
+  // loop, broke on the same condition, and appended a second copy of "waiting
+  // for a human" — a button that reads as available, does nothing, and litters
+  // the trace for doing it. Completing the form is what resumes the run, and
+  // it is on screen directly below.
   const canRun =
     run.phase === "ready" &&
     !running &&
     !stepping &&
     !draft.hasErrors &&
-    !needsStartForm;
+    !needsStartForm &&
+    !openUserTask;
 
   useAutostart({
-    enabled: autostart,
+    // The example has a veto: one whose default scenario ends at a human task
+    // would otherwise open already parked on a form (see `ExampleDef.autostart`).
+    enabled: autostart && example.autostart !== false,
     ready: canRun,
     targetRef: runnerRef,
     start: () => void start(),
@@ -1166,7 +1220,8 @@ export function ExampleRunner({
       run.phase !== "ready" ||
       runningRef.current ||
       stepping ||
-      draft.hasErrors
+      draft.hasErrors ||
+      openUserTask
     )
       return;
 
@@ -1233,6 +1288,7 @@ export function ExampleRunner({
     stepping,
     draft.hasErrors,
     canResume,
+    openUserTask,
     beginRun,
     trace,
     elementLabels,
@@ -1273,26 +1329,27 @@ export function ExampleRunner({
    * to reach one — and it has to work while the process is parked on a human
    * task, which is exactly when the interesting interrupts arrive.
    */
-  const readyMessageEvents = useMemo(() => {
-    const declared = example.messageEvents;
-    if (!declared?.length || !run.snapshot) return [];
-    return declared.flatMap((event) => {
-      // A boundary event's subscription is reported against the activity it is
-      // attached to, so an example names the event and this resolves it. Match
-      // the message name too: one activity can carry several message
-      // boundaries, and the host alone would bind every button to whichever
-      // subscription came first.
-      const spec = model.boundaryEvents.find((b) => b.elementId === event.elementId);
-      const sub = run.snapshot!.messageSubscriptions.find((m) =>
-        m.elementId === event.elementId
-          ? true
-          : !!spec &&
-            m.elementId === spec.attachedTo &&
-            (!spec.messageName || m.messageName === spec.messageName),
-      );
-      return sub ? [{ event, sub }] : [];
-    });
-  }, [example.messageEvents, run.snapshot, model.boundaryEvents]);
+  const readyMessageEvents = useMemo(
+    () => matchReadyMessageEvents(example.messageEvents, run.snapshot, model.boundaryEvents),
+    [example.messageEvents, run.snapshot, model.boundaryEvents],
+  );
+
+  /**
+   * The timer the drive loop is deliberately *not* advancing because an
+   * offered event is racing it (see `driveLoop`'s `timers` branch). Without a
+   * way to fire it, the "leave it and let the SLA lapse" outcome an example
+   * like `credit-line-increase` documents is unreachable in the browser —
+   * pressing Run just re-enters the same guard and parks again. Present only
+   * while parked, and only when both a timer and an offered event are open, so
+   * a lone timer (which the loop advances itself) never grows a button.
+   */
+  const racingTimer = useMemo(() => {
+    if (running || stepping) return null;
+    if (readyMessageEvents.length === 0) return null;
+    const timers = run.snapshot?.timers ?? [];
+    if (timers.length === 0) return null;
+    return timers.reduce((min, t) => (t.dueInMs < min.dueInMs ? t : min));
+  }, [running, stepping, readyMessageEvents, run.snapshot]);
 
   /** Publish one, then keep driving — the interrupt is mid-run, not a restart. */
   const publishMessageEvent = useCallback(
@@ -1338,6 +1395,32 @@ export function ExampleRunner({
     },
     [readyMessageEvents, run, trace, driveLoop],
   );
+
+  /** Advance the clock past the raced timer, then keep driving — the reader's
+   *  alternative to answering the event ({@link racingTimer}). */
+  const lapseRacingTimer = useCallback(async () => {
+    if (runningRef.current || !racingTimer) return;
+    const seq = ++runSeqRef.current;
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      const snap = run.advanceTime(Math.max(racingTimer.dueInMs, 0) + 1);
+      if (!snap) {
+        trace({ kind: "error", text: "▶ advancing the clock failed" });
+        return;
+      }
+      trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
+      const vars = displayableVars(snap, rootInstanceKeyRef.current);
+      if (vars) setDisplayVars({ ...vars });
+      await new Promise((r) => setTimeout(r, BEAT));
+      await driveLoop(workersRef.current, agentsRef.current, snap, seq);
+    } finally {
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setRunning(false);
+      }
+    }
+  }, [racingTimer, run, trace, driveLoop]);
 
   const submitUserTask = useCallback(async () => {
     if (!openUserTask || runningRef.current) return;
@@ -1594,13 +1677,8 @@ export function ExampleRunner({
           // `beginRun` starts a fresh instance and this takes its first round.
           // Disabling it here stranded the embed, which autostarts: the reader
           // arrives after the run has finished, so Step was never once usable.
-          disabled={
-            run.phase !== "ready" ||
-            running ||
-            stepping ||
-            draft.hasErrors ||
-            needsStartForm
-          }
+          // (`canRun` tests the open user task, not completion.)
+          disabled={!canRun}
         >
           ⏭ Step
         </Button>
@@ -1780,6 +1858,17 @@ export function ExampleRunner({
                     {event.label}
                   </Button>
                 ))}
+                {racingTimer && (
+                  // The other side of the race: don't answer, let the timer
+                  // fire. Only rendered while it's actually holding one back.
+                  <Button
+                    variant="secondary"
+                    onClick={() => void lapseRacingTimer()}
+                    disabled={running || stepping}
+                  >
+                    ⏳ Let the timer lapse
+                  </Button>
+                )}
               </div>
             </CollapsibleCard>
           )}
@@ -1819,6 +1908,29 @@ export function ExampleRunner({
                   )}
                 </pre>
               </details>
+            }
+            decisions={
+              // Only present for a model with a business rule task, and only
+              // once one has evaluated — so #15's "the reader sees which rule
+              // matched" is met without adding anything to a non-DMN run.
+              (run.snapshot?.decisionInstances?.length ?? 0) > 0 && (
+                <details
+                  className="vars-block"
+                  open={decisionsOpen}
+                  onToggle={(e) => setDecisionsOpen(e.currentTarget.open)}
+                >
+                  <summary className="vars-head">Decisions</summary>
+                  <ul className="decisions">
+                    {run.snapshot!.decisionInstances.map((d, i) => (
+                      <li key={`${d.elementId}-${i}`}>
+                        <code>{decisionLabelFor(d.elementId)}</code>
+                        {" → "}
+                        <strong>{safeStringify(d.output)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )
             }
           />
         </div>

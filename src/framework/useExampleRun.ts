@@ -113,14 +113,31 @@ export interface ExampleRunControls {
  *   and recreates the whole bojtos session whenever `bpmn` changes identity,
  *   which would otherwise redeploy/reset on every character typed and wipe
  *   the previous run's state mid-edit.
+ * @param decisions DMN resources to register before every deploy of `bpmn`,
+ *   so a `bpmn:businessRuleTask` resolves. Re-registered on `reset`/`redeploy`
+ *   too, since `session.reset()` clears the deployment along with the run.
  */
-export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
+export function useExampleRun({
+  bpmn,
+  decisions,
+}: {
+  bpmn: string;
+  decisions?: Record<string, string>;
+}): ExampleRunControls {
   const sessionRef = useRef<BojtosSession | null>(null);
   const [phase, setPhase] = useState<EnginePhase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [processIds, setProcessIds] = useState<string[]>([]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const lastAppliedRef = useRef(bpmn);
+  /**
+   * Held in a ref so `deployInto` stays referentially stable: every example
+   * passes a fresh object literal for `decisions` on each render, and taking
+   * it as a dependency would recreate `reset`/`redeploy` — and through them
+   * the whole session effect — on every one.
+   */
+  const decisionsRef = useRef(decisions);
+  decisionsRef.current = decisions;
   /**
    * Monotonic generation token, bumped whenever `reset()`/`redeploy()` reuse
    * the *same* `BojtosSession` object with a fresh instance (`session.reset()`
@@ -170,17 +187,25 @@ export function useExampleRun({ bpmn }: { bpmn: string }): ExampleRunControls {
     [],
   );
 
-  const deployInto = useCallback((session: BojtosSession, xml: string) => {
-    const res = session.deploy(xml);
-    lastAppliedRef.current = xml;
-    // A fresh deploy (mount, Reset, or Redeploy) starts a new run — drop any
-    // prior run's held image bytes so they can't outlive their instance.
-    runImagesRef.current.clear();
-    setProcessIds(res.processIds);
-    setSnapshot(null);
-    setError(null);
-    return res.processIds;
-  }, []);
+  const deployInto = useCallback(
+    (session: BojtosSession, xml: string) => {
+      // Decisions first: a business rule task resolves its decision at deploy
+      // time, and `session.reset()` clears registrations along with the run,
+      // so this has to run on every deploy rather than once at mount.
+      for (const dmn of Object.values(decisionsRef.current ?? {}))
+        session.deployDecision(dmn);
+      const res = session.deploy(xml);
+      lastAppliedRef.current = xml;
+      // A fresh deploy (mount, Reset, or Redeploy) starts a new run — drop any
+      // prior run's held image bytes so they can't outlive their instance.
+      runImagesRef.current.clear();
+      setProcessIds(res.processIds);
+      setSnapshot(null);
+      setError(null);
+      return res.processIds;
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;

@@ -228,6 +228,8 @@ export const plateRecognition: ExampleDef = {
     "plate-recognition-manual": manualForm,
   },
   seed: { country: "auto" },
+  // Ends on the confirm/correct form — see `ExampleDef.autostart`.
+  autostart: false,
   imageInput: {
     label:
       "Pick a seed photo (its plate is known, so the scripted reader works offline) or upload your own — a live in-browser model reads a photo it has never seen.",

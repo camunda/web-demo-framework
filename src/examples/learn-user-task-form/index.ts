@@ -40,6 +40,9 @@ const learnUserTaskForm: ExampleDef = {
     requester: "Priya Shah",
     details: "Approve access to the shared design-review workspace.",
   },
+  // Parking on the form is this page's whole subject, but it is still a form
+  // sprung on an arriving reader — see `ExampleDef.autostart`.
+  autostart: false,
   handlers: []
 };
 

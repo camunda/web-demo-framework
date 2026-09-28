@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Rejected at deploy (Magikcraft/nano-bpm#1168) — see reject-send-task.bpmn. -->
+<!--
+  Still rejected at deploy on engine-wasm 0.9.3 (Magikcraft/nano-bpm#1168) — the
+  last of the three constructs that issue covered. `sendTask` and
+  `inclusiveGateway` now run; see send-task.bpmn and inclusive-gateway.bpmn.
+-->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_RejectEscalation" targetNamespace="http://bpmn.io/schema/bpmn">
   <bpmn:escalation id="Escalation_Probe" name="probe-escalation" escalationCode="PROBE_ESC" />
   <bpmn:process id="probe-reject-escalation" isExecutable="true">

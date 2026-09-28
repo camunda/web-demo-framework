@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  An inclusive gateway diverging into three branches and converging again.
+  engine-wasm 0.9.3 models it; 0.7.x rejected it at deploy
+  (Magikcraft/nano-bpm#1168), which is what this fixture used to assert.
+
+  Three branches, not two, and a `Settle` task after the join: the whole point
+  of an inclusive gateway is that the *subset* whose conditions hold is taken
+  and the join waits for exactly that subset. A two-branch model can't tell an
+  inclusive join apart from a parallel one, and without a task after the join
+  a converging gateway that let every token through would still look like a
+  single completion.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="Definitions_Inclusive" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-inclusive" isExecutable="true">
+    <bpmn:startEvent id="IS"><bpmn:outgoing>if1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:sequenceFlow id="if1" sourceRef="IS" targetRef="Fork" />
+    <bpmn:inclusiveGateway id="Fork" default="ToManual">
+      <bpmn:incoming>if1</bpmn:incoming>
+      <bpmn:outgoing>ToCard</bpmn:outgoing>
+      <bpmn:outgoing>ToBank</bpmn:outgoing>
+      <bpmn:outgoing>ToManual</bpmn:outgoing>
+    </bpmn:inclusiveGateway>
+    <bpmn:sequenceFlow id="ToCard" sourceRef="Fork" targetRef="CardCheck">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=byCard</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="ToBank" sourceRef="Fork" targetRef="BankCheck">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=byBank</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="ToManual" sourceRef="Fork" targetRef="ManualCheck" />
+    <bpmn:serviceTask id="CardCheck" name="Card check">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-inclusive-branch" /></bpmn:extensionElements>
+      <bpmn:incoming>ToCard</bpmn:incoming><bpmn:outgoing>CardToJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="BankCheck" name="Bank check">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-inclusive-branch" /></bpmn:extensionElements>
+      <bpmn:incoming>ToBank</bpmn:incoming><bpmn:outgoing>BankToJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="ManualCheck" name="Manual check">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-inclusive-branch" /></bpmn:extensionElements>
+      <bpmn:incoming>ToManual</bpmn:incoming><bpmn:outgoing>ManualToJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="CardToJoin" sourceRef="CardCheck" targetRef="Join" />
+    <bpmn:sequenceFlow id="BankToJoin" sourceRef="BankCheck" targetRef="Join" />
+    <bpmn:sequenceFlow id="ManualToJoin" sourceRef="ManualCheck" targetRef="Join" />
+    <bpmn:inclusiveGateway id="Join">
+      <bpmn:incoming>CardToJoin</bpmn:incoming>
+      <bpmn:incoming>BankToJoin</bpmn:incoming>
+      <bpmn:incoming>ManualToJoin</bpmn:incoming>
+      <bpmn:outgoing>if9</bpmn:outgoing>
+    </bpmn:inclusiveGateway>
+    <bpmn:sequenceFlow id="if9" sourceRef="Join" targetRef="Settle" />
+    <bpmn:serviceTask id="Settle" name="Settle once">
+      <bpmn:extensionElements><zeebe:taskDefinition type="probe-inclusive-settle" /></bpmn:extensionElements>
+      <bpmn:incoming>if9</bpmn:incoming><bpmn:outgoing>if10</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="if10" sourceRef="Settle" targetRef="IE" />
+    <bpmn:endEvent id="IE"><bpmn:incoming>if10</bpmn:incoming></bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

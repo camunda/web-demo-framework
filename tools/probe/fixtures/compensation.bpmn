@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Compensation: a boundary `compensateEventDefinition` associated with a
+  handler activity, triggered by an intermediate throw. Modelled and executed
+  from engine-wasm 0.9.3 (Magikcraft/nano-bpm#886); 0.7.x rejected the whole
+  definition at deploy.
+
+  Two processes, because "the handler ran" on its own is a side effect, not the
+  mechanism. `UndoBooking` has no incoming sequence flow, so the only thing
+  that can reach it is compensation — and `probe-compensation-nothrow` is the
+  same model with the throw removed, where it must therefore stay unreached. A
+  parser that mistook the association for a flow would pass the first process
+  and fail the second.
+-->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                   xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
                   id="Definitions_ProbeCompensation"
@@ -33,6 +46,34 @@
     <bpmn:sequenceFlow id="ToEnd" sourceRef="ThrowCompensation" targetRef="End" />
     <bpmn:endEvent id="End">
       <bpmn:incoming>ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+
+  <!-- Negative control: identical but for the missing throw event. -->
+  <bpmn:process id="probe-compensation-nothrow" name="Compensation probe (never triggered)" isExecutable="true">
+    <bpmn:startEvent id="NoThrow_Start">
+      <bpmn:outgoing>NoThrow_ToBooking</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="NoThrow_ToBooking" sourceRef="NoThrow_Start" targetRef="NoThrow_BookThing" />
+    <bpmn:serviceTask id="NoThrow_BookThing" name="Book a thing" isForCompensation="false">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-book-thing" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>NoThrow_ToBooking</bpmn:incoming>
+      <bpmn:outgoing>NoThrow_ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="NoThrow_CompensationBoundary" attachedToRef="NoThrow_BookThing">
+      <bpmn:compensateEventDefinition id="NoThrow_CompensateDef" />
+    </bpmn:boundaryEvent>
+    <bpmn:association id="NoThrow_Assoc" associationDirection="One" sourceRef="NoThrow_CompensationBoundary" targetRef="NoThrow_UndoBooking" />
+    <bpmn:serviceTask id="NoThrow_UndoBooking" name="Undo the booking" isForCompensation="true">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-undo-booking" />
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="NoThrow_ToEnd" sourceRef="NoThrow_BookThing" targetRef="NoThrow_End" />
+    <bpmn:endEvent id="NoThrow_End">
+      <bpmn:incoming>NoThrow_ToEnd</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
 </bpmn:definitions>

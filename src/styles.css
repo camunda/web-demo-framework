@@ -597,6 +597,24 @@ body {
   max-height: 180px;
   font-size: 11.5px;
 }
+/* The evaluated-DMN list under the trace, one "task → matched output" per row.
+   Reuses the vars-block disclosure chrome; only the body differs from the JSON
+   pre above. */
+.decisions {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.decisions code {
+  color: var(--ink-muted);
+}
+.decisions strong {
+  color: var(--ink);
+}
 
 .log {
   display: flex;
@@ -1098,7 +1116,12 @@ body {
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  /* Half the track's single-row height, not 999px. At one row that is still a
+     capsule; wrapped, it is a rounded block instead of a lozenge stretched
+     around four rows. Four ~40-character scenario labels need about 1250px,
+     so any embed narrower than that wraps — the multi-row state is the normal
+     one here, not the exception. The pills stay 999px. */
+  border-radius: 20px;
   background: var(--surface-3);
   max-width: 100%;
   flex-wrap: wrap;
