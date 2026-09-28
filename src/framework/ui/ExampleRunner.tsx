@@ -331,6 +331,9 @@ export function ExampleRunner({
   // it holds, which would otherwise highlight a closed summary. Opening it
   // whenever a tour starts is what keeps that step worth reading.
   const [varsOpen, setVarsOpen] = usePersistentDisclosure("variables", false);
+  // Open by default: a decision is the point of a business-rule example, and
+  // it only shows when one actually evaluated (see `decisionInstances` below).
+  const [decisionsOpen, setDecisionsOpen] = usePersistentDisclosure("decisions", true);
   // Held apart from the persisted preference on purpose, exactly as
   // `forcedStartOpen` is: the tour opening this panel is tour state, not a
   // choice the reader made, and writing it through would leave every later
@@ -472,6 +475,21 @@ export function ExampleRunner({
     }
     return (elementId: string) => map.get(elementId) ?? elementId;
   }, [model]);
+
+  // Business rule tasks aren't job-bearing, so `parseModel` doesn't carry
+  // them and `elementLabels` doesn't know their names. The decisions panel
+  // wants the friendly name the diagram shows, so read it straight off the
+  // resolved XML — cheap, and scoped to the one construct that needs it.
+  const decisionLabelFor = useMemo(() => {
+    const map = new Map<string, string>();
+    const doc = new DOMParser().parseFromString(draft.resolvedBpmn, "application/xml");
+    const BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    for (const el of Array.from(doc.getElementsByTagNameNS(BPMN_NS, "businessRuleTask"))) {
+      const id = el.getAttribute("id");
+      if (id) map.set(id, el.getAttribute("name") || id);
+    }
+    return (elementId: string) => map.get(elementId) ?? elementLabels(elementId);
+  }, [draft.resolvedBpmn, elementLabels]);
 
   /** Append a trace line — or update in place when it carries a `key`. */
   const trace = useCallback((entry: TraceEntry) => {
@@ -1836,6 +1854,29 @@ export function ExampleRunner({
                   )}
                 </pre>
               </details>
+            }
+            decisions={
+              // Only present for a model with a business rule task, and only
+              // once one has evaluated — so #15's "the reader sees which rule
+              // matched" is met without adding anything to a non-DMN run.
+              (run.snapshot?.decisionInstances?.length ?? 0) > 0 && (
+                <details
+                  className="vars-block"
+                  open={decisionsOpen}
+                  onToggle={(e) => setDecisionsOpen(e.currentTarget.open)}
+                >
+                  <summary className="vars-head">Decisions</summary>
+                  <ul className="decisions">
+                    {run.snapshot!.decisionInstances.map((d, i) => (
+                      <li key={`${d.elementId}-${i}`}>
+                        <code>{decisionLabelFor(d.elementId)}</code>
+                        {" → "}
+                        <strong>{safeStringify(d.output)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )
             }
           />
         </div>

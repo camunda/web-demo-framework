@@ -97,16 +97,6 @@ const KNOWN_FAILURES = {
     why: "nano-bpm#1009 — silently skipped, no subscription",
     probe: "receive task (message wait) — NOT supported, silently skipped",
   },
-  businessRuleTask: {
-    verdict: "raises-incident",
-    why: "nano-bpm#1158 — no DMN deploy path; fails loudly at run time",
-    probe: "DMN business rule task (no decision deployed)",
-  },
-  compensateEventDefinition: {
-    verdict: "rejected-at-deploy",
-    why: "nano-bpm#886 — fixed upstream, unreleased",
-    probe: "compensation (rejected at deploy — not modelled, #886)",
-  },
   linkEventDefinition: {
     verdict: "silently-wrong",
     why: "nano-bpm#1157 — token vanishes, run reports success",
@@ -131,21 +121,6 @@ const KNOWN_FAILURES = {
     verdict: "rejected-at-deploy",
     why: "nano-bpm#1168 — not modelled; the flow out of it dangles",
     probe: "escalationEventDefinition (not modelled — rejected at deploy, #1168)",
-  },
-  "callActivity[adHocTool]": {
-    verdict: "silently-wrong",
-    why: "nano-bpm#1159 — the child never starts, and output mapping yields nulls",
-    probe: "ad-hoc sub-process: call activity as a tool — child never starts (#1159)",
-  },
-  sendTask: {
-    verdict: "rejected-at-deploy",
-    why: "nano-bpm#1168 — not modelled; the flow into it dangles",
-    probe: "sendTask (not modelled — rejected at deploy, #1168)",
-  },
-  inclusiveGateway: {
-    verdict: "rejected-at-deploy",
-    why: "nano-bpm#1168 — not modelled; the flow into it dangles",
-    probe: "inclusiveGateway (not modelled — rejected at deploy, #1168)",
   },
   escalationEventDefinition: {
     verdict: "rejected-at-deploy",

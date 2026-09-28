@@ -199,6 +199,7 @@ export function TraceTimeline({
   incidents = [],
   labelFor = (id) => id,
   variables,
+  decisions,
   hasAgent = false,
 }: {
   log: TraceLogLine[];
@@ -210,6 +211,8 @@ export function TraceTimeline({
   labelFor?: (elementId: string) => string;
   /** Live instance payload, rendered as this panel's footer. */
   variables?: ReactNode;
+  /** Evaluated DMN decisions, rendered beneath the variables when any ran. */
+  decisions?: ReactNode;
   /** Whether the model has an AI Agent host — decides how this panel names itself. */
   hasAgent?: boolean;
 }) {
@@ -286,6 +289,8 @@ export function TraceTimeline({
         </div>
 
         {variables}
+
+        {decisions}
 
         {(elementStats.length > 0 || incidents.length > 0) && (
           <details

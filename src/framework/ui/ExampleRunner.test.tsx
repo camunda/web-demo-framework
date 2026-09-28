@@ -6,6 +6,7 @@ import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
 import { seedExportCompliance } from "../../examples/seed-export-compliance";
 import { creditLineIncrease } from "../../examples/credit-line-increase";
+import { expenseDecision } from "../../examples/expense-decision";
 
 // Stands in for driver.js, whose every layout pass is scheduled on
 // `requestAnimationFrame` — so what it draws can't be asserted here anyway.
@@ -66,6 +67,29 @@ describe("ExampleRunner — a run with no human in it", () => {
 
     expect(app.status()).toBe("Completed");
     expect(app.trace().at(-1)).toContain("process instance completed");
+  }, 30_000);
+
+  /**
+   * #15's acceptance criterion: a reader must see which DMN rule matched. The
+   * engine evaluates the table (drive.test.ts / coverage-check prove that);
+   * this is the part that only the mounted runner can show — that the matched
+   * output reaches the inspector.
+   */
+  it("surfaces the matched DMN decision in the run inspector", async () => {
+    const app = await renderExample(expenseDecision);
+    await app.run();
+
+    const decisions = document.querySelector(".decisions");
+    expect(decisions).not.toBeNull();
+    // The clear-approve default: the table decides it and the agent never runs.
+    expect(decisions!.textContent).toContain("Evaluate expense policy");
+    expect(decisions!.textContent).toContain("approved");
+  }, 30_000);
+
+  it("shows no decisions panel for a model without a business rule task", async () => {
+    const app = await renderExample(orderProcess);
+    await app.run();
+    expect(document.querySelector(".decisions")).toBeNull();
   }, 30_000);
 
   /**
