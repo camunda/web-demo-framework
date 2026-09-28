@@ -296,6 +296,30 @@ describe("ExampleRunner — a timer racing an event the reader was offered", () 
     // The reply beat the SLA, so the timeout note must never have been written.
     expect(trace).not.toContain("No credit bureau reply within the SLA window");
   }, 30_000);
+
+  /**
+   * The other side of the race, and the reason it can't just fast-forward: the
+   * documented "leave it and let the SLA lapse" outcome has to be reachable
+   * from the UI. With only the reply button it wasn't — pressing Run re-parked
+   * on the same guard — so the escalation scenario was browser-unreachable.
+   */
+  it("lets the reader lapse the SLA into the escalation path", async () => {
+    const app = await renderExample(creditLineIncrease);
+    await app.run();
+
+    fireEvent.click(screen.getByRole("button", { name: "⏳ Let the timer lapse" }));
+    await app.settle();
+
+    const trace = app.trace().join("\n");
+    expect(trace).toContain("the clock advanced");
+    // The timeout reports back into the agent's loop, which then escalates to a
+    // human — the outcome the "bureau never answers" scenario promises.
+    expect(trace).toContain("No credit bureau reply within the SLA window");
+    expect(app.status()).toBe("Waiting for a human");
+    expect(app.showsOutsideDiagram("Escalate to underwriting ops")).toBe(true);
+    // And the reply button is gone — the race is resolved the other way now.
+    expect(screen.queryByRole("button", { name: "📨 The credit bureau replies" })).toBeNull();
+  }, 30_000);
 });
 
 describe("ExampleRunner — when the agent really does give up early", () => {

@@ -1334,6 +1334,23 @@ export function ExampleRunner({
     [example.messageEvents, run.snapshot, model.boundaryEvents],
   );
 
+  /**
+   * The timer the drive loop is deliberately *not* advancing because an
+   * offered event is racing it (see `driveLoop`'s `timers` branch). Without a
+   * way to fire it, the "leave it and let the SLA lapse" outcome an example
+   * like `credit-line-increase` documents is unreachable in the browser —
+   * pressing Run just re-enters the same guard and parks again. Present only
+   * while parked, and only when both a timer and an offered event are open, so
+   * a lone timer (which the loop advances itself) never grows a button.
+   */
+  const racingTimer = useMemo(() => {
+    if (running || stepping) return null;
+    if (readyMessageEvents.length === 0) return null;
+    const timers = run.snapshot?.timers ?? [];
+    if (timers.length === 0) return null;
+    return timers.reduce((min, t) => (t.dueInMs < min.dueInMs ? t : min));
+  }, [running, stepping, readyMessageEvents, run.snapshot]);
+
   /** Publish one, then keep driving — the interrupt is mid-run, not a restart. */
   const publishMessageEvent = useCallback(
     async (elementId: string) => {
@@ -1378,6 +1395,32 @@ export function ExampleRunner({
     },
     [readyMessageEvents, run, trace, driveLoop],
   );
+
+  /** Advance the clock past the raced timer, then keep driving — the reader's
+   *  alternative to answering the event ({@link racingTimer}). */
+  const lapseRacingTimer = useCallback(async () => {
+    if (runningRef.current || !racingTimer) return;
+    const seq = ++runSeqRef.current;
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      const snap = run.advanceTime(Math.max(racingTimer.dueInMs, 0) + 1);
+      if (!snap) {
+        trace({ kind: "error", text: "▶ advancing the clock failed" });
+        return;
+      }
+      trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
+      const vars = displayableVars(snap, rootInstanceKeyRef.current);
+      if (vars) setDisplayVars({ ...vars });
+      await new Promise((r) => setTimeout(r, BEAT));
+      await driveLoop(workersRef.current, agentsRef.current, snap, seq);
+    } finally {
+      if (runSeqRef.current === seq) {
+        runningRef.current = false;
+        setRunning(false);
+      }
+    }
+  }, [racingTimer, run, trace, driveLoop]);
 
   const submitUserTask = useCallback(async () => {
     if (!openUserTask || runningRef.current) return;
@@ -1815,6 +1858,17 @@ export function ExampleRunner({
                     {event.label}
                   </Button>
                 ))}
+                {racingTimer && (
+                  // The other side of the race: don't answer, let the timer
+                  // fire. Only rendered while it's actually holding one back.
+                  <Button
+                    variant="secondary"
+                    onClick={() => void lapseRacingTimer()}
+                    disabled={running || stepping}
+                  >
+                    ⏳ Let the timer lapse
+                  </Button>
+                )}
               </div>
             </CollapsibleCard>
           )}
