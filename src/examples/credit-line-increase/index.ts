@@ -81,13 +81,13 @@ import underwritingOpsEscalationForm from "./underwriting-ops-escalation.form.js
  * 9. The `toolCallResults` output collection stays declared, for fidelity, and
  *    nothing reads it — this engine populates it with nulls (`bank-support`
  *    divergence 3). Everything downstream reads named variables.
- * 10. One thing the browser can't reproduce: **which** way the wait ends is not
- *    the reader's to pick in the runner. A settled round with both a timer and
- *    a message subscription open is reported as `timers`, so the drive loop
- *    jumps the clock and the SLA always wins — upstream's headline demo, and
- *    the one that ends in a human decision, but it means the bureau-reply path
- *    is only reachable by correlating the message directly, which is what
- *    `engine.test.ts` does.
+ * 10. Both ways the wait can end are the reader's to pick. A settled round with
+ *    a timer and a message subscription both open is a race the runner does not
+ *    resolve for you: it parks and offers two buttons — send the bureau reply
+ *    (`messageEvents`, correlating the message) or **Let the timer lapse**
+ *    (advancing the clock into the SLA timeout). `engine.test.ts` drives the
+ *    reply path by correlating directly and the timeout path by advancing time;
+ *    `ExampleRunner.test.tsx` covers the two buttons.
  *
  * What this one is *for*, against the other agent examples here:
  *
