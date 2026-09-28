@@ -131,8 +131,31 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     expect(screen.getByRole("button", { name: "Complete task" })).toBeDisabled();
   }, 40_000);
 
-  it("does not accuse the agent of giving up while it is still asking", async () => {
-    // `invoicePayment` declares no `requiredTools`, so the alert could never
+  /**
+   * Run and Step *resume* an open run, and the drive loop breaks the moment it
+   * sees an open user task — so while the form is up they can only re-enter
+   * the loop and break again. Left enabled, Run read as available, did
+   * nothing, and appended a second "waiting for a human" line for doing it.
+   */
+  it("offers no Run or Step while the form is the only thing that can advance", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+
+    expect(app.status()).toBe("Waiting for a human");
+    expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Step/ })).toBeDisabled();
+    // Reset is the way out of a parked run, so it must stay live.
+    expect(screen.getByRole("button", { name: /Reset/ })).toBeEnabled();
+
+    // And completing the form still hands the run back — the guard must not
+    // have stranded it.
+    await app.completeUserTask(() => {
+      fireEvent.click(screen.getByText("Approve release"));
+    });
+    expect(app.trace().join("\n")).toContain("Release payment");
+  }, 40_000);
+
+  it("does not accuse the agent of giving up while it is still asking", async () => {    // `invoicePayment` declares no `requiredTools`, so the alert could never
     // fire for it and asserting its absence would prove nothing. Mark a tool
     // the clean-match scenario legitimately skips — a USD invoice needs no
     // currency conversion — so the alert *would* show if the mid-loop

@@ -1149,7 +1149,7 @@ export function ExampleRunner({
     // but re-check here too: `draft.hasErrors` is the single source of truth
     // for "safe to run", not just a button prop. Same for the start form's
     // validity — the button being disabled isn't the actual guarantee.
-    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors)
+    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors || openUserTask)
       return;
 
     // Set the in-flight lock *before* the first `await` (matching
@@ -1188,16 +1188,25 @@ export function ExampleRunner({
         setRunning(false);
       }
     }
-  }, [run, stepping, draft.hasErrors, canResume, beginRun, driveLoop]);
+  }, [run, stepping, draft.hasErrors, canResume, openUserTask, beginRun, driveLoop]);
 
   // Same conditions as the Run button's `disabled`, deliberately duplicated
   // from one place rather than inverted by hand at each call site.
+  //
+  // `openUserTask` is in here because Run and Step *resume* an open run rather
+  // than restarting it, and the drive loop breaks the moment it sees an open
+  // user task. Pressing either while the form is up therefore re-entered the
+  // loop, broke on the same condition, and appended a second copy of "waiting
+  // for a human" — a button that reads as available, does nothing, and litters
+  // the trace for doing it. Completing the form is what resumes the run, and
+  // it is on screen directly below.
   const canRun =
     run.phase === "ready" &&
     !running &&
     !stepping &&
     !draft.hasErrors &&
-    !needsStartForm;
+    !needsStartForm &&
+    !openUserTask;
 
   useAutostart({
     enabled: autostart,
@@ -1218,7 +1227,8 @@ export function ExampleRunner({
       run.phase !== "ready" ||
       runningRef.current ||
       stepping ||
-      draft.hasErrors
+      draft.hasErrors ||
+      openUserTask
     )
       return;
 
@@ -1285,6 +1295,7 @@ export function ExampleRunner({
     stepping,
     draft.hasErrors,
     canResume,
+    openUserTask,
     beginRun,
     trace,
     elementLabels,
@@ -1630,13 +1641,8 @@ export function ExampleRunner({
           // `beginRun` starts a fresh instance and this takes its first round.
           // Disabling it here stranded the embed, which autostarts: the reader
           // arrives after the run has finished, so Step was never once usable.
-          disabled={
-            run.phase !== "ready" ||
-            running ||
-            stepping ||
-            draft.hasErrors ||
-            needsStartForm
-          }
+          // (`canRun` tests the open user task, not completion.)
+          disabled={!canRun}
         >
           ⏭ Step
         </Button>
