@@ -218,6 +218,8 @@ export const loanOrigination: ExampleDef = {
     "loan-senior-officer-review": reviewForm,
   },
   seed: SCENARIO_STRONG,
+  // Ends on the senior officer's review form — see `ExampleDef.autostart`.
+  autostart: false,
   scenarios: [
     { label: "Strong applicant (policy recommends approve)", variables: SCENARIO_STRONG },
     { label: "Marginal applicant (policy recommends decline)", variables: SCENARIO_MARGINAL },

@@ -371,6 +371,8 @@ export const fraudAlertTriage: ExampleDef = {
     "fraud-team-handoff": teamHandoffForm,
   },
   seed: SCENARIO_AMBIGUOUS,
+  // The ambiguous alert ends on the analyst's form — see `ExampleDef.autostart`.
+  autostart: false,
   scenariosLabel: "Fraud alert",
   scenarios: [
     {

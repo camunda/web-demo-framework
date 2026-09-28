@@ -321,4 +321,18 @@ export interface ExampleDef extends ExampleMeta {
    * matching subscription is open — see {@link MessageEventDef}.
    */
   messageEvents?: MessageEventDef[];
+  /**
+   * Whether `?autostart=1` may run this example unprompted. Defaults to true.
+   *
+   * Set `false` when the default scenario ends parked on a **human task**.
+   * Autostart exists so an embedded reader sees the process work without
+   * having to press anything; an example that runs itself into a form instead
+   * greets them with a demand for input they have no context for, and the
+   * work they were meant to watch has already happened. Those start on Run.
+   *
+   * Not a free choice: `drive.test.ts` drives every example's default
+   * scenario and requires this to match what actually happens, in both
+   * directions — so it cannot quietly drift when a seed or a handler changes.
+   */
+  autostart?: boolean;
 }

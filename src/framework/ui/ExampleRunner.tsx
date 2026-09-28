@@ -19,12 +19,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@camunda/design-system";
-import type { AgentSpec, BoundaryEventSpec } from "../model";
+import type { AgentSpec } from "../model";
 import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
 import { withToolCallArgs } from "../agent/activation";
+import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { useEmbedReadyReporter } from "../embedHeight";
 import { describeRound, newSequenceFlows } from "../stepSummary";
@@ -40,7 +41,7 @@ import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
-import type { ExampleDef, MessageEventDef, TraceEntry } from "../types";
+import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
 import { useAutostart } from "../useAutostart";
@@ -61,34 +62,6 @@ const TEMPLATE_TAB_PREFIX = "__template__:";
  */
 function isBoundarySubscription(sub: { kind: string }): boolean {
   return sub.kind.toLowerCase().includes("boundary");
-}
-
-/**
- * Which of an example's declared {@link MessageEventDef}s have an open
- * subscription right now — the ones the reader is being offered as buttons.
- *
- * A boundary event's subscription is reported against the activity it is
- * attached to, so an example names the event and this resolves it. The message
- * name is matched too: one activity can carry several message boundaries, and
- * the host alone would bind every button to whichever subscription came first.
- */
-function matchReadyMessageEvents(
-  declared: MessageEventDef[] | undefined,
-  snapshot: Snapshot | null,
-  boundaryEvents: BoundaryEventSpec[],
-): { event: MessageEventDef; sub: Snapshot["messageSubscriptions"][number] }[] {
-  if (!declared?.length || !snapshot) return [];
-  return declared.flatMap((event) => {
-    const spec = boundaryEvents.find((b) => b.elementId === event.elementId);
-    const sub = snapshot.messageSubscriptions.find((m) =>
-      m.elementId === event.elementId
-        ? true
-        : !!spec &&
-          m.elementId === spec.attachedTo &&
-          (!spec.messageName || m.messageName === spec.messageName),
-    );
-    return sub ? [{ event, sub }] : [];
-  });
 }
 
 /**
@@ -1209,7 +1182,9 @@ export function ExampleRunner({
     !openUserTask;
 
   useAutostart({
-    enabled: autostart,
+    // The example has a veto: one whose default scenario ends at a human task
+    // would otherwise open already parked on a form (see `ExampleDef.autostart`).
+    enabled: autostart && example.autostart !== false,
     ready: canRun,
     targetRef: runnerRef,
     start: () => void start(),

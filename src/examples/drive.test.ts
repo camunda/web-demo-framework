@@ -7,9 +7,10 @@ import {
   type Snapshot,
   type ReadModelBojtosSession,
 } from "@nanobpm/bojtos-kit";
-import { resolveCorrelationKey } from "../framework/model";
+import { resolveCorrelationKey, type ModelInfo } from "../framework/model";
 import { buildWorkers } from "../framework/compile";
 import { withToolCallArgs } from "../framework/agent/activation";
+import { matchReadyMessageEvents } from "../framework/messageEvents";
 import { buildDraftRunDefinition } from "../framework/draft";
 import {
   imageRefVariables,
@@ -174,29 +175,43 @@ function openUserTasks(snap: Snapshot) {
   );
 }
 
-/** The reader's moves, in the order the runner would offer them. */
+/** What the reader had to do to get the run moving again. */
+type ReaderMove = "user-task" | "manual-job" | "timer" | "message" | "signal";
+
+/**
+ * The reader's moves, in the order the runner would offer them. Returns which
+ * one was taken, or null when nothing is left — the caller needs to tell a
+ * move the *runner* makes on its own (a timer, a message, a signal) from one
+ * that stops it dead and waits for a person.
+ */
 async function readerCanAct(
   session: ReadModelBojtosSession,
   example: ExampleDef,
+  model: ModelInfo,
   bpmn: string,
   manualJobTypes: Set<string>,
-): Promise<boolean> {
+): Promise<ReaderMove | null> {
   const snap = session.snapshot();
   const open = openUserTasks(snap);
   if (open.length > 0) {
     session.completeUserTask(open[0].key, formPayload(example, bpmn, open[0].elementId));
-    return true;
+    return "user-task";
   }
   // A held-back job waits for the reader to press "Complete normally"; the
   // drive loop never dispatches it on its own.
   const held = snap.jobs.find((j) => j.state === "Created" && manualJobTypes.has(j.jobType));
   if (held) {
     await dispatchWorkers(session, { [held.jobType]: () => ({}) }, {});
-    return true;
+    return "manual-job";
   }
   if (snap.timers.length > 0) {
+    // The runner refuses to fast-forward a timer an offered event is racing —
+    // it parks and lets the reader pick. That is a resting place, so report it
+    // as one rather than resolving the race here and driving on past it.
+    if (matchReadyMessageEvents(example.messageEvents, snap, model.boundaryEvents).length > 0)
+      return null;
     session.advanceTime(Math.max(1, Math.min(...snap.timers.map((t) => t.dueInMs))) + 1);
-    return true;
+    return "timer";
   }
   // Boundary subscriptions are the reader's to fire deliberately, so leaving
   // one open is a legitimate resting place rather than a stall.
@@ -208,17 +223,19 @@ async function readerCanAct(
     const after = session.correlateMessage(target.messageName, target.correlationKey, "{}");
     // Publishing is only a move if the engine took it. A correlation that
     // leaves the same subscription open has advanced nothing, and returning
-    // true would spin out the round budget and then report a clean finish.
-    return !after.messageSubscriptions.some(
+    // a move would spin out the round budget and then report a clean finish.
+    return after.messageSubscriptions.some(
       (m) => m.messageName === target.messageName && m.correlationKey === target.correlationKey,
-    );
+    )
+      ? null
+      : "message";
   }
   if (snap.signalSubscriptions.length > 0) {
     const name = snap.signalSubscriptions[0].signalName;
     const after = session.broadcastSignal(name, "{}");
-    return !after.signalSubscriptions.some((s) => s.signalName === name);
+    return after.signalSubscriptions.some((s) => s.signalName === name) ? null : "signal";
   }
-  return false;
+  return null;
 }
 
 let session: ReadModelBojtosSession;
@@ -319,9 +336,14 @@ describe("every example goes somewhere", () => {
       started.instances.find((i) => i.processId === model.processId)?.key ?? started.created;
     expect(rootKey, "the example never started an instance").toBeDefined();
 
+    let firstStop: ReaderMove | null = null;
     for (let round = 0; round < 40; round += 1) {
       await dispatchWorkers(session, workers, { agents });
-      if (!(await readerCanAct(session, example, bpmn, manualJobTypes))) break;
+      const move = await readerCanAct(session, example, model, bpmn, manualJobTypes);
+      if (!move) break;
+      // Where the runner's own drive loop would have come to rest. A timer, a
+      // message and a signal it resolves itself; a human task stops it.
+      if (firstStop === null && (move === "user-task" || move === "manual-job")) firstStop = move;
     }
 
     const snap = session.snapshot();
@@ -330,9 +352,20 @@ describe("every example goes somewhere", () => {
     // resting place. An ordinary one still open is not: the loop already tried
     // to correlate it and the engine didn't take it — reported on its own line
     // so a boundary button sitting alongside can't excuse it.
+    //
+    // A subscription the example declares in `messageEvents` counts as
+    // pressable too, boundary or not: it has a button, and the loop leaves it
+    // alone on purpose rather than having failed to correlate it.
     const isBoundary = (m: { kind: string }) => m.kind.toLowerCase().includes("boundary");
-    const pressable = snap.messageSubscriptions.filter(isBoundary);
-    const unconsumed = snap.messageSubscriptions.filter((m) => !isBoundary(m));
+    const offered = new Set(
+      matchReadyMessageEvents(example.messageEvents, snap, model.boundaryEvents).map(
+        (m) => m.sub.elementId,
+      ),
+    );
+    const readerFires = (m: { kind: string; elementId: string }) =>
+      isBoundary(m) || offered.has(m.elementId);
+    const pressable = snap.messageSubscriptions.filter(readerFires);
+    const unconsumed = snap.messageSubscriptions.filter((m) => !readerFires(m));
     // A job left Created that no worker took is a stall whatever else is open —
     // a boundary button sitting alongside doesn't unblock it. Manual-control
     // types are excluded: those wait for the reader on purpose.
@@ -361,6 +394,19 @@ describe("every example goes somewhere", () => {
       stalledWithNothingToDo: false,
       waitingOnAMessageThatNeverCorrelated: [],
       jobsNoWorkerTook: [],
+    });
+
+    // `ExampleDef.autostart` is a claim about this run, so check it against
+    // the run rather than trusting the manifest. Both directions: an example
+    // that ends at a form must opt out, and one that does not must not — a
+    // stale `autostart: false` silently costs every other reader the
+    // unprompted run the embed exists for.
+    expect({
+      id,
+      endsAtAHumanTask: firstStop === "user-task",
+    }).toEqual({
+      id,
+      endsAtAHumanTask: example.autostart === false,
     });
   }, 30_000);
 });

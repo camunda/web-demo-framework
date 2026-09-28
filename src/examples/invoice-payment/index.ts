@@ -303,6 +303,8 @@ export const invoicePayment: ExampleDef = {
     "compliance-signoff": complianceSignoffForm,
   },
   seed: SCENARIO_CLEAN_MATCH,
+  // Ends on the reviewer's release form — see `ExampleDef.autostart`.
+  autostart: false,
   scenariosLabel: "Invoice to review",
   scenarios: [
     {
