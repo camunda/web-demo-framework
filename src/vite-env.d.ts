@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  /** `false`/`0` hides the learn-bpmn gallery; see `src/examples/index.ts`. */
+  readonly VITE_INCLUDE_LEARN_BPMN?: string;
+}
+
 declare module "*.bpmn?raw" {
   const content: string;
   export default content;
