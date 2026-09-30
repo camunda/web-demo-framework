@@ -57,9 +57,22 @@ const learnBpmnMetaModules = import.meta.glob("./learn-*/meta.ts", {
   eager: true,
 }) as Record<string, { default: ExampleMeta }>;
 
-const learnBpmnMeta: ExampleMeta[] = Object.values(learnBpmnMetaModules)
-  .map((mod) => mod.default)
-  .sort((a, b) => a.id.localeCompare(b.id));
+/**
+ * Build-time switch for the whole `learn-bpmn` section, on unless
+ * `VITE_INCLUDE_LEARN_BPMN` is `false`/`0`. Off, the section's cards, its
+ * gallery heading and its `/examples/learn-*` routes all disappear (a route
+ * then falls back to the first example) while the directories stay built and
+ * tested. `release-embed-bundle.yml` turns it off for camunda.com.
+ */
+const includeLearnBpmn = !/^(false|0)$/i.test(
+  import.meta.env.VITE_INCLUDE_LEARN_BPMN?.trim() ?? "",
+);
+
+const learnBpmnMeta: ExampleMeta[] = includeLearnBpmn
+  ? Object.values(learnBpmnMetaModules)
+      .map((mod) => mod.default)
+      .sort((a, b) => a.id.localeCompare(b.id))
+  : [];
 
 /**
  * Every example the gallery offers, as cards: hand-listed scenarios plus every

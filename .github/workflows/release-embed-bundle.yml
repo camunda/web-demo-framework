@@ -78,6 +78,10 @@ jobs:
           # baked into every asset URL at build time, so a bundle built for "/"
           # 404s everything when served under /demo-app/.
           VITE_BASE_PATH: /demo-app/
+          # camunda.com launches with the scenario examples only. The embed's
+          # "Open full page" link reaches the full gallery nav, so this is what
+          # keeps the Learn BPMN menu off the site. Flip to "true" to ship it.
+          VITE_INCLUDE_LEARN_BPMN: "false"
       - name: Pack the bundle
         run: |
           tar -czf demo-app.tgz -C dist .
