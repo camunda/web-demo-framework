@@ -385,24 +385,18 @@ export function ExampleRunner({
   // Length, not truthiness: `scenarios: []` is a truthy empty array, which
   // rendered an empty labelled group and told the reader to pick from it.
   const hasScenarios = !!example.scenarios?.length;
-  // An example with a real start form opens it on a first visit — its fields
-  // may be required, and Run stays disabled until they're filled. Compact is
-  // the exception: an embed on a marketing page should read as "press play",
-  // so it starts collapsed and only opens when the form actually blocks Run
-  // (see `startEditorOpen`). Its own storage key, because the compact embed is
-  // same-origin with the full runner and would otherwise inherit a preference
-  // set over there.
-  //
-  // Per example too: localStorage outlives the remount when switching examples.
+  // Starts collapsed: every example is seeded, so its start form is already
+  // valid and Run works from one press. It opens itself only when the form
+  // actually blocks Run (see `forcedStartOpen`). Compact keeps its own storage
+  // key so a choice made on the full page can't carry into an embed, and both
+  // are per example because localStorage outlives the remount on a switch.
   const [startOpen, setStartOpen] = usePersistentDisclosure(
     `${compact ? "start-compact" : "start"}:${example.id}`,
-    compact ? false : !!startSchema,
+    false,
   );
   // Set when an invalid start form forces the editor open. Kept out of
-  // `usePersistentDisclosure` on purpose: that setter writes to localStorage,
-  // and this is not a disclosure preference — persisting it would leave every
-  // later compact load rehydrating as open, including ones whose seeded form is
-  // perfectly valid, which is exactly what compact mode is trying to avoid.
+  // `usePersistentDisclosure` on purpose: persisting it would reopen the editor
+  // on every later load, including ones whose seeded form is perfectly valid.
   const [forcedStartOpen, setForcedStartOpen] = useState(false);
   const [running, setRunning] = useState(false);
   // True only while a single `⏭ Step` round is in flight — distinct from
@@ -1119,17 +1113,14 @@ export function ExampleRunner({
    * ends in "valid" anyway.
    */
   const startFormBlocking = !canResume && !!startSchema && startFormValid === false;
-  // Compact only: the full runner already opens the editor on a first visit
-  // when the example has a start form, and forcing it there would override both
-  // the "Done" button and a persisted closed preference.
   const startEditorOpen = startOpen || forcedStartOpen;
 
   // Latch the forced-open panel open. Without this it closes itself the instant
   // the last required field is filled — pulling focus out from under the reader
   // mid-form, and taking the optional fields with it.
   useEffect(() => {
-    if (compact && startFormBlocking) setForcedStartOpen(true);
-  }, [compact, startFormBlocking]);
+    if (startFormBlocking) setForcedStartOpen(true);
+  }, [startFormBlocking]);
 
   /** Closing has to drop the latch too, or the panel springs straight back open. */
   const setStartEditorOpen = (open: boolean) => {
