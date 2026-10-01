@@ -1609,6 +1609,20 @@ export function ExampleRunner({
                 ? `Rendered from the model's start form "${model.startFormId}".`
                 : "The variables the instance starts with."}
             </div>
+            {/* Edited input is where a scripted agent's fixed rules show:
+                anything they weren't written for falls through to the
+                fallback (usually human review), which reads as a bug unless
+                it's said up front. */}
+            {displayAgent && (brain.kind === "scripted" || !brain.chat) && (
+              <p className="inline-input-editor-note">
+                The scripted agent follows fixed rules written for these
+                examples. Input it doesn't recognise usually goes to human
+                review.{" "}
+                {compact
+                  ? "Open the editable version to connect a real model."
+                  : "Switch the agent brain to a model to have it reason about what you type."}
+              </p>
+            )}
           </div>
           <Button
             size="sm"
@@ -1938,7 +1952,7 @@ export function ExampleRunner({
           data-tour={TOUR_ANCHOR.codePanel}
           defaultOpen={false}
           title="Code"
-          description="One handler per BPMN element — plus one per task listener — and a model tab holding the editable diagram: select an element there to edit its properties. Return variables to merge, or throw to fail the job."
+          description="One handler per BPMN element — plus one per task listener — and a model tab holding the editable diagram: select an element there to edit its properties. Return variables to merge, or throw to fail the job. Editing is experimental and can break the example; nothing is saved, so reload the page to get the original back."
         >
           <Suspense
             fallback={

@@ -892,6 +892,7 @@ body {
    wrapper with no height of its own grows by the scrollbar instead, leaving
    the pills alone and putting the bar underneath them. */
 .editors .tab-strip {
+  margin-top: 1rem;
   overflow-x: auto;
   /* Don't hand a horizontal flick to the page once the strip is at its end. */
   overscroll-behavior-x: contain;
@@ -1097,6 +1098,12 @@ body {
   letter-spacing: 0.03em;
 }
 .inline-input-editor-copy {
+  font-size: 12px;
+  color: var(--ink-muted-2);
+}
+.inline-input-editor-note {
+  margin: 6px 0 0;
+  max-width: 60ch;
   font-size: 12px;
   color: var(--ink-muted-2);
 }
