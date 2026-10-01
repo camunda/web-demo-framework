@@ -407,6 +407,26 @@ describe("ExampleRunner — the example input toggle", () => {
   }, 40_000);
 
   /**
+   * The open/closed choice was stored under one key for every example, and
+   * localStorage outlives the remount when the reader switches examples — so
+   * opening one example's input editor opened the next one's too.
+   */
+  it("keeps one example's open input editor from opening another's", async () => {
+    window.localStorage.clear();
+    await renderExample(seedExportCompliance, { compact: true });
+    const toggle = () => screen.getByRole("button", { name: /edit input/i });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+
+    cleanup();
+
+    await renderExample(expenseDecision, { compact: true });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("start-input-editor")).not.toBeVisible();
+  }, 40_000);
+
+  /**
    * Reader feedback: "it was not completely clear to me that the EXAMPLE
    * SHIPMENT was the actual input for the process instance". The row said
    * nothing at rest — the hint slot only filled in once the input was locked —

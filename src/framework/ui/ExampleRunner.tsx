@@ -392,8 +392,10 @@ export function ExampleRunner({
   // (see `startEditorOpen`). Its own storage key, because the compact embed is
   // same-origin with the full runner and would otherwise inherit a preference
   // set over there.
+  //
+  // Per example too: localStorage outlives the remount when switching examples.
   const [startOpen, setStartOpen] = usePersistentDisclosure(
-    compact ? "start-compact" : "start",
+    `${compact ? "start-compact" : "start"}:${example.id}`,
     compact ? false : !!startSchema,
   );
   // Set when an invalid start form forces the editor open. Kept out of

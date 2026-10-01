@@ -63,8 +63,11 @@ export interface RunnerHarness {
   completeUserTask(fill?: () => void): Promise<void>;
 }
 
-export async function renderExample(example: ExampleDef): Promise<RunnerHarness> {
-  render(<ExampleRunner example={example} />);
+export async function renderExample(
+  example: ExampleDef,
+  { compact = false }: { compact?: boolean } = {},
+): Promise<RunnerHarness> {
+  render(<ExampleRunner example={example} compact={compact} />);
 
   const status = () => {
     for (const text of STATUSES) {
