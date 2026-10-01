@@ -55,12 +55,6 @@ vi.mock("../sandbox", () => ({
 
 const ALERT = "The agent didn't finish its checks";
 
-// The Code panel mounts Monaco and the bpmn-js Modeler when opened. Monaco's
-// package entry doesn't resolve under Vitest, and neither editor is what these
-// tests are about — the Modeler has its own (`ModelEditor.test.tsx`).
-vi.mock("./MonacoEditor", () => ({ default: () => null }));
-vi.mock("./ModelEditor", () => ({ default: () => null }));
-
 // This repo doesn't enable RTL's automatic cleanup, and every query below is
 // document-wide — a second mounted runner makes all of them ambiguous.
 afterEach(cleanup);
@@ -556,15 +550,11 @@ describe("ExampleRunner — the example input toggle", () => {
 });
 
 describe("ExampleRunner — the code panel", () => {
-  // Opening it is remembered, and would mount the editors for every test after.
-  afterEach(() => window.localStorage.clear());
-
   it("says editing is experimental and how to get the original back", async () => {
-    window.localStorage.clear();
     await renderExample(orderProcess);
-    fireEvent.click(screen.getByRole("button", { name: /^Code/ }));
-    expect(await screen.findByText("Experimental")).toBeInTheDocument();
-    expect(screen.getByText(/reload the page to get the original back/i)).toBeInTheDocument();
+    const code = screen.getByRole("button", { name: /^Code/ });
+    expect(code).toHaveTextContent(/editing is experimental and can break the example/i);
+    expect(code).toHaveTextContent(/reload the page to get the original back/i);
   }, 40_000);
 });
 

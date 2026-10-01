@@ -1952,16 +1952,8 @@ export function ExampleRunner({
           data-tour={TOUR_ANCHOR.codePanel}
           defaultOpen={false}
           title="Code"
-          description="One handler per BPMN element — plus one per task listener — and a model tab holding the editable diagram: select an element there to edit its properties. Return variables to merge, or throw to fail the job."
+          description="One handler per BPMN element — plus one per task listener — and a model tab holding the editable diagram: select an element there to edit its properties. Return variables to merge, or throw to fail the job. Editing is experimental and can break the example; nothing is saved, so reload the page to get the original back."
         >
-          <Alert className="code-experimental-note">
-            <AlertTitle>Experimental</AlertTitle>
-            <AlertDescription>
-              Editing the code and model is experimental, and changes can
-              break this example. Nothing is saved — reload the page to get
-              the original back.
-            </AlertDescription>
-          </Alert>
           <Suspense
             fallback={
               <div className="editor-fallback">Loading editor…</div>
