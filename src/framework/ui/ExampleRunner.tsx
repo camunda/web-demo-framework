@@ -1722,7 +1722,8 @@ export function ExampleRunner({
           </AlertDescription>
         </Alert>
       )}
-      {!draft.hasErrors && draft.diagnostics.length > 0 && (
+      {/* Warnings are for whoever edits the model; compact has no editors. */}
+      {!compact && !draft.hasErrors && draft.diagnostics.length > 0 && (
         <Alert>
           <AlertTitle>Heads up</AlertTitle>
           <AlertDescription>

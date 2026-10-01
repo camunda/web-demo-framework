@@ -453,6 +453,18 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(screen.getByRole("button", { name: "▶ Run" })).toBeDisabled();
   }, 40_000);
 
+  // bank-support's four processes always warn which one is primary. That's
+  // for whoever edits the model — compact has nothing to edit.
+  it("shows model warnings on the full page but not in the compact embed", async () => {
+    await renderExample(bankSupport);
+    expect(screen.getByText("Heads up")).toBeInTheDocument();
+
+    cleanup();
+
+    await renderExample(bankSupport, { compact: true });
+    expect(screen.queryByText("Heads up")).not.toBeInTheDocument();
+  }, 40_000);
+
   /**
    * Reader feedback: "it was not completely clear to me that the EXAMPLE
    * SHIPMENT was the actual input for the process instance". The row said
