@@ -55,6 +55,12 @@ vi.mock("../sandbox", () => ({
 
 const ALERT = "The agent didn't finish its checks";
 
+// The Code panel mounts Monaco and the bpmn-js Modeler when opened. Monaco's
+// package entry doesn't resolve under Vitest, and neither editor is what these
+// tests are about — the Modeler has its own (`ModelEditor.test.tsx`).
+vi.mock("./MonacoEditor", () => ({ default: () => null }));
+vi.mock("./ModelEditor", () => ({ default: () => null }));
+
 // This repo doesn't enable RTL's automatic cleanup, and every query below is
 // document-wide — a second mounted runner makes all of them ambiguous.
 afterEach(cleanup);
@@ -465,6 +471,31 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(screen.queryByText("Heads up")).not.toBeInTheDocument();
   }, 40_000);
 
+  // Edited input is where the scripted agent's fixed rules show: what they
+  // weren't written for falls through to human review, which reads as a bug
+  // unless it's said up front. Each surface names the way out it actually has.
+  it("warns that the scripted agent only knows the rules it was written with", async () => {
+    await renderExample(seedExportCompliance);
+    const editor = document.getElementById("start-input-editor")!;
+    expect(editor).toHaveTextContent(/scripted agent follows fixed rules/i);
+    expect(editor).toHaveTextContent(/switch the agent brain to a model/i);
+
+    cleanup();
+
+    await renderExample(seedExportCompliance, { compact: true });
+    const embedEditor = document.getElementById("start-input-editor")!;
+    expect(embedEditor).toHaveTextContent(/scripted agent follows fixed rules/i);
+    expect(embedEditor).toHaveTextContent(/open the editable version/i);
+    expect(embedEditor).not.toHaveTextContent(/switch the agent brain/i);
+  }, 40_000);
+
+  it("says nothing about an agent where there isn't one", async () => {
+    await renderExample(orderProcess);
+    expect(document.getElementById("start-input-editor")).not.toHaveTextContent(
+      /scripted agent/i,
+    );
+  }, 40_000);
+
   /**
    * Reader feedback: "it was not completely clear to me that the EXAMPLE
    * SHIPMENT was the actual input for the process instance". The row said
@@ -521,6 +552,19 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(
       screen.getByRole("group", { name: "Example input" }),
     ).toBeInTheDocument();
+  }, 40_000);
+});
+
+describe("ExampleRunner — the code panel", () => {
+  // Opening it is remembered, and would mount the editors for every test after.
+  afterEach(() => window.localStorage.clear());
+
+  it("says editing is experimental and how to get the original back", async () => {
+    window.localStorage.clear();
+    await renderExample(orderProcess);
+    fireEvent.click(screen.getByRole("button", { name: /^Code/ }));
+    expect(await screen.findByText("Experimental")).toBeInTheDocument();
+    expect(screen.getByText(/reload the page to get the original back/i)).toBeInTheDocument();
   }, 40_000);
 });
 
