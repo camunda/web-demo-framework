@@ -7,6 +7,7 @@ import { invoicePayment } from "../../examples/invoice-payment";
 import { seedExportCompliance } from "../../examples/seed-export-compliance";
 import { creditLineIncrease } from "../../examples/credit-line-increase";
 import { expenseDecision } from "../../examples/expense-decision";
+import { bankSupport } from "../../examples/bank-support";
 
 // Stands in for driver.js, whose every layout pass is scheduled on
 // `requestAnimationFrame` — so what it draws can't be asserted here anyway.
@@ -179,7 +180,8 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     expect(app.trace().join("\n")).toContain("Release payment");
   }, 40_000);
 
-  it("does not accuse the agent of giving up while it is still asking", async () => {    // `invoicePayment` declares no `requiredTools`, so the alert could never
+  it("does not accuse the agent of giving up while it is still asking", async () => {
+    // `invoicePayment` declares no `requiredTools`, so the alert could never
     // fire for it and asserting its absence would prove nothing. Mark a tool
     // the clean-match scenario legitimately skips — a USD invoice needs no
     // currency conversion — so the alert *would* show if the mid-loop
@@ -404,6 +406,51 @@ describe("ExampleRunner — the example input toggle", () => {
     await renderExample(orderProcess);
     expect(screen.getByRole("button", { name: /view input/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /edit input/i })).not.toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * The open/closed choice was stored under one key for every example, and
+   * localStorage outlives the remount when the reader switches examples — so
+   * opening one example's input editor opened the next one's too.
+   */
+  it("keeps one example's open input editor from opening another's", async () => {
+    window.localStorage.clear();
+    await renderExample(seedExportCompliance, { compact: true });
+    const toggle = () => screen.getByRole("button", { name: /edit input/i });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+
+    cleanup();
+
+    await renderExample(expenseDecision, { compact: true });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("start-input-editor")).not.toBeVisible();
+  }, 40_000);
+
+  // Every example is seeded, so its start form is valid on arrival and the
+  // full page has no reason to open it any more than the embed does.
+  it("starts the input editor collapsed on the full page", async () => {
+    window.localStorage.clear();
+    await renderExample(seedExportCompliance);
+    expect(screen.getByRole("button", { name: /edit input/i })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  }, 40_000);
+
+  // The one reason to open it unasked: a required field is empty, so Run is
+  // disabled, and a disabled Run with a hidden form is a dead end.
+  it("opens the input editor when the start form blocks Run", async () => {
+    window.localStorage.clear();
+    await renderExample({ ...bankSupport, seed: {}, scenarios: undefined });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /edit input/i })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "▶ Run" })).toBeDisabled();
   }, 40_000);
 
   /**
