@@ -892,6 +892,7 @@ body {
    wrapper with no height of its own grows by the scrollbar instead, leaving
    the pills alone and putting the bar underneath them. */
 .editors .tab-strip {
+  margin-top: 1rem;
   overflow-x: auto;
   /* Don't hand a horizontal flick to the page once the strip is at its end. */
   overscroll-behavior-x: contain;
