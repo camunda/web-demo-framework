@@ -1,4 +1,5 @@
 import type { ExampleMeta } from "../../framework/types";
+import { tutorialLinks } from "../tutorials";
 
 /** Gallery card copy for this example — see `ExampleMeta`. */
 const meta: ExampleMeta = {
@@ -11,7 +12,16 @@ const meta: ExampleMeta = {
     lede: "An agentic ad-hoc sub-process chooses its own compliance checks, but the gateway after it — not the model — decides whether a shipment ships or goes to a human.",
     tagline: "Anatomy of an enterprise agent",
   },
-  docsUrl: "https://camunda.com/blog/agentic-ai/",
+  pageUrl: "https://camunda.com/orchestrate/agents/#task-agent",
+  ...tutorialLinks(
+    "task-agent",
+    [
+      "seed-export-compliance-agent.bpmn",
+      "seed-export-shipment-ready.form",
+      "seed-export-compliance-review.form",
+    ],
+    "Seed Export Compliance Agent",
+  ),
 };
 
 export default meta;

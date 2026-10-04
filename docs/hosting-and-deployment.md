@@ -210,7 +210,7 @@ possible follow-up for infra, not a blocker for the demo to exist.
 ## 5. Docs-side ownership
 
 **Decision, engineering side:** each example's manifest can carry a
-`docsUrl` field (see [#8](https://github.com/camunda/web-demo-framework/issues/8),
+`pageUrl` field (see [#8](https://github.com/camunda/web-demo-framework/issues/8),
 which owns adding this to `src/framework/types.ts`) linking back to the
 camunda.com page the example illustrates. The reverse direction — the docs
 page linking *to* the demo — is **not this repo's engineering deliverable**;

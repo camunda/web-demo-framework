@@ -1,4 +1,5 @@
 import type { ExampleMeta } from "../../framework/types";
+import { tutorialLinks } from "../tutorials";
 
 /** Gallery card copy for this example — see `ExampleMeta`. */
 const meta: ExampleMeta = {
@@ -11,8 +12,17 @@ const meta: ExampleMeta = {
     lede: "Camunda's decision agent pattern, running here on a wasm engine in your browser — with a real DMN table deployed alongside the diagram. Run the clear-approve claim and watch the agent never start; run the 90 EUR dinner and watch it convert the currency and apply the one exception the table has no way to express.",
     tagline: "Decision agent",
   },
-  docsUrl:
-    "https://github.com/camunda/camunda-8-tutorials/tree/main/examples/decision-agent",
+  pageUrl: "https://camunda.com/orchestrate/agents/#decision-agent",
+  ...tutorialLinks(
+    "decision-agent",
+    [
+      "expense-decision-agent.bpmn",
+      "expense-policy.dmn",
+      "expense-claim-start.form",
+      "expense-claim-review.form",
+    ],
+    "Expense Decision Agent",
+  ),
 };
 
 export default meta;

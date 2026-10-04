@@ -10,7 +10,7 @@ const meta: ExampleMeta = {
     "Run this and watch 'Check order total' decide a route variable, then watch the gateway send the token down 'Express ship' when the order is large enough, or 'Standard ship' otherwise (the default flow). Try both from the Start panel on the right: it holds a \"Small order\" and a \"Large order\" button that swap the payload for you.",
     "To see the conditions themselves, open the model tab in the Code panel and click either arrow leaving the gateway — the FEEL is under Condition. Get one wrong (or misspell the variable name) and the flow you meant to take is silently skipped in favour of whichever one does evaluate true, or the default if none do — no error, just the wrong branch.",
   ].join("\n\n"),
-  docsUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/gateways/gateways/#exclusive-gateway",
+  sourceUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/gateways/gateways/#exclusive-gateway",
 };
 
 export default meta;

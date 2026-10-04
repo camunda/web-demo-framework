@@ -11,7 +11,7 @@ const meta: ExampleMeta = {
     "The link between the two halves is the job type: in the Code panel, open the model tab, click \"Prepare package\", and expand Task definition in the properties panel on the right — Job type is the name a worker has to subscribe to in order to be handed this task's work.",
     "(This page wires its own handlers up from whatever the model declares, so renaming it here keeps working; on a real cluster the worker is a separate process started with a job type of its own, and a mismatch means nobody ever activates the job, so the run stalls forever.)",
   ].join("\n\n"),
-  docsUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/service-tasks/",
+  sourceUrl: "https://docs.camunda.io/docs/components/modeler/bpmn/service-tasks/",
 };
 
 export default meta;

@@ -150,13 +150,11 @@ export function App() {
         </>
       )}
       <div className="example-meta">
-        {/* Only in the standalone app: this is its way back to camunda.com. In an
-            embed the runner is already *on* camunda.com, so the link is
-            redundant (and points at a loosely-related docs page), so it's hidden. */}
-        {!embed && example.docsUrl && (
+        {/* Only in the standalone app: an embed is already *on* camunda.com. */}
+        {!embed && example.pageUrl && (
           <a
             className="docs-link"
-            href={example.docsUrl}
+            href={example.pageUrl}
             target="_blank"
             rel="noreferrer noopener"
           >
@@ -192,6 +190,25 @@ export function App() {
         />
       ) : (
         <p className="form-fallback">Loading {example.title}…</p>
+      )}
+      {/* camunda.com shows these same two buttons under its embeds. */}
+      {!embed && (example.saasImportUrl || example.sourceUrl) && (
+        <div className="example-ctas">
+          {example.saasImportUrl && (
+            <Button asChild size="sm">
+              <a href={example.saasImportUrl} target="_blank" rel="noreferrer noopener">
+                Run in SaaS
+              </a>
+            </Button>
+          )}
+          {example.sourceUrl && (
+            <Button asChild size="sm" variant="secondary">
+              <a href={example.sourceUrl} target="_blank" rel="noreferrer noopener">
+                Read the docs
+              </a>
+            </Button>
+          )}
+        </div>
       )}
     </>
   );

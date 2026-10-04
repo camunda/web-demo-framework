@@ -11,7 +11,7 @@ const meta: ExampleMeta = {
     "To see where that key comes from: in the Code panel, open the model tab, click \"Wait for shipment confirmed\", and expand Message in the properties panel on the right. Subscription correlation key holds `orderId` (the `=` beside the box marks it as a FEEL expression), and Name holds `shipment-confirmed` — those two together are what a publisher has to match. Edit them freely; because this page publishes the key the subscription itself resolved, the run stays self-consistent either way.",
     "In a real deployment, where a separate system does the publishing, pointing that expression at a variable the instance never sets leaves the catch event waiting forever, and omitting zeebe:subscription altogether is rejected at deploy time with \"has no zeebe:subscription correlationKey\" — docs/engine-coverage.md records both.",
   ].join("\n\n"),
-  docsUrl:
+  sourceUrl:
     "https://docs.camunda.io/docs/components/modeler/bpmn/message-events/",
 };
 
