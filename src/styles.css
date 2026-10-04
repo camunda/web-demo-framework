@@ -220,6 +220,11 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
+.example-ctas {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .docs-link,
 .open-full-page {
   font-size: 13px;

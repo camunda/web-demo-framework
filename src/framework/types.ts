@@ -215,12 +215,19 @@ export interface ExampleMeta {
    */
   hero?: ExampleHero;
   /**
-   * The camunda.com docs page this example illustrates, rendered as a visible
-   * link so a reader landing on `/examples/<id>` (see routing.ts) can get back
-   * to the source material. Optional so an example can be added before its
-   * docs page exists.
+   * The camunda.com page that presents this example, shown as "View on
+   * camunda.com" so a reader landing on `/examples/<id>` (see routing.ts) can
+   * get back to it. Must be on camunda.com; omit it when no such page exists.
    */
-  docsUrl?: string;
+  pageUrl?: string;
+  /**
+   * Where the example comes from or what it teaches: the upstream GitHub
+   * folder it was ported from, or the docs.camunda.io page for its construct.
+   * Shown as "Read the docs", matching camunda.com's own button.
+   */
+  sourceUrl?: string;
+  /** A Web Modeler import link for the upstream models, shown as "Run in SaaS". */
+  saasImportUrl?: string;
   /**
    * Which gallery section this example belongs to. `"scenario"` (the
    * default, used when this field is absent) is the existing hand-built

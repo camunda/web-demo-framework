@@ -212,10 +212,48 @@ describe("example models", () => {
     const meta = EXAMPLES.find((e) => e.id === id)!;
     const { bpmn: _bpmn, ...def } = await loadExample(id);
 
-    for (const key of ["id", "title", "blurb", "hero", "docsUrl", "group"] as const) {
+    for (const key of ["id", "title", "blurb", "hero", "pageUrl", "sourceUrl", "saasImportUrl", "group"] as const) {
       expect(def[key], `${id}.${key} differs between meta.ts and index.ts`).toEqual(
         meta[key],
       );
+    }
+  });
+
+  /** Each link's label names its destination, so the URL has to be that kind of page. */
+  it.each(EXAMPLES.map((e) => e.id))("%s links where its labels say", (id) => {
+    const { pageUrl, sourceUrl, saasImportUrl } = EXAMPLES.find((e) => e.id === id)!;
+    expect(sourceUrl, `${id} has no "Read the docs" link`).toBeDefined();
+
+    if (pageUrl) {
+      const url = new URL(pageUrl);
+      expect(`${url.protocol}//${url.hostname}`, `${id}.pageUrl`).toBe("https://camunda.com");
+    }
+    if (sourceUrl) {
+      const url = new URL(sourceUrl);
+      const github = url.hostname === "github.com" && url.pathname.startsWith("/camunda/");
+      const docs = url.hostname === "docs.camunda.io";
+      expect(
+        url.protocol === "https:" && (github || docs),
+        `${id}.sourceUrl must be github.com/camunda/… or docs.camunda.io: ${sourceUrl}`,
+      ).toBe(true);
+      // The unreleased docs version: its pages move or vanish on release.
+      expect(url.pathname, `${id}.sourceUrl`).not.toMatch(/^\/docs\/next\//);
+    }
+    if (saasImportUrl) {
+      const url = new URL(saasImportUrl);
+      expect(`${url.origin}${url.pathname}`, `${id}.saasImportUrl`).toBe(
+        "https://modeler.cloud.camunda.io/import/resources",
+      );
+      // An import of some other example's models would still open fine in Web Modeler.
+      const folder = sourceUrl?.match(/^https:\/\/github\.com\/(camunda\/[^/]+)\/tree\/main\/(.+)$/);
+      expect(folder, `${id}.saasImportUrl needs a GitHub sourceUrl to import from`).toBeTruthy();
+      const sources = url.searchParams.get("source")?.split(",") ?? [];
+      expect(sources.length, `${id}.saasImportUrl imports nothing`).toBeGreaterThan(0);
+      for (const source of sources) {
+        expect(source, `${id}.saasImportUrl`).toMatch(
+          new RegExp(`^https://raw\\.githubusercontent\\.com/${folder![1]}/main/${folder![2]}/`),
+        );
+      }
     }
   });
 

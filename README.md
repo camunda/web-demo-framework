@@ -173,7 +173,7 @@ same repository (previews are skipped for fork PRs; see the hosting doc).
 
 1. Drop the `.bpmn` (and any `.form` JSON) into `src/examples/<id>/`.
 2. Write `meta.ts`: the card copy the gallery shows — `id`, `title`, `blurb`, and
-   optionally `hero`, `docsUrl`, `group`. Default-export it.
+   optionally `hero`, `pageUrl`, `sourceUrl`, `saasImportUrl`, `group`. Default-export it.
 3. Write `index.ts`: the manifest. Spread `meta`, then add handler source per
    element id, a seed, optional scenarios, and — for an agentic model — a
    scripted stand-in agent.

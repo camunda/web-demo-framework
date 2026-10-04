@@ -14,8 +14,15 @@ import type { ExampleDef, ExampleMeta } from "./framework/types";
 
 const { META, pending, rejectors } = vi.hoisted(() => ({
   META: [
-    { id: "alpha", title: "Alpha", blurb: "First." },
-    { id: "beta", title: "Beta", blurb: "Second." },
+    {
+      id: "alpha",
+      title: "Alpha",
+      blurb: "First.",
+      pageUrl: "https://camunda.com/alpha/",
+      sourceUrl: "https://github.com/camunda/alpha",
+      saasImportUrl: "https://modeler.cloud.camunda.io/import/resources?source=alpha",
+    },
+    { id: "beta", title: "Beta", blurb: "Second.", sourceUrl: "https://docs.camunda.io/beta/" },
   ] as ExampleMeta[],
   /** Settled by the test, so the pending window can be inspected. */
   pending: new Map<string, (def: ExampleDef) => void>(),
@@ -92,5 +99,45 @@ describe("App — switching examples while a manifest is in flight", () => {
 
     await screen.findByText("running alpha");
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("App — links out from an example", () => {
+  const href = (name: string) =>
+    screen.getByRole("link", { name }).getAttribute("href");
+
+  it("shows the camunda.com link and both buttons on the full page", async () => {
+    history.pushState({}, "", "/examples/alpha");
+    render(<App />);
+    settle("alpha");
+    await screen.findByText("running alpha");
+
+    expect(href("View on camunda.com ↗")).toBe("https://camunda.com/alpha/");
+    expect(href("Run in SaaS")).toBe("https://modeler.cloud.camunda.io/import/resources?source=alpha");
+    expect(href("Read the docs")).toBe("https://github.com/camunda/alpha");
+  });
+
+  it("leaves out the links an example doesn't have", async () => {
+    history.pushState({}, "", "/examples/beta");
+    render(<App />);
+    settle("beta");
+    await screen.findByText("running beta");
+
+    expect(href("Read the docs")).toBe("https://docs.camunda.io/beta/");
+    // By text, not role: an `<a>` with no href isn't a link, so a role query misses a broken button.
+    expect(screen.queryByText("Run in SaaS")).toBeNull();
+    expect(screen.queryByText("View on camunda.com ↗")).toBeNull();
+  });
+
+  it("shows none of them in an embed, which sits beside camunda.com's own", async () => {
+    history.pushState({}, "", "/examples/alpha?embed=1");
+    render(<App />);
+    settle("alpha");
+    await screen.findByText("running alpha");
+
+    expect(screen.getByRole("link", { name: /Open full page/ })).toBeTruthy();
+    for (const name of ["View on camunda.com ↗", "Run in SaaS", "Read the docs"]) {
+      expect(screen.queryByText(name), name).toBeNull();
+    }
   });
 });

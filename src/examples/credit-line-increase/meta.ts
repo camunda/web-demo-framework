@@ -1,4 +1,5 @@
 import type { ExampleMeta } from "../../framework/types";
+import { tutorialLinks } from "../tutorials";
 
 /** Gallery card copy for this example — see `ExampleMeta`. */
 const meta: ExampleMeta = {
@@ -11,8 +12,16 @@ const meta: ExampleMeta = {
     lede: "Camunda's long-running agent pattern, running here on a wasm engine in your browser. One tool call submits the bureau request and doesn't return until the report lands or the SLA elapses — hours or days on a real cluster, and no worker, no poll loop, nothing to retry in the meantime.",
     tagline: "Long-running agent",
   },
-  docsUrl:
-    "https://github.com/camunda/camunda-8-tutorials/tree/main/examples/long-running-agent",
+  pageUrl: "https://camunda.com/orchestrate/agents/#long-running-agent",
+  ...tutorialLinks(
+    "long-running-agent",
+    [
+      "credit-line-increase-agent.bpmn",
+      "credit-line-request.form",
+      "underwriting-ops-escalation.form",
+    ],
+    "Credit Line Increase Agent",
+  ),
 };
 
 export default meta;

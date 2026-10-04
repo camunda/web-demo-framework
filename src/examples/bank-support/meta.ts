@@ -1,4 +1,5 @@
 import type { ExampleMeta } from "../../framework/types";
+import { tutorialLinks } from "../tutorials";
 
 const meta: ExampleMeta = {
   id: "bank-support",
@@ -10,7 +11,19 @@ const meta: ExampleMeta = {
     headline: "One agent *routes*. Three others do the work.",
     lede: "The orchestrator resolves nothing on its own — it decides which specialists a request needs and delegates. Each runs as a separate process instance, so what came back is attributable to the specialist that said it.",
   },
-  docsUrl: "https://camunda.com/orchestrate/agents/",
+  pageUrl: "https://camunda.com/orchestrate/agents/#orchestrator-agent",
+  ...tutorialLinks(
+    "orchestrator-agent",
+    [
+      "bank-support-orchestrator.bpmn",
+      "bank-support-loan-agent.bpmn",
+      "bank-support-account-agent.bpmn",
+      "bank-support-card-agent.bpmn",
+      "bank-support-request.form",
+      "bank-support-review.form",
+    ],
+    "Bank Support Orchestrator Agent",
+  ),
 };
 
 export default meta;
