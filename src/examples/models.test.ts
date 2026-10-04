@@ -222,7 +222,7 @@ describe("example models", () => {
   /** Each link's label names its destination, so the URL has to be that kind of page. */
   it.each(EXAMPLES.map((e) => e.id))("%s links where its labels say", (id) => {
     const { pageUrl, sourceUrl, saasImportUrl } = EXAMPLES.find((e) => e.id === id)!;
-    expect(pageUrl ?? sourceUrl, `${id} links nowhere`).toBeDefined();
+    expect(sourceUrl, `${id} has no "Read the docs" link`).toBeDefined();
 
     if (pageUrl) {
       const url = new URL(pageUrl);
