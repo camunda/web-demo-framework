@@ -1,0 +1,694 @@
+import{b as n}from"./index-CMPB3JD1.js";import"./vendor-react-9Ma26nY1.js";import"./vendor-design-system-B2HQUYYn.js";const t=`<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ported from camunda/camunda-8-tutorials/examples/decision-agent
+  (models/expense-decision-agent.bpmn). Upstream element ids and names are
+  kept wherever the engine allowed them.
+
+  See index.ts for the divergences from upstream and why each one exists.
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bioc="http://bpmn.io/schema/bpmn/biocolor/1.0" xmlns:color="http://www.omg.org/spec/BPMN/non-normative/color/1.0" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_ExpenseDecisionAgent" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.46.1" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
+  <bpmn:process id="expense-decision-agent" name="Expense Decision Agent (Decision Agent)" isExecutable="true">
+    <bpmn:documentation>A concrete runnable Decision Agent example, based on the pattern at camunda.com/orchestrate/agents.
+
+A DMN decision table is the first-class decision-maker, not a fallback: it settles the predictable, clear-cut claims instantly and for free, and for those the agent is never invoked at all. Only the residual the table cannot resolve on its own - a gray-zone amount, a non-USD claim, or a category it doesn't cover - reaches the agent, which has exactly one real tool and one documented policy exception a flat rule band cannot express. Anything still genuinely ambiguous after that goes to a human rather than being guessed at.</bpmn:documentation>
+    <bpmn:startEvent id="StartEvent_ClaimSubmitted" name="Expense claim submitted">
+      <bpmn:documentation>Start form. It carries the whole claim: the category and amount the rule table reads, and the justification only the agent ever reads.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:formDefinition formId="expense-claim-start" />
+      </bpmn:extensionElements>
+      <bpmn:outgoing>Flow_ToPolicy</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToPolicy" sourceRef="StartEvent_ClaimSubmitted" targetRef="BusinessRuleTask_EvaluatePolicy" />
+    <bpmn:businessRuleTask id="BusinessRuleTask_EvaluatePolicy" name="Evaluate expense policy">
+      <bpmn:documentation>Deterministic policy check: known categories with amounts inside the clear approve/reject bands are decided here, without ever invoking the agent. The decision is expense-policy.dmn, deployed alongside this diagram; its single output lands in policyDecision as "approved", "rejected" or "needs-review".</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:calledDecision decisionId="expense_policy_decision" resultVariable="policyDecision" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToPolicy</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPolicyGateway</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:sequenceFlow id="Flow_ToPolicyGateway" sourceRef="BusinessRuleTask_EvaluatePolicy" targetRef="Gateway_PolicyOutcome" />
+    <bpmn:exclusiveGateway id="Gateway_PolicyOutcome" name="Policy&#10;outcome?" default="Flow_PolicyNeedsReview">
+      <bpmn:documentation>The table's verdict routes the claim. Both decided outcomes leave here for a notification without the agent ever being asked; only the default path, "needs review", reaches it.</bpmn:documentation>
+      <bpmn:incoming>Flow_ToPolicyGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_PolicyApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_PolicyRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_PolicyNeedsReview</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_PolicyApproved" name="approved" sourceRef="Gateway_PolicyOutcome" targetRef="NotifyApprovedReimbursement">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=policyDecision = "approved"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PolicyRejected" name="rejected" sourceRef="Gateway_PolicyOutcome" targetRef="NotifyRejectedClaim">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=policyDecision = "rejected"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PolicyNeedsReview" name="needs&#10;review" sourceRef="Gateway_PolicyOutcome" targetRef="ExpenseReasoningAgent" />
+    <bpmn:adHocSubProcess id="ExpenseReasoningAgent" name="Expense Reasoning Agent" zeebe:modelerTemplate="io.camunda.connectors.agenticai.aiagent.jobworker.v1" zeebe:modelerTemplateVersion="10">
+      <bpmn:documentation>Reached only for the residual the rule table could not resolve. It is told the same policy bands the table just applied, plus one documented exception it may apply with judgment. Its one real tool is only useful for one of those residual cases - a claim that isn't in USD. It answers approved, rejected, or escalate.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:adHoc outputCollection="toolCallResults" outputElement="={&#10;  id: toolCall._meta.id,&#10;  name: toolCall._meta.name,&#10;  content: toolCallResult&#10;}" />
+        <zeebe:taskDefinition type="io.camunda.agenticai:aiagent-job-worker:1" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="openaiCompatible" target="provider.type" />
+          <zeebe:input source="{{secrets.CAMUNDA_PROVIDED_LLM_API_ENDPOINT}}" target="provider.openaiCompatible.endpoint" />
+          <zeebe:input source="{{secrets.CAMUNDA_PROVIDED_LLM_API_KEY}}" target="provider.openaiCompatible.authentication.apiKey" />
+          <zeebe:input source="{{secrets.CAMUNDA_PROVIDED_LLM_DEFAULT_MODEL}}" target="provider.openaiCompatible.model.model" />
+          <zeebe:input source="=&#34;You are a demo workflow assistant that resolves expense claims an automated policy engine could not decide on its own.&#10;&#10;You must invoke tools using the actual tool-calling mechanism available to you - never describe or simulate a tool call in your plain-text response, and never invent, guess, or fabricate what a tool would return.&#10;&#10;The standard reimbursement policy, already checked once by the rule engine before you were called, is:&#10;- meals: approve up to $75, reject above $150&#10;- lodging: approve up to $250, reject above $400&#10;- transport: approve up to $100, reject above $200&#10;You are only ever invoked for the cases the rule engine could not resolve on its own: amounts in the gray zone between those approve/reject bands, claims in a currency other than USD, or categories the policy doesn&#39;t cover.&#10;&#10;One documented exception you may apply: a &#39;meals&#39; claim may be approved up to double its normal cap (i.e. up to $150) if the justification clearly describes client or prospect entertainment with multiple attendees and mentions a receipt.&#10;&#10;If the claim isn&#39;t in USD, call ConvertCurrency to get the USD amount before judging it against the policy bands above - never estimate a conversion yourself.&#10;&#10;Once you&#39;ve reached a conclusion, stop calling tools and give your final answer: &#39;decision&#39; must be &#39;approved&#39; if it fits within policy (including the documented exception), &#39;rejected&#39; if it clearly exceeds every applicable cap, or &#39;escalate&#39; if the claim is genuinely ambiguous and you can&#39;t responsibly decide either way. Always fill in &#39;reasoning&#39; with a short explanation. What happens next is handled automatically.&#34;" target="data.systemPrompt.prompt" />
+          <zeebe:input source="=&#34;Expense claim under review:&#10;Category: &#34; + category + &#34;&#10;Amount: &#34; + string(amount) + &#34; &#34; + currency + &#34;&#10;Justification: &#34; + justification + &#34;&#10;&#10;The automated policy engine flagged this claim as needing review. Please assess it and give your final decision.&#34;" target="data.userPrompt.prompt" />
+          <zeebe:input target="agentContext" />
+          <zeebe:input source="in-process" target="data.memory.storage.type" />
+          <zeebe:input source="=20" target="data.memory.contextWindowSize" />
+          <zeebe:input source="=10" target="data.limits.maxModelCalls" />
+          <zeebe:input source="WAIT_FOR_TOOL_CALL_RESULTS" target="data.events.behavior" />
+          <zeebe:input source="json" target="data.response.format.type" />
+          <zeebe:input source="ExpenseDecision" target="data.response.format.schemaName" />
+          <zeebe:input source="=false" target="data.response.includeAssistantMessage" />
+          <zeebe:input source="=false" target="data.response.includeAgentContext" />
+          <zeebe:input target="agent" />
+          <zeebe:output source="=agent" target="agent" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="elementTemplateVersion" value="10" />
+          <zeebe:header key="elementTemplateId" value="io.camunda.connectors.agenticai.aiagent.jobworker.v1" />
+          <zeebe:header key="retryBackoff" value="PT30S" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_PolicyNeedsReview</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToAgentGateway</bpmn:outgoing>
+      <bpmn:serviceTask id="ConvertCurrency" name="Convert currency" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
+        <bpmn:documentation>Tool (the agent's only one). Converts a non-USD claim amount to USD via the free, public frankfurter.dev exchange-rate API (European Central Bank reference rates, no key required) so the agent can judge it against the same policy bands the rule engine used. Useless for a USD claim, which is the point: the tool exists for exactly one of the residual cases.</bpmn:documentation>
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="io.camunda:http-json:1" retries="2" />
+          <zeebe:ioMapping>
+            <zeebe:input source="=false" target="ignoreNullValues" />
+            <zeebe:input source="noAuth" target="authentication.type" />
+            <zeebe:input source="GET" target="method" />
+            <zeebe:input source="https://api.frankfurter.dev/v1/latest" target="url" />
+            <zeebe:input source="={&#10;  amount: fromAi(toolCall.claimAmount, &#34;The claim&#39;s amount in its original currency, as a plain number with no currency symbol and no thousands separators.&#34;, &#34;number&#34;),&#10;  from: fromAi(toolCall.claimCurrency, &#34;The claim&#39;s original three-letter currency code, copied exactly as it appears on the claim.&#34;, &#34;string&#34;),&#10;  to: &#34;USD&#34;&#10;}" target="queryParameters" />
+            <zeebe:input source="=false" target="storeResponse" />
+            <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
+            <zeebe:input source="=20" target="readTimeoutInSeconds" />
+          </zeebe:ioMapping>
+          <zeebe:taskHeaders>
+            <zeebe:header key="elementTemplateVersion" value="13" />
+            <zeebe:header key="elementTemplateId" value="io.camunda.connectors.HttpJson.v2" />
+            <zeebe:header key="retryBackoff" value="PT5S" />
+          </zeebe:taskHeaders>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+    </bpmn:adHocSubProcess>
+    <bpmn:sequenceFlow id="Flow_ToAgentGateway" sourceRef="ExpenseReasoningAgent" targetRef="Gateway_AgentOutcome" />
+    <bpmn:exclusiveGateway id="Gateway_AgentOutcome" name="Agent&#10;resolved?" default="Flow_AgentEscalate">
+      <bpmn:documentation>The agent's own verdict routes the claim, into the same two notifications the policy gateway uses. "escalate" is the default path, so a claim the agent could not resolve - and equally one whose answer this gateway cannot read at all - goes to a human rather than being silently approved.</bpmn:documentation>
+      <bpmn:incoming>Flow_ToAgentGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_AgentApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_AgentRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_AgentEscalate</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_AgentApproved" name="approved" sourceRef="Gateway_AgentOutcome" targetRef="NotifyApprovedReimbursement">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=agentDecision = "approved"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_AgentRejected" name="rejected" sourceRef="Gateway_AgentOutcome" targetRef="NotifyRejectedClaim">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=agentDecision = "rejected"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_AgentEscalate" name="escalate" sourceRef="Gateway_AgentOutcome" targetRef="HumanTask_ReviewExpenseClaim" />
+    <bpmn:serviceTask id="NotifyApprovedReimbursement" name="Notify approved reimbursement" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
+      <bpmn:documentation>Posts the approved reimbursement to httpbin.io's echo endpoint (a stand-in for a real payroll/finance notification channel). Reached from either gateway, so it is where the two decision-makers' verdicts converge.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="2" />
+        <zeebe:ioMapping>
+          <zeebe:input source="noAuth" target="authentication.type" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="https://httpbin.io/post" target="url" />
+          <zeebe:input source="=false" target="storeResponse" />
+          <zeebe:input source="=false" target="followRedirects" />
+          <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="=20" target="readTimeoutInSeconds" />
+          <zeebe:input source="=false" target="ignoreNullValues" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="elementTemplateVersion" value="13" />
+          <zeebe:header key="elementTemplateId" value="io.camunda.connectors.HttpJson.v2" />
+          <zeebe:header key="retryBackoff" value="PT5S" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_PolicyApproved</bpmn:incoming>
+      <bpmn:incoming>Flow_AgentApproved</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndApproved</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEndApproved" sourceRef="NotifyApprovedReimbursement" targetRef="EndEvent_ReimbursementApproved" />
+    <bpmn:endEvent id="EndEvent_ReimbursementApproved" name="Reimbursement approved">
+      <bpmn:incoming>Flow_ToEndApproved</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="NotifyRejectedClaim" name="Notify rejected claim" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2" zeebe:modelerTemplateVersion="13">
+      <bpmn:documentation>Posts the rejected claim to httpbin.io's echo endpoint (a stand-in for a real payroll/finance notification channel). Reached from either gateway, the same way the approval notification is.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="2" />
+        <zeebe:ioMapping>
+          <zeebe:input source="noAuth" target="authentication.type" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="https://httpbin.io/post" target="url" />
+          <zeebe:input source="=false" target="storeResponse" />
+          <zeebe:input source="=false" target="followRedirects" />
+          <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="=20" target="readTimeoutInSeconds" />
+          <zeebe:input source="=false" target="ignoreNullValues" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="elementTemplateVersion" value="13" />
+          <zeebe:header key="elementTemplateId" value="io.camunda.connectors.HttpJson.v2" />
+          <zeebe:header key="retryBackoff" value="PT5S" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_PolicyRejected</bpmn:incoming>
+      <bpmn:incoming>Flow_AgentRejected</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndRejected</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEndRejected" sourceRef="NotifyRejectedClaim" targetRef="EndEvent_ClaimRejected" />
+    <bpmn:endEvent id="EndEvent_ClaimRejected" name="Claim rejected">
+      <bpmn:incoming>Flow_ToEndRejected</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="HumanTask_ReviewExpenseClaim" name="Review expense claim">
+      <bpmn:documentation>Reached only on the gateway's default path: neither the rule table nor the agent could responsibly decide. The form shows both of their verdicts alongside the claim, and the reviewer records the decision.</bpmn:documentation>
+      <bpmn:extensionElements>
+        <zeebe:userTask />
+        <zeebe:formDefinition formId="expense-claim-review" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_AgentEscalate</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndManual</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_ToEndManual" sourceRef="HumanTask_ReviewExpenseClaim" targetRef="EndEvent_ManuallyDecided" />
+    <bpmn:endEvent id="EndEvent_ManuallyDecided" name="Claim manually decided">
+      <bpmn:incoming>Flow_ToEndManual</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:textAnnotation id="TextAnnotation_0130wya">
+      <bpmn:text>A deterministic decision comes first for the easy cases - the agent is never invoked for these</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_1nq3ifs" associationDirection="None" sourceRef="BusinessRuleTask_EvaluatePolicy" targetRef="TextAnnotation_0130wya" />
+    <bpmn:textAnnotation id="TextAnnotation_10q8vgq">
+      <bpmn:text>The agent is the exception handler, not the decision-maker. A real deployment would orchestrate more tools to be useful - kept simple for the example</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="Association_0mwfn28" associationDirection="None" sourceRef="ExpenseReasoningAgent" targetRef="TextAnnotation_10q8vgq" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="expense-decision-agent">
+      <bpmndi:BPMNShape id="StartEvent_ClaimSubmitted_di" bpmnElement="StartEvent_ClaimSubmitted">
+        <dc:Bounds x="162" y="242" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="146" y="285" width="69" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BusinessRuleTask_EvaluatePolicy_di" bpmnElement="BusinessRuleTask_EvaluatePolicy" bioc:stroke="#0d4372" bioc:fill="#bbdefb" color:background-color="#bbdefb" color:border-color="#0d4372">
+        <dc:Bounds x="250" y="220" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_PolicyOutcome_di" bpmnElement="Gateway_PolicyOutcome" isMarkerVisible="true" bioc:stroke="#0d4372" bioc:fill="#bbdefb" color:background-color="#bbdefb" color:border-color="#0d4372">
+        <dc:Bounds x="400" y="235" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="396" y="192" width="58" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ExpenseReasoningAgent_di" bpmnElement="ExpenseReasoningAgent" isExpanded="true">
+        <dc:Bounds x="500" y="160" width="340" height="220" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ConvertCurrency_di" bpmnElement="ConvertCurrency">
+        <dc:Bounds x="610" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_AgentOutcome_di" bpmnElement="Gateway_AgentOutcome" isMarkerVisible="true" bioc:stroke="#0d4372" bioc:fill="#bbdefb" color:background-color="#bbdefb" color:border-color="#0d4372">
+        <dc:Bounds x="900" y="235" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="897" y="192" width="56" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="NotifyApprovedReimbursement_di" bpmnElement="NotifyApprovedReimbursement">
+        <dc:Bounds x="1040" y="110" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_ReimbursementApproved_di" bpmnElement="EndEvent_ReimbursementApproved">
+        <dc:Bounds x="1200" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1187" y="175" width="63" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="NotifyRejectedClaim_di" bpmnElement="NotifyRejectedClaim">
+        <dc:Bounds x="1040" y="329" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_ClaimRejected_di" bpmnElement="EndEvent_ClaimRejected">
+        <dc:Bounds x="1200" y="351" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1188" y="394" width="61" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="HumanTask_ReviewExpenseClaim_di" bpmnElement="HumanTask_ReviewExpenseClaim">
+        <dc:Bounds x="1040" y="220" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_ManuallyDecided_di" bpmnElement="EndEvent_ManuallyDecided">
+        <dc:Bounds x="1200" y="242" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1187" y="285" width="63" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_0130wya_di" bpmnElement="TextAnnotation_0130wya">
+        <dc:Bounds x="220" y="450" width="180" height="82" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_10q8vgq_di" bpmnElement="TextAnnotation_10q8vgq">
+        <dc:Bounds x="618" y="530" width="224" height="96" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_ToPolicy_di" bpmnElement="Flow_ToPolicy">
+        <di:waypoint x="198" y="260" />
+        <di:waypoint x="250" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPolicyGateway_di" bpmnElement="Flow_ToPolicyGateway">
+        <di:waypoint x="350" y="260" />
+        <di:waypoint x="400" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PolicyApproved_di" bpmnElement="Flow_PolicyApproved">
+        <di:waypoint x="425" y="235" />
+        <di:waypoint x="425" y="80" />
+        <di:waypoint x="1090" y="80" />
+        <di:waypoint x="1090" y="110" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="435" y="62" width="49" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PolicyRejected_di" bpmnElement="Flow_PolicyRejected">
+        <di:waypoint x="425" y="285" />
+        <di:waypoint x="425" y="440" />
+        <di:waypoint x="1090" y="440" />
+        <di:waypoint x="1090" y="409" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="435" y="422" width="43" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PolicyNeedsReview_di" bpmnElement="Flow_PolicyNeedsReview">
+        <di:waypoint x="450" y="260" />
+        <di:waypoint x="500" y="260" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="455" y="217" width="41" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToAgentGateway_di" bpmnElement="Flow_ToAgentGateway">
+        <di:waypoint x="840" y="260" />
+        <di:waypoint x="900" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AgentApproved_di" bpmnElement="Flow_AgentApproved">
+        <di:waypoint x="925" y="235" />
+        <di:waypoint x="925" y="150" />
+        <di:waypoint x="1040" y="150" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="935" y="132" width="49" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AgentRejected_di" bpmnElement="Flow_AgentRejected">
+        <di:waypoint x="925" y="285" />
+        <di:waypoint x="925" y="369" />
+        <di:waypoint x="1040" y="369" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="935" y="351" width="43" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AgentEscalate_di" bpmnElement="Flow_AgentEscalate">
+        <di:waypoint x="950" y="260" />
+        <di:waypoint x="1040" y="260" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="971" y="242" width="45" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndApproved_di" bpmnElement="Flow_ToEndApproved">
+        <di:waypoint x="1140" y="150" />
+        <di:waypoint x="1200" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndRejected_di" bpmnElement="Flow_ToEndRejected">
+        <di:waypoint x="1140" y="369" />
+        <di:waypoint x="1200" y="369" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndManual_di" bpmnElement="Flow_ToEndManual">
+        <di:waypoint x="1140" y="260" />
+        <di:waypoint x="1200" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_1nq3ifs_di" bpmnElement="Association_1nq3ifs">
+        <di:waypoint x="300" y="300" />
+        <di:waypoint x="300" y="450" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_0mwfn28_di" bpmnElement="Association_0mwfn28">
+        <di:waypoint x="730" y="380" />
+        <di:waypoint x="730" y="530" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
+`,o=`<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_ExpensePolicy" name="DRD" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.46.1" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
+  <decision id="expense_policy_decision" name="Expense Policy Decision">
+    <decisionTable id="DecisionTable_ExpensePolicy" hitPolicy="FIRST">
+      <input id="Input_Currency" label="currency">
+        <inputExpression id="InputExpression_Currency" typeRef="string">
+          <text>currency</text>
+        </inputExpression>
+      </input>
+      <input id="Input_Category" label="category">
+        <inputExpression id="InputExpression_Category" typeRef="string">
+          <text>category</text>
+        </inputExpression>
+      </input>
+      <input id="Input_Amount" label="amount">
+        <inputExpression id="InputExpression_Amount" typeRef="number">
+          <text>amount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_Outcome" label="outcome" name="outcome" typeRef="string" />
+      <rule id="Rule_ForeignCurrency">
+        <inputEntry id="UnaryTests_ForeignCurrency_Currency">
+          <text>not("USD")</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_ForeignCurrency_Category">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_ForeignCurrency_Amount">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_ForeignCurrency">
+          <text>"needs-review"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_MealsApprove">
+        <inputEntry id="UnaryTests_MealsApprove_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_MealsApprove_Category">
+          <text>"meals"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_MealsApprove_Amount">
+          <text>&lt;=75</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_MealsApprove">
+          <text>"approved"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_MealsReview">
+        <inputEntry id="UnaryTests_MealsReview_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_MealsReview_Category">
+          <text>"meals"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_MealsReview_Amount">
+          <text>(75..150]</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_MealsReview">
+          <text>"needs-review"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_MealsReject">
+        <inputEntry id="UnaryTests_MealsReject_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_MealsReject_Category">
+          <text>"meals"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_MealsReject_Amount">
+          <text>&gt;150</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_MealsReject">
+          <text>"rejected"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_LodgingApprove">
+        <inputEntry id="UnaryTests_LodgingApprove_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_LodgingApprove_Category">
+          <text>"lodging"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_LodgingApprove_Amount">
+          <text>&lt;=250</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_LodgingApprove">
+          <text>"approved"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_LodgingReview">
+        <inputEntry id="UnaryTests_LodgingReview_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_LodgingReview_Category">
+          <text>"lodging"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_LodgingReview_Amount">
+          <text>(250..400]</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_LodgingReview">
+          <text>"needs-review"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_LodgingReject">
+        <inputEntry id="UnaryTests_LodgingReject_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_LodgingReject_Category">
+          <text>"lodging"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_LodgingReject_Amount">
+          <text>&gt;400</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_LodgingReject">
+          <text>"rejected"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_TransportApprove">
+        <inputEntry id="UnaryTests_TransportApprove_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_TransportApprove_Category">
+          <text>"transport"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_TransportApprove_Amount">
+          <text>&lt;=100</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_TransportApprove">
+          <text>"approved"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_TransportReview">
+        <inputEntry id="UnaryTests_TransportReview_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_TransportReview_Category">
+          <text>"transport"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_TransportReview_Amount">
+          <text>(100..200]</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_TransportReview">
+          <text>"needs-review"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_TransportReject">
+        <inputEntry id="UnaryTests_TransportReject_Currency">
+          <text>"USD"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_TransportReject_Category">
+          <text>"transport"</text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_TransportReject_Amount">
+          <text>&gt;200</text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_TransportReject">
+          <text>"rejected"</text>
+        </outputEntry>
+      </rule>
+      <rule id="Rule_UncoveredCategory">
+        <inputEntry id="UnaryTests_UncoveredCategory_Currency">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_UncoveredCategory_Category">
+          <text></text>
+        </inputEntry>
+        <inputEntry id="UnaryTests_UncoveredCategory_Amount">
+          <text></text>
+        </inputEntry>
+        <outputEntry id="LiteralExpression_UncoveredCategory">
+          <text>"needs-review"</text>
+        </outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="expense_policy_decision">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>
+`,i=[{text:"# Submit an expense claim",type:"text",layout:{row:"Row_heading",columns:null},id:"Field_Heading"},{text:`The fields below already hold a clear-cut, auto-approved claim. Pick one of the presets above to load another, or edit the values by hand:
+
+| Scenario | Category | Amount | Currency |
+|---|---|---|---|
+| Clear approve (default) | meals | 45 | USD |
+| Clear reject | lodging | 550 | USD |
+| Gray zone, agent resolves | meals | 90 | EUR |
+| Gray zone, agent escalates | lodging | 320 | USD |`,type:"text",layout:{row:"Row_scenarios",columns:null},id:"Field_ScenarioTable"},{label:"Category",values:[{label:"Meals",value:"meals"},{label:"Lodging",value:"lodging"},{label:"Transport",value:"transport"},{label:"Other",value:"other"}],type:"select",layout:{row:"Row_category",columns:null},id:"Field_Category",key:"category",defaultValue:"meals",validate:{required:!0}},{label:"Amount",type:"number",layout:{row:"Row_amount",columns:null},id:"Field_Amount",key:"amount",defaultValue:45,validate:{required:!0}},{label:"Currency",values:[{label:"USD",value:"USD"},{label:"EUR",value:"EUR"},{label:"GBP",value:"GBP"}],type:"select",layout:{row:"Row_currency",columns:null},id:"Field_Currency",key:"currency",defaultValue:"USD",validate:{required:!0}},{label:"Justification",description:"Free text - the agent reads this whenever the automated policy can't decide on its own.",type:"textarea",layout:{row:"Row_justification",columns:null},id:"Field_Justification",key:"justification",defaultValue:"Team lunch with three colleagues; standard restaurant receipt attached.",validate:{required:!0}}],a="default",r="expense-claim-start",s="Camunda Cloud",d="8.10.0",c={name:"Camunda Modeler",version:"5.46.1"},p=19,l={components:i,type:a,id:r,executionPlatform:s,executionPlatformVersion:d,exporter:c,schemaVersion:p},u=[{text:`# Expense claim needs your decision
+
+The policy engine flagged this claim for review, and the agent could not confidently resolve it either. Check the details below, then record your decision.`,type:"text",layout:{row:"Row_heading",columns:null},id:"Field_ReviewHeading"},{text:`**Category:** {{category}}
+
+**Amount:** {{amount}} {{currency}}
+
+**Justification:** {{justification}}
+
+**Policy engine outcome:** {{policyDecision}}
+
+**Agent's recommendation:** {{agentDecision}}
+
+**Agent's reasoning:** {{agentReasoning}}`,type:"text",layout:{row:"Row_findings",columns:null},id:"Field_ReviewFindings"},{label:"Reviewer decision",values:[{label:"Approve claim",value:"approved"},{label:"Reject claim",value:"rejected"}],type:"radio",layout:{row:"Row_review_decision",columns:null},id:"Field_ReviewDecision",key:"reviewDecision",validate:{required:!0}},{label:"Reviewer comments",description:"Explain your decision - this is recorded alongside the process instance.",type:"textarea",layout:{row:"Row_review_comments",columns:null},id:"Field_ReviewComments",key:"reviewComments"}],m="default",y="expense-claim-review",b="Camunda Cloud",g="8.10.0",h={name:"Camunda Modeler",version:"5.46.1"},w=19,x={components:u,type:m,id:y,executionPlatform:b,executionPlatformVersion:g,exporter:h,schemaVersion:w},e={category:"meals",amount:45,currency:"USD",justification:"Team lunch with three colleagues; standard restaurant receipt attached."},v=`async (job) => {
+  const v = job.variables;
+  const category = String(v.category || "");
+  const currency = String(v.currency || "USD");
+  const amount = Number(v.amount);
+
+  // Step 1 — the policy bands are in USD. A claim in anything else has to be
+  // converted before it can be compared, and the prompt forbids estimating it.
+  if (currency !== "USD" && v.convertedAmountUSD === undefined) {
+    return {
+      variables: { claimAmount: amount, claimCurrency: currency },
+      activateElements: [{ elementId: "ConvertCurrency" }],
+    };
+  }
+
+  const usd = currency === "USD" ? amount : Number(v.convertedAmountUSD);
+  const shown =
+    currency === "USD"
+      ? "$" + usd
+      : amount + " " + currency + " (about $" + usd + ")";
+
+  // The connector's JSON response format upstream; set here, because this
+  // engine does not apply the agent's agent.responseJson.* output mapping.
+  const decide = (decision, reasoning) => ({
+    completionConditionFulfilled: true,
+    variables: { agentDecision: decision, agentReasoning: reasoning },
+  });
+
+  // Step 2 — the same bands the rule engine just used, as the prompt states
+  // them. An uncovered category has none, which is one of the three reasons a
+  // claim reaches this agent at all.
+  const bands = { meals: [75, 150], lodging: [250, 400], transport: [100, 200] };
+  const band = bands[category];
+  if (!band) {
+    return decide(
+      "escalate",
+      "No reimbursement band covers '" + category + "', so " + shown +
+        " cannot be judged against policy. Referring it to a human."
+    );
+  }
+  const approveCap = band[0];
+  const rejectCap = band[1];
+
+  if (usd <= approveCap) {
+    return decide(
+      "approved",
+      "Converted to " + shown + ", which is inside the $" + approveCap + " " +
+        category + " cap."
+    );
+  }
+  if (usd > rejectCap) {
+    return decide(
+      "rejected",
+      shown + " is above the $" + rejectCap + " point at which a " + category +
+        " claim is rejected outright."
+    );
+  }
+
+  // Step 3 — the gray zone, and the one documented exception. A flat DMN band
+  // cannot express this: it turns on reading the justification.
+  const justification = String(v.justification || "");
+  const entertainment = /client|prospect|customer/i.test(justification);
+  const attendees =
+    /attendee|guest|colleague|\\b(two|three|four|five|six|several|multiple)\\b/i.test(
+      justification
+    );
+  const receipt = /receipt|itemi[sz]ed|invoice/i.test(justification);
+
+  if (category === "meals" && entertainment && attendees && receipt && usd <= approveCap * 2) {
+    return decide(
+      "approved",
+      shown + " is over the $" + approveCap +
+        " meals cap, but the justification describes client entertainment with " +
+        "several attendees and a receipt, so the documented exception applies up to $" +
+        approveCap * 2 + "."
+    );
+  }
+
+  return decide(
+    "escalate",
+    shown + " sits between the $" + approveCap + " and $" + rejectCap + " " +
+      category + " bands, and the justification gives nothing concrete to " +
+      "decide on. Referring it to a human rather than guessing."
+  );
+}`,E=`async (job, { num, text, sleep, trace }) => {
+  // Stands in for the HTTP connector calling api.frankfurter.dev (ECB
+  // reference rates). No network in a sandboxed browser demo, so use a small
+  // fixed rate table covering the currencies the claim form offers — the shape
+  // of the answer is what matters here, and a fixed rate keeps the scenarios
+  // reproducible where a live rate would drift day to day.
+  const amount = num("claimAmount");
+  const from = text("claimCurrency", "USD");
+  const rates = { USD: 1, EUR: 1.09, GBP: 1.27 };
+  const rate = rates[from];
+
+  await sleep(400);
+
+  if (!rate) {
+    trace("no reference rate for " + JSON.stringify(from));
+    return {
+      toolCallResult: "No ECB reference rate available for " + from + ".",
+    };
+  }
+
+  const usd = Math.round(amount * rate * 100) / 100;
+  trace(amount + " " + from + " → " + usd + " USD");
+
+  return {
+    convertedAmountUSD: usd,
+    toolCallResult:
+      "Converted " + amount + " " + from + " to " + usd +
+      " USD (ECB reference rate).",
+  };
+}`,_=`async (job, { text, sleep, trace }) => {
+  // Stands in for the HTTP connector posting to a payroll/finance
+  // notification channel. Reached from either gateway, so the one thing worth
+  // recording is which decision-maker actually settled it — derived from
+  // whether the agent ever ran, not from a flag someone had to remember to set.
+  const v = job.variables;
+  const source = v.agentDecision === undefined || v.agentDecision === null ? "policy" : "agent";
+
+  await sleep(300);
+  trace("approved by the " + source);
+
+  return {
+    reimbursementNotice: {
+      category: text("category", ""),
+      amount: v.amount,
+      currency: text("currency", ""),
+      policyDecision: text("policyDecision", ""),
+      agentDecision: v.agentDecision ?? null,
+      agentReasoning: v.agentReasoning ?? null,
+      decisionSource: source,
+    },
+  };
+}`,f=`async (job, { text, sleep, trace }) => {
+  // The mirror of the approval notification, and reached the same two ways.
+  const v = job.variables;
+  const source = v.agentDecision === undefined || v.agentDecision === null ? "policy" : "agent";
+
+  await sleep(300);
+  trace("rejected by the " + source);
+
+  return {
+    rejectionNotice: {
+      category: text("category", ""),
+      amount: v.amount,
+      currency: text("currency", ""),
+      policyDecision: text("policyDecision", ""),
+      agentDecision: v.agentDecision ?? null,
+      agentReasoning: v.agentReasoning ?? null,
+      decisionSource: source,
+    },
+  };
+}`,A={...n,bpmn:t,decisions:{"expense-policy.dmn":o},forms:{"expense-claim-start":l,"expense-claim-review":x},seed:e,scenariosLabel:"Expense claim",scenarios:[{label:"Clear approve — policy decides, agent never runs",variables:e},{label:"Clear reject — policy decides, agent never runs",variables:{category:"lodging",amount:550,currency:"USD",justification:"Presidential suite booked for a one-night conference stay."}},{label:"Gray zone — agent converts and resolves",variables:{category:"meals",amount:90,currency:"EUR",justification:"Dinner with a prospective client to close a deal; four attendees, itemized receipt attached."}},{label:"Gray zone — agent escalates to a human",variables:{category:"lodging",amount:320,currency:"USD",justification:"Hotel for an extended stay; exact reason unclear, awaiting further details from the employee."}}],scriptedAgent:v,handlers:[{elementId:"ConvertCurrency",standsInFor:"HTTP connector — api.frankfurter.dev ECB reference rates",source:E},{elementId:"NotifyApprovedReimbursement",standsInFor:"HTTP connector — payroll/finance reimbursement notice",source:_},{elementId:"NotifyRejectedClaim",standsInFor:"HTTP connector — payroll/finance rejection notice",source:f}]};export{A as expenseDecision};
