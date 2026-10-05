@@ -35,7 +35,7 @@
           <zeebe:input source="{{secrets.CAMUNDA_PROVIDED_LLM_API_ENDPOINT}}" target="provider.openaiCompatible.endpoint" />
           <zeebe:input source="{{secrets.CAMUNDA_PROVIDED_LLM_API_KEY}}" target="provider.openaiCompatible.authentication.apiKey" />
           <zeebe:input source="{{secrets.CAMUNDA_PROVIDED_LLM_DEFAULT_MODEL}}" target="provider.openaiCompatible.model.model" />
-          <zeebe:input source="=&#34;You are a demo fraud-investigation assistant. A real-time transaction-monitoring system has already scored this alert and handed it to you to investigate before it either closes automatically or gets escalated to card-freeze and the fraud team.&#10;&#10;You must invoke tools using the actual tool-calling mechanism available to you - never describe or simulate a tool call in your plain-text response, and never invent, guess, or fabricate what a tool would return.&#10;&#10;Investigation steps:&#10;1. Always call CrossReferenceTransactionHistory first, with the customer identifier and the card&#39;s last four digits, copied exactly as the alert states them. This is the same full-account, all-linked-cards history lookup the real fraud platform runs on every alert - it is deliberately slow, and that is expected, not an error.&#10;2. If the transaction currency is not already USD, call ConvertToBaseCurrency to get the USD-equivalent amount before you reason about the amount. Never estimate a conversion yourself.&#10;3. Weigh the case using relatedAlerts90d, the riskScore, and the USD amount:&#10;   - Clearly low risk (relatedAlerts90d is 0, riskScore is under 40, and the USD amount is under 1000): your outcome is &#39;clear&#39;.&#10;   - Clearly high risk (relatedAlerts90d is 2 or more, or riskScore is 70 or above, or the USD amount is 5000 or above): your outcome is &#39;escalate&#39;.&#10;   - Anything in between is genuinely ambiguous. You may call AskFraudAnalyst to get a second opinion from a human before deciding - this is entirely your own judgment call, not a requirement, and you keep the final decision either way. If you ask and get no response in time, you will be told so; use your own judgment instead.&#10;4. Once you&#39;ve reached a conclusion, stop calling tools and give your final answer: &#39;investigationOutcome&#39; must be &#39;clear&#39; or &#39;escalate&#39;, and &#39;investigationSummary&#39; should be a short explanation mentioning the riskScore, relatedAlerts90d, the USD amount you used, and whether you consulted the analyst.&#10;&#10;A second real-time alert for this same customer can arrive at any moment and cancel this investigation outright, including while you are waiting on the analyst. The process handles that itself - there is nothing special for you to do about it.&#34;" target="data.systemPrompt.prompt" />
+          <zeebe:input source="=&#34;You are a demo fraud-investigation assistant. A real-time transaction-monitoring system has already scored this alert and handed it to you to investigate before it either closes automatically or gets escalated to card-freeze and the fraud team.&#10;&#10;You must invoke tools using the actual tool-calling mechanism available to you - never describe or simulate a tool call in your plain-text response, and never invent, guess, or fabricate what a tool would return.&#10;&#10;Investigation steps:&#10;1. Always call CrossReferenceTransactionHistory first, with the customer identifier and the card&#39;s last four digits, copied exactly as the alert states them. This is the same full-account, all-linked-cards history lookup the real fraud platform runs on every alert - it is deliberately slow, and that is expected, not an error.&#10;2. If the transaction currency is not already USD, call ConvertToBaseCurrency to get the USD-equivalent amount before you reason about the amount. Never estimate a conversion yourself.&#10;3. Weigh the case using relatedAlerts90d, the riskScore, and the USD amount:&#10;   - Clearly low risk (relatedAlerts90d is 0, riskScore is under 40, and the USD amount is under 1000): your outcome is &#39;clear&#39;.&#10;   - Clearly high risk (relatedAlerts90d is 2 or more, or riskScore is 70 or above, or the USD amount is 5000 or above): your outcome is &#39;escalate&#39;.&#10;   - Anything in between is genuinely ambiguous. You may call AskFraudAnalyst to get a second opinion from a human before deciding - this is entirely your own judgment call, not a requirement, and you keep the final decision either way. If you ask and get no response in time, you will be told so; use your own judgment instead.&#10;4. Once you&#39;ve reached a conclusion, call RecordInvestigationOutcome as your last tool call - that is the only way your decision is recorded: &#39;investigationOutcome&#39; must be &#39;clear&#39; or &#39;escalate&#39;, and &#39;investigationSummary&#39; should be a short explanation mentioning the riskScore, relatedAlerts90d, the USD amount you used, and whether you consulted the analyst.&#10;&#10;A second real-time alert for this same customer can arrive at any moment and cancel this investigation outright, including while you are waiting on the analyst. The process handles that itself - there is nothing special for you to do about it.&#34;" target="data.systemPrompt.prompt" />
           <zeebe:input source="=&#34;Fraud alert under investigation:&#10;Alert: &#34; + originalAlertId + &#34;&#10;Customer: &#34; + originalCustomerId + &#34;&#10;Card ending: &#34; + originalCardLast4 + &#34;&#10;Transaction amount: &#34; + string(originalTransactionAmount) + &#34; &#34; + originalTransactionCurrency + &#34;&#10;Merchant: &#34; + originalMerchantName + &#34; (&#34; + originalMerchantCountry + &#34;)&#10;Monitoring system risk score: &#34; + string(originalRiskScore) + &#34;&#10;Alert reason: &#34; + originalAlertReason + &#34;&#10;&#10;Investigate this alert and give your final decision.&#34;" target="data.userPrompt.prompt" />
           <zeebe:input target="agentContext" />
           <zeebe:input source="in-process" target="data.memory.storage.type" />
@@ -145,6 +145,19 @@
           <bpmn:incoming>Flow_TimeoutToEnd</bpmn:incoming>
         </bpmn:endEvent>
       </bpmn:subProcess>
+      <bpmn:scriptTask id="RecordInvestigationOutcome" name="Record investigation outcome">
+        <bpmn:documentation>Call this once you have reached your conclusion, as your last tool call. It records your decision and a short summary of why; the process routes the case on what this records.</bpmn:documentation>
+        <bpmn:extensionElements>
+          <zeebe:script expression="=if starts with(lower case(proposedOutcome), &#34;clear&#34;) then &#34;clear&#34; else &#34;escalate&#34;" resultVariable="recordedOutcome" />
+          <zeebe:ioMapping>
+            <zeebe:input source="=fromAi(toolCall.investigationOutcome, &#34;Your decision: &#39;clear&#39; or &#39;escalate&#39;.&#34;, &#34;string&#34;)" target="proposedOutcome" />
+            <zeebe:input source="=fromAi(toolCall.investigationSummary, &#34;A short explanation mentioning the risk score, the related alerts in the last 90 days, the dollar amount you used, and whether you consulted the analyst.&#34;, &#34;string&#34;)" target="proposedSummary" />
+            <zeebe:output source="=recordedOutcome" target="investigationOutcome" />
+            <zeebe:output source="=proposedSummary" target="investigationSummary" />
+            <zeebe:output source="=&#34;Recorded outcome: &#34; + recordedOutcome" target="toolCallResult" />
+          </zeebe:ioMapping>
+        </bpmn:extensionElements>
+      </bpmn:scriptTask>
     </bpmn:adHocSubProcess>
     <bpmn:boundaryEvent id="Boundary_SecondAlert" name="Second real-time alert (same customer)" attachedToRef="FraudInvestigationAgent">
       <bpmn:documentation>No connector, no separate webhook, no separate URL - this is a bare BPMN interrupting message boundary event, subscribed to the same "fraud-alert" message and the same customerId correlation key as the start event. As long as this agent instance is running (whether it is mid tool-call, or its own analyst consultation is open), a matching subscription is open here. When a second alert for this customerId is published while this instance is active, Zeebe's message correlation prefers this already-open subscription over starting a new instance, so the same "fraud alert received" endpoint that started the case can also interrupt it - the external system never needs to know or care which one to call for a follow-up. Structurally, no path exists from the agent to anywhere except through this event once it fires: whatever the agent was doing, including a pending human task, is cancelled unconditionally.</bpmn:documentation>
@@ -246,7 +259,7 @@
         <dc:Bounds x="240" y="200" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="FraudInvestigationAgent_di" bpmnElement="FraudInvestigationAgent" isExpanded="true">
-        <dc:Bounds x="400" y="80" width="760" height="320" />
+        <dc:Bounds x="400" y="80" width="760" height="420" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="CrossReferenceTransactionHistory_di" bpmnElement="CrossReferenceTransactionHistory">
         <dc:Bounds x="440" y="120" width="100" height="80" />
@@ -284,6 +297,9 @@
           <dc:Bounds x="1003" y="315" width="76" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="RecordInvestigationOutcome_di" bpmnElement="RecordInvestigationOutcome">
+        <dc:Bounds x="860" y="380" width="100" height="80" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Flow_ToConsult_di" bpmnElement="Flow_ToConsult">
         <di:waypoint x="668" y="170" />
         <di:waypoint x="720" y="170" />
@@ -302,9 +318,9 @@
         <di:waypoint x="1022" y="290" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNShape id="Boundary_SecondAlert_di" bpmnElement="Boundary_SecondAlert" bioc:stroke="#831311" bioc:fill="#ffcdd2" color:background-color="#ffcdd2" color:border-color="#831311">
-        <dc:Bounds x="682" y="382" width="36" height="36" />
+        <dc:Bounds x="682" y="482" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="656" y="425" width="89" height="40" />
+          <dc:Bounds x="656" y="525" width="89" height="40" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Gateway_InvestigationOutcome_di" bpmnElement="Gateway_InvestigationOutcome" isMarkerVisible="true">
@@ -323,21 +339,21 @@
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Gateway_HandoffMerge_di" bpmnElement="Gateway_HandoffMerge" isMarkerVisible="true">
-        <dc:Bounds x="1220" y="495" width="50" height="50" />
+        <dc:Bounds x="1220" y="595" width="50" height="50" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="1208" y="552" width="75" height="27" />
+          <dc:Bounds x="1208" y="652" width="75" height="27" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="FreezeCard_di" bpmnElement="FreezeCard">
-        <dc:Bounds x="1330" y="480" width="100" height="80" />
+        <dc:Bounds x="1330" y="580" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="FraudTeamHandoff_di" bpmnElement="FraudTeamHandoff" bioc:stroke="#0d4372" bioc:fill="#bbdefb" color:background-color="#bbdefb" color:border-color="#0d4372">
-        <dc:Bounds x="1490" y="480" width="100" height="80" />
+        <dc:Bounds x="1490" y="580" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="EndEvent_Escalated_di" bpmnElement="EndEvent_Escalated">
-        <dc:Bounds x="1652" y="502" width="36" height="36" />
+        <dc:Bounds x="1652" y="602" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="1640" y="545" width="62" height="27" />
+          <dc:Bounds x="1640" y="645" width="62" height="27" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Flow_ToSnapshot_di" bpmnElement="Flow_ToSnapshot">
@@ -366,27 +382,27 @@
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_Escalate_di" bpmnElement="Flow_Escalate">
         <di:waypoint x="1245" y="265" />
-        <di:waypoint x="1245" y="495" />
+        <di:waypoint x="1245" y="595" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="1253" y="371" width="41" height="14" />
+          <dc:Bounds x="1253" y="421" width="41" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_InterruptToMerge_di" bpmnElement="Flow_InterruptToMerge">
-        <di:waypoint x="700" y="418" />
-        <di:waypoint x="700" y="520" />
-        <di:waypoint x="1220" y="520" />
+        <di:waypoint x="700" y="518" />
+        <di:waypoint x="700" y="620" />
+        <di:waypoint x="1220" y="620" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_ToFreezeCard_di" bpmnElement="Flow_ToFreezeCard">
-        <di:waypoint x="1270" y="520" />
-        <di:waypoint x="1330" y="520" />
+        <di:waypoint x="1270" y="620" />
+        <di:waypoint x="1330" y="620" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_ToHandoffTask_di" bpmnElement="Flow_ToHandoffTask">
-        <di:waypoint x="1430" y="520" />
-        <di:waypoint x="1490" y="520" />
+        <di:waypoint x="1430" y="620" />
+        <di:waypoint x="1490" y="620" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_HandoffToEnd_di" bpmnElement="Flow_HandoffToEnd">
-        <di:waypoint x="1590" y="520" />
-        <di:waypoint x="1652" y="520" />
+        <di:waypoint x="1590" y="620" />
+        <di:waypoint x="1652" y="620" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

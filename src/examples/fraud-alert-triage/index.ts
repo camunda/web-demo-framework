@@ -32,13 +32,15 @@ import teamHandoffForm from "./fraud-team-handoff.form.json";
  *    moves inside it too — upstream it is a direct child of the ad-hoc
  *    sub-process, which here would advertise it to a live brain as a tool of
  *    its own.
- * 3. `investigationOutcome`/`investigationSummary` come from the agent's final
- *    turn rather than from the connector's `agent.responseJson.*` output
- *    mappings, which this engine doesn't apply (same divergence `bank-support`
- *    records for its specialists). The JSON response *schema* goes with them;
- *    the system prompt still asks for exactly those two fields, and
- *    `SCRIPTED_AGENT` writes them through `AgentResult.variables` on the turn
- *    it sets `completionConditionFulfilled`.
+ * 3. `investigationOutcome`/`investigationSummary` are recorded by an added
+ *    tool, `RecordInvestigationOutcome`, rather than by the connector's
+ *    `agent.responseJson.*` output mappings, which this engine doesn't apply
+ *    (same divergence `bank-support` records for its specialists). The JSON
+ *    response *schema* goes with them, and the system prompt's final step
+ *    names the tool. A live brain's final turn carries no variables, so
+ *    without the tool it had no way to state its decision at all: every case
+ *    took the gateway's default and escalated. The scripted agent calls the
+ *    same tool, so both brains take the same path.
  * 4. `CrossReferenceTransactionHistory`'s arguments are renamed
  *    `customerId` → `alertCustomerId` and `cardLast4` → `alertCardLast4`. An
  *    agent's arguments arrive as one flat bag at instance scope (see
@@ -51,9 +53,10 @@ import teamHandoffForm from "./fraud-team-handoff.form.json";
  *    something the code panel shows and a reader can edit.
  * 6. `FreezeCard` derives `handoffTrigger`/`handoffReason` in its handler
  *    rather than in `zeebe:input` mappings. Upstream's
- *    `=if investigationOutcome != null then …` has to evaluate on the interrupt
- *    path, which is exactly the path where the agent was cancelled before that
- *    variable was ever written.
+ *    `=if investigationOutcome != null then …` can't tell an interrupt from an
+ *    agent that never recorded its outcome, so the handler asks whether a
+ *    second alert actually arrived: it overwrites `alertId`, and
+ *    `originalAlertId` keeps the first.
  * 7. `FraudTeamHandoff` is added back. Upstream ships a `fraud-team-handoff`
  *    form, its README says an escalated case reaches "Fraud team case handoff"
  *    in Tasklist, and the flow out of `FreezeCard` is even called
@@ -114,8 +117,9 @@ const SCENARIO_AMBIGUOUS = {
  *
  * The variables it writes are the `fromAi(toolCall.x, …)` argument names off
  * the diagram (`alertCustomerId`, `alertCardLast4`, `amount`, `fromCurrency`,
- * `question`, `context`); a live brain supplies exactly the same names, so the
- * handlers below read the same values either way.
+ * `question`, `context`, `investigationOutcome`, `investigationSummary`); a
+ * live brain supplies exactly the same names, so the handlers below read the
+ * same values either way.
  *
  * Nothing here looks at whether an interrupt happened. It can't: by the time
  * `Boundary_SecondAlert` fires, this agent and everything it had running are
@@ -123,6 +127,11 @@ const SCENARIO_AMBIGUOUS = {
  */
 const SCRIPTED_AGENT = `async (job) => {
   const v = job.variables;
+
+  // Step 4 has run: the decision is recorded, so there is nothing left to do.
+  if (v.investigationOutcome !== undefined && v.investigationOutcome !== null) {
+    return { completionConditionFulfilled: true };
+  }
 
   // Step 1 — always cross-reference first. Every threshold below reads
   // relatedAlerts90d, so there is nothing to weigh until this has run.
@@ -160,11 +169,11 @@ const SCRIPTED_AGENT = `async (job) => {
     "risk score " + risk + ", " + related + " related alert(s) in 90 days, " +
     usd + " USD";
 
-  // The connector's JSON response format upstream; set here, because this
-  // engine does not apply the agent's agent.responseJson.* output mapping.
+  // Recorded through the same tool a live brain has to call — there is no
+  // other way for its decision to reach the gateway.
   const decide = (outcome, why) => ({
-    completionConditionFulfilled: true,
     variables: { investigationOutcome: outcome, investigationSummary: why },
+    activateElements: [{ elementId: "RecordInvestigationOutcome" }],
   });
 
   // Step 3 — the two hard thresholds, exactly as the prompt states them.
@@ -301,6 +310,19 @@ const CONVERT_TO_BASE_CURRENCY = `async (job, { num, text, sleep, trace }) => {
   };
 }`;
 
+const RECORD_INVESTIGATION_OUTCOME = `async (job, { text, trace }) => {
+  // The agent's last tool call, and the only way its decision reaches
+  // Gateway_InvestigationOutcome. Mirrors the element's zeebe:script: anything
+  // that isn't recognisably 'clear' escalates, since a fraud case closed by
+  // mistake costs more than one a human looks at twice.
+  const proposed = text("proposedOutcome", "").trim().toLowerCase();
+  const recordedOutcome = proposed.startsWith("clear") ? "clear" : "escalate";
+  if (proposed !== recordedOutcome) {
+    trace("model said " + JSON.stringify(proposed) + " — recorded '" + recordedOutcome + "'");
+  }
+  return { recordedOutcome: recordedOutcome };
+}`;
+
 const RECORD_ANALYST_TIMEOUT = `async (job, { trace }) => {
   // Reached only from the timer boundary event on the analyst consultation.
   // Its whole job is to hand the timeout back to the agent as the result of
@@ -342,10 +364,10 @@ const FREEZE_CARD = `async (job, { text, sleep, trace }) => {
   const v = job.variables;
 
   // Which of the two paths got here, read off the diagram's own state rather
-  // than from a flag something had to remember to set: the agent writes
-  // investigationOutcome on the turn it finishes, so an unset one means the
-  // ad-hoc sub-process was cancelled before it ever got there.
-  const interrupted = v.investigationOutcome === undefined || v.investigationOutcome === null;
+  // than from a flag something had to remember to set: a second alert
+  // correlating into Boundary_SecondAlert overwrites alertId, while the
+  // snapshot taken at the start keeps the original.
+  const interrupted = v.alertId !== v.originalAlertId;
 
   await sleep(300);
   trace(interrupted ? "frozen after a second alert interrupted the agent" : "frozen on the agent's own escalation");
@@ -476,6 +498,11 @@ export const fraudAlertTriage: ExampleDef = {
       elementId: "RecordAnalystTimeout",
       standsInFor: "script task — hand the SLA timeout back to the agent",
       source: RECORD_ANALYST_TIMEOUT,
+    },
+    {
+      elementId: "RecordInvestigationOutcome",
+      standsInFor: "script task — record the agent's decision",
+      source: RECORD_INVESTIGATION_OUTCOME,
     },
     {
       elementId: "CloseAlertNotification",
