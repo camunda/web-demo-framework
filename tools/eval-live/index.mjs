@@ -11,7 +11,7 @@
 // whatever the model decides:
 //   - the run used the scripted brain instead of the live one
 //   - an incident, an engine error, or "LLM call failed"
-//   - a required tool never ran ("never ran" / "didn't finish its checks")
+//   - a required tool never completed (engine counts), or "didn't finish its checks"
 //   - a human-task field the model fills via an input mapping is empty
 //   - a `{{…}}` line in a human-task form renders blank
 //   - a form that won't validate after filling, or a run that stalls
@@ -38,6 +38,11 @@ const ROOT = resolve(import.meta.dirname, "../..");
 const EXAMPLES_DIR = join(ROOT, "src/examples");
 const ENDPOINT = process.env.LIVE_ENDPOINT ?? "http://localhost:11434/v1";
 const SCENARIO_BUDGET_MS = Number(process.env.LIVE_TIMEOUT_MIN ?? 20) * 60_000;
+// setTimeout fires at once for anything above 2^31-1 ms.
+if (!Number.isFinite(SCENARIO_BUDGET_MS) || SCENARIO_BUDGET_MS <= 0 || SCENARIO_BUDGET_MS > 2 ** 31 - 1) {
+  console.error(`LIVE_TIMEOUT_MIN must be a positive number of minutes (got ${JSON.stringify(process.env.LIVE_TIMEOUT_MIN)}).`);
+  process.exit(2);
+}
 const OUT = process.env.LIVE_OUT ?? mkdtempSync(join(tmpdir(), "eval-live-"));
 mkdirSync(OUT, { recursive: true });
 
@@ -66,6 +71,26 @@ function agentExamples() {
 const decodeXml = (s) =>
   s.replace(/&#34;|&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#10;/g, "\n")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** `ExampleDef.requiredTools`, read off the example's source. */
+function requiredToolsOf(id) {
+  const src = readFileSync(join(EXAMPLES_DIR, id, "index.ts"), "utf8");
+  const list = /^\s*requiredTools:\s*\[([^\]]*)\]/m.exec(src)?.[1] ?? "";
+  return [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
+/** element id → BPMN name, which is what the runner's panels show. */
+function elementNamesOf(id) {
+  const names = new Map();
+  for (const file of readdirSync(join(EXAMPLES_DIR, id)).filter((f) => f.endsWith(".bpmn"))) {
+    for (const m of readFileSync(join(EXAMPLES_DIR, id, file), "utf8").matchAll(/<bpmn:\w+\b([^>]*)>/g)) {
+      const elementId = /\bid="([^"]+)"/.exec(m[1])?.[1];
+      const name = /\bname="([^"]*)"/.exec(m[1])?.[1];
+      if (elementId && name) names.set(elementId, decodeXml(name));
+    }
+  }
+  return names;
+}
 
 /** formId → { elementId, name, inputTargets, inAgent } for every user task in the example's BPMN. */
 function userTasksOf(id) {
@@ -378,9 +403,15 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
   const started = Date.now();
   const deadline = started + SCENARIO_BUDGET_MS;
   const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  // Closing the context cancels whatever wait is pending, setup included.
+  let overBudget = false;
+  const budget = setTimeout(() => {
+    overBudget = true;
+    context.close().catch(() => {});
+  }, SCENARIO_BUDGET_MS);
   const page = await context.newPage();
   const trace = new Trace();
-  const ctx = { trace, scenario, userTasks: userTasksOf(example), forms: formsOf(example), leftBlank: new Set(), pressed: false };
+  const ctx = { trace, scenario, userTasks: userTasksOf(example), forms: formsOf(example), leftBlank: new Set(), pressed: false, interrupted: false };
   page.on("pageerror", (e) => result.warn.push(`page error: ${e.message.slice(0, 160)}`));
 
   try {
@@ -411,7 +442,10 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
         // the interrupt. After the agent has finished there is nothing to
         // interrupt, and a press would only start another case.
         if (/\bpress\b/i.test(scenario) && !ctx.pressed && (await openTaskIsInAgent(page, ctx)) &&
-          (await resolveWaitingEvent(page, ctx, result, s))) continue;
+          (await resolveWaitingEvent(page, ctx, result, s))) {
+          ctx.interrupted = true;
+          continue;
+        }
         if (!(await answerHumanTask(page, ctx, result))) ended = s;
         continue;
       }
@@ -430,19 +464,35 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
       result.fail.push("never ran on the live brain (scripted fallback?)");
     }
     for (const l of trace.matching(/LLM call failed/)) result.fail.push(l);
-    for (const l of trace.matching(/never ran/)) result.fail.push(`required tool: ${l}`);
+    // From the engine's counts, not the trace: a model that says "done" again
+    // after its one nudge is accepted without any "never ran" line.
+    if (!ctx.interrupted) {
+      const names = elementNamesOf(example);
+      const completed = await page.locator(".engine-view .timeline-stats li").evaluateAll((lis) =>
+        lis.map((li) => [li.querySelector("code")?.textContent?.trim() ?? "", Number(/completed (\d+)/.exec(li.textContent ?? "")?.[1] ?? 0)]),
+      );
+      for (const id of requiredToolsOf(example)) {
+        const count = completed.find(([shown]) => shown === (names.get(id) || id) || shown === id)?.[1] ?? 0;
+        if (!count) result.fail.push(`required tool ${id} never completed`);
+      }
+    }
     for (const l of trace.matching(/doesn't exist/)) result.warn.push(l);
     for (const l of trace.matching(/Turn budget spent|activated nothing — completing/)) result.warn.push(l);
   } catch (e) {
-    result.fail.push(`harness: ${String(e.message ?? e).split("\n")[0]}`);
+    result.fail.push(
+      overBudget
+        ? `exceeded the ${SCENARIO_BUDGET_MS / 60_000} min scenario budget`
+        : `harness: ${String(e.message ?? e).split("\n")[0]}`,
+    );
   }
+  clearTimeout(budget);
 
   result.ms = Date.now() - started;
   result.pass = result.fail.length === 0;
   const slug = `${example}--${scenario}--${brain}`.replace(/[^a-z0-9]+/gi, "-").slice(0, 110);
   writeFileSync(join(OUT, `${slug}.trace.txt`), trace.lines.join("\n") + "\n");
   if (!result.pass) await page.screenshot({ path: join(OUT, `${slug}.png`), fullPage: true }).catch(() => {});
-  await context.close();
+  await context.close().catch(() => {});
   return result;
 }
 
