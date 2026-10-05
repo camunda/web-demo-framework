@@ -127,12 +127,6 @@ const SCRIPTED_AGENT = `async (job) => {
         variables: {
           proposedAmountUSD: invoiceUSD,
           reasoning: reasoning,
-          // The diagram prefills the reviewer's form from the agent's
-          // proposal; set the form's own key so the prefill lands whether or
-          // not the engine evaluates the fromAi() input mapping.
-          agentProposedAmountUSD: invoiceUSD,
-          agentReleaseReasoning: reasoning,
-          approvedAmountUSD: invoiceUSD,
         },
         activateElements: [{ elementId: "RequestPaymentRelease" }],
       };
