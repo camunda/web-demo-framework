@@ -333,32 +333,45 @@ describe("fraud-alert-triage on the live engine — the event is the entry", () 
 });
 
 describe("fraud-alert-triage on the live engine — a live-shaped agent", () => {
-  it("routes the decision it records through RecordInvestigationOutcome, normalised", async () => {
-    await start(
-      CLEARLY_CLEARED,
-      liveShaped(
-        crossReferenceThen((v) =>
-          v.investigationOutcome === undefined
-            ? {
-                variables: {
-                  investigationOutcome: "Clear",
-                  investigationSummary: "Low risk on every threshold.",
-                },
-                activateElements: [{ elementId: "RecordInvestigationOutcome" }],
-              }
-            : { completionConditionFulfilled: true },
-        ),
+  const recording = (outcome: string) =>
+    liveShaped(
+      crossReferenceThen((v) =>
+        v.investigationOutcome === undefined
+          ? {
+              variables: { investigationOutcome: outcome, investigationSummary: "Summary." },
+              activateElements: [{ elementId: "RecordInvestigationOutcome" }],
+            }
+          : { completionConditionFulfilled: true },
       ),
     );
 
-    expect(completedCount("RecordInvestigationOutcome")).toBe(1);
-    // The gateway's condition is an exact `= "clear"`, so taking that branch is
-    // what proves the model's "Clear" was normalised on the way through.
-    expect(tookFlow("Gateway_InvestigationOutcome", "CloseAlertNotification")).toBe(true);
-    expect(completedCount("FreezeCard")).toBe(0);
-    expect(cases()[0].completed).toBe(true);
-    expect(snap().incidents).toEqual([]);
-  });
+  it.each(["Clear", " clear "])(
+    "routes a recorded %j through RecordInvestigationOutcome to the clear branch",
+    async (outcome) => {
+      await start(CLEARLY_CLEARED, recording(outcome));
+
+      expect(completedCount("RecordInvestigationOutcome")).toBe(1);
+      // The gateway's condition is an exact `= "clear"`, so taking that branch is
+      // what proves the model's value was normalised on the way through.
+      expect(tookFlow("Gateway_InvestigationOutcome", "CloseAlertNotification")).toBe(true);
+      expect(completedCount("FreezeCard")).toBe(0);
+      expect(cases()[0].completed).toBe(true);
+      expect(snap().incidents).toEqual([]);
+    },
+  );
+
+  it.each(["clearly fraudulent", "clearance denied", "escalate", "not sure"])(
+    "escalates a recorded %j rather than closing the alert",
+    async (outcome) => {
+      await start(CLEARLY_CLEARED, recording(outcome));
+
+      expect(completedCount("RecordInvestigationOutcome")).toBe(1);
+      expect(completedCount("CloseAlertNotification")).toBe(0);
+      expect(completedCount("FreezeCard")).toBe(1);
+      expect(rootVariables().handoffTrigger).toBe("agent-escalation");
+      expect(snap().incidents).toEqual([]);
+    },
+  );
 
   it("labels an escalation the agent never recorded as the agent's, not as an interrupt", async () => {
     // A model that says "done" without recording: the gateway's default

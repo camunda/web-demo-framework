@@ -313,10 +313,10 @@ const CONVERT_TO_BASE_CURRENCY = `async (job, { num, text, sleep, trace }) => {
 const RECORD_INVESTIGATION_OUTCOME = `async (job, { text, trace }) => {
   // The agent's last tool call, and the only way its decision reaches
   // Gateway_InvestigationOutcome. Mirrors the element's zeebe:script: anything
-  // that isn't recognisably 'clear' escalates, since a fraud case closed by
-  // mistake costs more than one a human looks at twice.
+  // that isn't exactly 'clear' escalates ("clearly fraudulent" included), since
+  // a fraud case closed by mistake costs more than one a human looks at twice.
   const proposed = text("proposedOutcome", "").trim().toLowerCase();
-  const recordedOutcome = proposed.startsWith("clear") ? "clear" : "escalate";
+  const recordedOutcome = proposed === "clear" ? "clear" : "escalate";
   if (proposed !== recordedOutcome) {
     trace("model said " + JSON.stringify(proposed) + " — recorded '" + recordedOutcome + "'");
   }

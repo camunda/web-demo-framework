@@ -148,7 +148,7 @@
       <bpmn:scriptTask id="RecordInvestigationOutcome" name="Record investigation outcome">
         <bpmn:documentation>Call this once you have reached your conclusion, as your last tool call. It records your decision and a short summary of why; the process routes the case on what this records.</bpmn:documentation>
         <bpmn:extensionElements>
-          <zeebe:script expression="=if starts with(lower case(proposedOutcome), &#34;clear&#34;) then &#34;clear&#34; else &#34;escalate&#34;" resultVariable="recordedOutcome" />
+          <zeebe:script expression="=if lower case(trim(proposedOutcome)) = &#34;clear&#34; then &#34;clear&#34; else &#34;escalate&#34;" resultVariable="recordedOutcome" />
           <zeebe:ioMapping>
             <zeebe:input source="=fromAi(toolCall.investigationOutcome, &#34;Your decision: &#39;clear&#39; or &#39;escalate&#39;.&#34;, &#34;string&#34;)" target="proposedOutcome" />
             <zeebe:input source="=fromAi(toolCall.investigationSummary, &#34;A short explanation mentioning the risk score, the related alerts in the last 90 days, the dollar amount you used, and whether you consulted the analyst.&#34;, &#34;string&#34;)" target="proposedSummary" />
