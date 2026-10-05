@@ -49,27 +49,31 @@ const IN_FLIGHT = new Set(["", "Booting engine…", "Running…", "Stepping…"]
 
 // --- what each example declares, read straight off its files ---------------
 
-function agentExamples() {
-  const only = process.env.LIVE_EXAMPLES?.split(",").map((s) => s.trim()).filter(Boolean);
+function agentExamplesUnfiltered() {
   return readdirSync(EXAMPLES_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .filter((id) => existsSync(join(EXAMPLES_DIR, id, "index.ts")))
     .filter((id) => readFileSync(join(EXAMPLES_DIR, id, "index.ts"), "utf8").includes("scriptedAgent"))
-    .filter((id) => !only || only.includes(id))
     .sort();
+}
+
+function agentExamples() {
+  const only = process.env.LIVE_EXAMPLES?.split(",").map((s) => s.trim()).filter(Boolean);
+  return agentExamplesUnfiltered().filter((id) => !only || only.includes(id));
 }
 
 const decodeXml = (s) =>
   s.replace(/&#34;|&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#10;/g, "\n")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
-/** formId → { elementId, name, inputTargets } for every user task in the example's BPMN. */
+/** formId → { elementId, name, inputTargets, inAgent } for every user task in the example's BPMN. */
 function userTasksOf(id) {
   const dir = join(EXAMPLES_DIR, id);
   const tasks = new Map();
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".bpmn"))) {
     const xml = readFileSync(join(dir, file), "utf8");
+    const agents = [...xml.matchAll(/<bpmn:adHocSubProcess\b[\s\S]*?<\/bpmn:adHocSubProcess>/g)].map((m) => [m.index, m.index + m[0].length]);
     for (const m of xml.matchAll(/<bpmn:userTask\b([^>]*)>([\s\S]*?)<\/bpmn:userTask>/g)) {
       const attrs = m[1];
       const formId = /formId="([^"]+)"/.exec(m[2])?.[1];
@@ -78,6 +82,7 @@ function userTasksOf(id) {
         elementId: /\bid="([^"]+)"/.exec(attrs)?.[1],
         name: decodeXml(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? ""),
         inputTargets: [...m[2].matchAll(/<zeebe:input\b[^>]*\btarget="([^"]+)"/g)].map((t) => t[1]),
+        inAgent: agents.some(([from, to]) => m.index > from && m.index < to),
       });
     }
   }
@@ -107,43 +112,52 @@ function componentsOf(schema) {
   return out;
 }
 
-/** One regex per template line, capturing what each `{{…}}` rendered as. */
-function templateProbes(schema) {
-  const probes = [];
-  for (const c of componentsOf(schema)) {
-    if (c.type !== "text" || typeof c.text !== "string") continue;
-    for (const raw of c.text.split("\n")) {
-      if (!raw.includes("{{")) continue;
-      const line = raw.replace(/\*\*|__|`/g, "").replace(/^\s*(#{1,6}|[-*])\s+/, "").trim();
-      // Placeholders separated only by whitespace can't be told apart in the
-      // rendered text, so each such run is one capture.
-      const groups = [];
-      for (const part of line.split(/(\{\{[\s\S]*?\}\})/)) {
-        const last = groups[groups.length - 1];
-        if (part.startsWith("{{")) {
-          const expr = part.slice(2, -2).trim();
-          if (last?.exprs && last.joinable) last.exprs.push(expr);
-          else groups.push({ exprs: [expr], joinable: true });
-        } else if (!part.trim() && last?.exprs) {
-          continue;
-        } else if (part) {
-          if (last?.exprs) last.joinable = false;
-          groups.push({ literal: part });
-        }
-      }
-      let pattern = "";
-      groups.forEach((g, i) => {
-        if (g.exprs) {
-          pattern += i === groups.length - 1 ? "([^\\n]*)" : "([^\\n]*?)";
-        } else {
-          pattern += g.literal.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*");
-          pattern += "\\s*";
-        }
-      });
-      probes.push({ line, groups: groups.filter((g) => g.exprs).map((g) => g.exprs), regex: new RegExp(pattern) });
+/**
+ * Per text component, in document order: its paragraph count, and one anchored
+ * regex per paragraph with a placeholder, capturing what each `{{…}}` rendered
+ * as. A paragraph that is nothing but placeholders gets no regex — there is no
+ * text to anchor it — and is caught by the paragraph count instead, since
+ * form-js drops a paragraph that renders empty.
+ */
+function templateChecks(schema) {
+  return componentsOf(schema)
+    .filter((c) => c.type === "text" && typeof c.text === "string")
+    .map((c) => {
+      const paragraphs = c.text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+      return { id: c.id, paragraphs: paragraphs.length, probes: paragraphs.filter((p) => p.includes("{{")).map(probeFor) };
+    });
+}
+
+function probeFor(paragraph) {
+  const line = paragraph.replace(/\*\*|__|`/g, "").replace(/^\s*(#{1,6}|[-*])\s+/, "").replace(/\s+/g, " ").trim();
+  // Placeholders separated only by whitespace can't be told apart in the
+  // rendered text, so each such run is one capture.
+  const groups = [];
+  for (const part of line.split(/(\{\{[\s\S]*?\}\})/)) {
+    const last = groups[groups.length - 1];
+    if (part.startsWith("{{")) {
+      const expr = part.slice(2, -2).trim();
+      if (last?.exprs && last.joinable) last.exprs.push(expr);
+      else groups.push({ exprs: [expr], joinable: true });
+    } else if (!part.trim() && last?.exprs) {
+      continue;
+    } else if (part) {
+      if (last?.exprs) last.joinable = false;
+      groups.push({ literal: part });
     }
   }
-  return probes;
+  const exprs = groups.filter((g) => g.exprs).map((g) => g.exprs);
+  if (!groups.some((g) => g.literal?.trim())) return { line, exprs, regex: null };
+  let pattern = "^";
+  groups.forEach((g, i) => {
+    if (g.exprs) {
+      pattern += i === groups.length - 1 ? "(.*)" : "(.*?)";
+    } else {
+      pattern += g.literal.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(" ?");
+      pattern += " ?";
+    }
+  });
+  return { line, exprs, regex: new RegExp(pattern + "$") };
 }
 
 // --- the page --------------------------------------------------------------
@@ -197,6 +211,16 @@ async function clickAndWaitForProgress(page, trace, button, from) {
 }
 
 async function connectBrain(page) {
+  const url = page.locator("#endpoint-url");
+  if ((await url.inputValue()) !== ENDPOINT) await url.fill(ENDPOINT);
+  // The picker lists the endpoint's models after a 400 ms debounce; pick from
+  // that list, not the previous endpoint's.
+  await page.waitForTimeout(600);
+  await page.waitForFunction(() => {
+    const picked = document.querySelector("#endpoint-model")?.textContent?.trim() ?? "";
+    const refreshing = [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Refreshing…");
+    return picked && !refreshing && !/^(Loading models…|Enter an endpoint above)$/.test(picked);
+  }, null, { timeout: 60_000 });
   if (process.env.LIVE_MODEL) {
     const combo = page.locator("#endpoint-model");
     if ((await combo.innerText()).trim() !== process.env.LIVE_MODEL) {
@@ -204,8 +228,6 @@ async function connectBrain(page) {
       await page.getByRole("option", { name: process.env.LIVE_MODEL, exact: true }).click();
     }
   }
-  const url = page.locator("#endpoint-url");
-  if ((await url.inputValue()) !== ENDPOINT) await url.fill(ENDPOINT);
   const connect = page.getByRole("button", { name: "Connect", exact: true });
   await connect.waitFor({ timeout: 30_000 });
   await page.waitForFunction(() => {
@@ -261,19 +283,35 @@ async function answerHumanTask(page, ctx, result) {
       }
     }
 
-    // Every `{{…}}` should render something.
-    const rendered = await form.innerText();
-    for (const probe of templateProbes(schema)) {
-      const m = probe.regex.exec(rendered);
-      if (!m) {
-        result.warn.push(`${label}: couldn't locate template line "${probe.line.slice(0, 60)}"`);
-        continue;
-      }
-      probe.groups.forEach((exprs, i) => {
-        const got = (m[i + 1] ?? "").trim();
-        if (!got || got === "undefined" || got === "null") {
-          const shown = exprs.map((e) => `{{${e.slice(0, 50)}}}`).join(" ");
-          result.fail.push(`${label}: ${shown} renders blank in "${probe.line.slice(0, 60)}"`);
+    // Every `{{…}}` should render something, checked within its own component.
+    const components = templateChecks(schema);
+    const rendered = await form.locator(".fjs-form-field-text").evaluateAll((els) =>
+      els.map((el) => [...el.children].map((b) => b.innerText.replace(/\s+/g, " ").trim())),
+    );
+    if (rendered.length !== components.length) {
+      result.warn.push(`${label}: ${rendered.length} text blocks rendered for ${components.length} in the form; template checks skipped`);
+    } else {
+      components.forEach((component, i) => {
+        const blocks = rendered[i];
+        if (blocks.length < component.paragraphs) {
+          result.fail.push(`${label}: ${component.paragraphs - blocks.length} paragraph(s) of ${component.id} rendered empty`);
+        }
+        for (const probe of component.probes) {
+          if (!probe.regex) continue;
+          const m = blocks.map((b) => probe.regex.exec(b)).find(Boolean);
+          if (!m) {
+            result.warn.push(`${label}: couldn't locate "${probe.line.slice(0, 60)}" in ${component.id}`);
+            continue;
+          }
+          probe.exprs.forEach((exprs, g) => {
+            const got = (m[g + 1] ?? "").trim();
+            // Blank because this harness left an optional field empty earlier.
+            if (exprs.every((e) => ctx.leftBlank.has(e))) return;
+            if (!got || got === "undefined" || got === "null") {
+              const shown = exprs.map((e) => `{{${e.slice(0, 50)}}}`).join(" ");
+              result.fail.push(`${label}: ${shown} renders blank in "${probe.line.slice(0, 60)}"`);
+            }
+          });
         }
       });
     }
@@ -287,9 +325,13 @@ async function answerHumanTask(page, ctx, result) {
         }
         continue;
       }
-      if (!c.validate?.required) continue;
       const input = form.getByLabel(c.label, { exact: false }).first();
-      if (!(await input.count()) || (await input.inputValue().catch(() => "")).trim()) continue;
+      const filled = (await input.count()) && (await input.inputValue().catch(() => "")).trim();
+      if (!c.validate?.required) {
+        if (!filled) ctx.leftBlank.add(c.key);
+        continue;
+      }
+      if (!(await input.count()) || filled) continue;
       // Typed, not `fill()`ed: form-js's number field ignores a programmatic fill.
       await input.pressSequentially(c.type === "number" ? "100" : "Automated live-eval reviewer note.");
       // A radio clicked within ~300 ms of typing a cleared number field is lost.
@@ -310,7 +352,13 @@ async function answerHumanTask(page, ctx, result) {
   return true;
 }
 
-async function resolveWaitingEvent(page, ctx, result) {
+async function openTaskIsInAgent(page, ctx) {
+  const card = page.locator(".panel").filter({ has: page.getByRole("button", { name: "Complete task", exact: true }) }).last();
+  const formId = /form "([^"]+)"/.exec(await card.locator(".panel-desc").innerText().catch(() => ""))?.[1];
+  return Boolean(formId && ctx.userTasks.get(formId)?.inAgent);
+}
+
+async function resolveWaitingEvent(page, ctx, result, from) {
   const card = page.locator(".panel").filter({ has: page.getByText("Something else happens", { exact: true }) });
   if (!(await card.count())) return false;
   const buttons = card.getByRole("button").filter({ hasNotText: "Something else happens" });
@@ -319,8 +367,9 @@ async function resolveWaitingEvent(page, ctx, result) {
     ? lapse.first()
     : buttons.filter({ hasNotText: /Let the timer lapse/ }).first();
   if (!(await choice.count())) return false;
+  ctx.pressed = true;
   result.notes.push(`pressed "${(await choice.innerText()).trim()}"`);
-  await clickAndWaitForProgress(page, ctx.trace, choice, "Paused");
+  await clickAndWaitForProgress(page, ctx.trace, choice, from);
   return true;
 }
 
@@ -331,7 +380,7 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
   const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
   const page = await context.newPage();
   const trace = new Trace();
-  const ctx = { trace, scenario, userTasks: userTasksOf(example), forms: formsOf(example) };
+  const ctx = { trace, scenario, userTasks: userTasksOf(example), forms: formsOf(example), leftBlank: new Set(), pressed: false };
   page.on("pageerror", (e) => result.warn.push(`page error: ${e.message.slice(0, 160)}`));
 
   try {
@@ -350,18 +399,29 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
     }, null, { timeout: 60_000 });
     await clickAndWaitForProgress(page, trace, run, "Ready");
 
-    for (let guard = 0; guard < 25; guard++) {
+    let ended = "";
+    for (let guard = 0; guard < 25 && !ended; guard++) {
       const s = await waitWhileInFlight(page, trace, deadline);
-      if (s === "Completed") break;
-      if (s === "timeout") { result.fail.push(`still running after ${SCENARIO_BUDGET_MS / 60_000} min`); break; }
-      if (s === "Incident" || s === "Engine error") { result.fail.push(`status: ${s}`); break; }
+      if (s === "Completed") { ended = s; break; }
+      if (s === "timeout") { result.fail.push(`still running after ${SCENARIO_BUDGET_MS / 60_000} min`); ended = s; break; }
+      if (s === "Incident" || s === "Engine error") { result.fail.push(`status: ${s}`); ended = s; break; }
       if (s === "Waiting for a human") {
-        if (!(await answerHumanTask(page, ctx, result))) break;
+        // A scenario that says "press" means the event should land while the
+        // agent is parked on its own human task — answering it first would skip
+        // the interrupt. After the agent has finished there is nothing to
+        // interrupt, and a press would only start another case.
+        if (/\bpress\b/i.test(scenario) && !ctx.pressed && (await openTaskIsInAgent(page, ctx)) &&
+          (await resolveWaitingEvent(page, ctx, result, s))) continue;
+        if (!(await answerHumanTask(page, ctx, result))) ended = s;
         continue;
       }
-      if (s === "Paused" && (await resolveWaitingEvent(page, ctx, result))) continue;
+      if (s === "Paused" && (await resolveWaitingEvent(page, ctx, result, s))) continue;
       result.fail.push(`run stopped at status "${s}" with nothing to resolve`);
-      break;
+      ended = s;
+    }
+    if (!ended) {
+      const s = await waitWhileInFlight(page, trace, deadline);
+      if (s !== "Completed") result.fail.push(`not Completed after 25 interactions (status "${s}")`);
     }
     await trace.capture(page);
     result.steps = [...new Set([...trace.matching(/^▶ /), ...result.humanTasks.map((t) => `👤 ${t}`)])];
@@ -425,9 +485,10 @@ async function main() {
   const server = process.env.LIVE_BASE_URL
     ? { base: process.env.LIVE_BASE_URL.replace(/\/$/, ""), stop: () => {} }
     : await startDevServer();
-  const browser = await chromium.launch({ headless: process.env.LIVE_HEADED !== "1" });
+  let browser;
   const results = [];
   try {
+    browser = await chromium.launch({ headless: process.env.LIVE_HEADED !== "1" });
     for (const example of agentExamples()) {
       for (const scenario of await scenariosOf(browser, server.base, example)) {
         process.stdout.write(`… ${example} / ${scenario}\n`);
@@ -454,8 +515,17 @@ async function main() {
       }
     }
   } finally {
-    await browser.close();
+    await browser?.close();
     server.stop();
+  }
+
+  if (results.length === 0) {
+    console.error(
+      `No scenarios selected — check LIVE_EXAMPLES (${process.env.LIVE_EXAMPLES ?? "unset"}) ` +
+        `and LIVE_SCENARIO (${process.env.LIVE_SCENARIO ?? "unset"}) against: ${agentExamplesUnfiltered().join(", ")}`,
+    );
+    process.exitCode = 1;
+    return;
   }
 
   writeFileSync(join(OUT, "report.json"), JSON.stringify(results, null, 2));
