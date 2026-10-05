@@ -112,22 +112,60 @@ afterAll(() => {
  * on this model at all — whether this starts a case or interrupts one is the
  * engine's decision, not the caller's.
  */
-async function publish(variables: Record<string, unknown>, key: string): Promise<void> {
+async function publish(
+  variables: Record<string, unknown>,
+  key: string,
+  withAgents: Record<string, AgentHandler> = agents,
+): Promise<void> {
   session.correlateMessage(
     model.startMessage!.messageName,
     key,
     JSON.stringify(variables),
   );
-  await dispatchWorkers(session, workers, { agents });
+  await dispatchWorkers(session, workers, { agents: withAgents });
 }
 
-async function start(scenario: Record<string, unknown>): Promise<void> {
+async function start(
+  scenario: Record<string, unknown>,
+  withAgents: Record<string, AgentHandler> = agents,
+): Promise<void> {
   session.reset();
   session.deploy(fraudAlertTriage.bpmn);
   await publish(
     scenario,
     resolveCorrelationKey(model.startMessage!.correlationKey, scenario),
+    withAgents,
   );
+}
+
+/**
+ * An agent shaped like `liveAgent`'s output rather than the scripted one's:
+ * each turn carries only the chosen tool's arguments, and the final turn is a
+ * bare `{ completionConditionFulfilled: true }` that writes no variables.
+ */
+function liveShaped(
+  turns: (v: Record<string, unknown>) => AgentResult,
+): Record<string, AgentHandler> {
+  return {
+    [model.agent!.jobType]: withToolCallArgs((job) => turns(job.variables), model.agent!.tools),
+  };
+}
+
+const CLEARLY_CLEARED = fraudAlertTriage.scenarios!.find((s) =>
+  s.label.startsWith("Clearly cleared"),
+)!.variables;
+
+function crossReferenceThen(next: (v: Record<string, unknown>) => AgentResult) {
+  return (v: Record<string, unknown>): AgentResult =>
+    v.relatedAlerts90d === undefined
+      ? {
+          variables: {
+            alertCustomerId: String(v.originalCustomerId),
+            alertCardLast4: String(v.originalCardLast4),
+          },
+          activateElements: [{ elementId: "CrossReferenceTransactionHistory" }],
+        }
+      : next(v);
 }
 
 function snap(): Snapshot {
@@ -155,11 +193,14 @@ function rootVariables(): Record<string, unknown> {
 }
 
 /** Answer the analyst consultation the agent opened, then drain again. */
-async function answerAnalyst(assessment: string): Promise<void> {
+async function answerAnalyst(
+  assessment: string,
+  withAgents: Record<string, AgentHandler> = agents,
+): Promise<void> {
   const task = openTask("ConsultFraudAnalyst");
   if (!task) throw new Error("no open ConsultFraudAnalyst task to answer");
   session.completeUserTask(task.key, JSON.stringify({ analystAssessment: assessment }));
-  await dispatchWorkers(session, workers, { agents });
+  await dispatchWorkers(session, workers, { agents: withAgents });
 }
 
 describe("fraud-alert-triage — one subscription, two jobs", () => {
@@ -233,13 +274,21 @@ describe("fraud-alert-triage on the live engine — the event is the entry", () 
   });
 
   it("escalates on the agent's own judgment when the analyst answers", async () => {
-    await start(AMBIGUOUS);
-    await answerAnalyst("looks-suspicious");
+    const seen: unknown[] = [];
+    const scripted = agents[model.agent!.jobType];
+    const recording = {
+      [model.agent!.jobType]: ((job) => {
+        seen.push(job.variables.toolCallResult);
+        return scripted(job);
+      }) as AgentHandler,
+    };
+    await start(AMBIGUOUS, recording);
+    await answerAnalyst("looks-suspicious", recording);
 
     // The analyst's answer came back to the agent as the *tool's* result —
     // AskFraudAnalyst's own `zeebe:output` mapping — which is what makes it a
     // tool call rather than a detour the agent has to notice on its own.
-    expect(rootVariables().toolCallResult).toContain("Analyst assessment: looks-suspicious");
+    expect(seen).toContain("Analyst assessment: looks-suspicious. Notes: (none)");
     // Through the merge, but by the other incoming flow — and the handoff says
     // so, which is how the interrupt test below can claim anything at all.
     expect(tookFlow("Gateway_InvestigationOutcome", "Gateway_HandoffMerge")).toBe(true);
@@ -279,6 +328,60 @@ describe("fraud-alert-triage on the live engine — the event is the entry", () 
       "Created",
     );
     expect(snap().timers).toEqual([]);
+    expect(snap().incidents).toEqual([]);
+  });
+});
+
+describe("fraud-alert-triage on the live engine — a live-shaped agent", () => {
+  const recording = (outcome: string) =>
+    liveShaped(
+      crossReferenceThen((v) =>
+        v.investigationOutcome === undefined
+          ? {
+              variables: { investigationOutcome: outcome, investigationSummary: "Summary." },
+              activateElements: [{ elementId: "RecordInvestigationOutcome" }],
+            }
+          : { completionConditionFulfilled: true },
+      ),
+    );
+
+  it.each(["Clear", " clear "])(
+    "routes a recorded %j through RecordInvestigationOutcome to the clear branch",
+    async (outcome) => {
+      await start(CLEARLY_CLEARED, recording(outcome));
+
+      expect(completedCount("RecordInvestigationOutcome")).toBe(1);
+      // The gateway's condition is an exact `= "clear"`, so taking that branch is
+      // what proves the model's value was normalised on the way through.
+      expect(tookFlow("Gateway_InvestigationOutcome", "CloseAlertNotification")).toBe(true);
+      expect(completedCount("FreezeCard")).toBe(0);
+      expect(cases()[0].completed).toBe(true);
+      expect(snap().incidents).toEqual([]);
+    },
+  );
+
+  it.each(["clearly fraudulent", "clearance denied", "escalate", "not sure"])(
+    "escalates a recorded %j rather than closing the alert",
+    async (outcome) => {
+      await start(CLEARLY_CLEARED, recording(outcome));
+
+      expect(completedCount("RecordInvestigationOutcome")).toBe(1);
+      expect(completedCount("CloseAlertNotification")).toBe(0);
+      expect(completedCount("FreezeCard")).toBe(1);
+      expect(rootVariables().handoffTrigger).toBe("agent-escalation");
+      expect(snap().incidents).toEqual([]);
+    },
+  );
+
+  it("labels an escalation the agent never recorded as the agent's, not as an interrupt", async () => {
+    // A model that says "done" without recording: the gateway's default
+    // escalates, which is the safe outcome — but no second alert arrived.
+    await start(CLEARLY_CLEARED, liveShaped(crossReferenceThen(() => ({ completionConditionFulfilled: true }))));
+
+    expect(rootVariables().investigationOutcome).toBeUndefined();
+    expect(completedCount("FreezeCard")).toBe(1);
+    expect(tookFlow("Boundary_SecondAlert", "Gateway_HandoffMerge")).toBe(false);
+    expect(rootVariables().handoffTrigger).toBe("agent-escalation");
     expect(snap().incidents).toEqual([]);
   });
 });
