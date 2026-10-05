@@ -27,6 +27,7 @@ import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
 import { withToolCallArgs } from "../agent/activation";
 import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
+import { userTaskVariables } from "../userTaskVariables";
 import { useEmbedReadyReporter } from "../embedHeight";
 import { describeRound, newSequenceFlows } from "../stepSummary";
 import { useBrain } from "../useBrain";
@@ -505,6 +506,16 @@ export function ExampleRunner({
   const openUserTask = useMemo(
     () => (run.snapshot ? (openUserTasksOf(run.snapshot)[0] ?? null) : null),
     [run.snapshot],
+  );
+
+  // Includes locals an input mapping put on the task or its sub-process, which root variables lack.
+  const { events: runEvents } = run;
+  const reviewContext = useMemo(
+    () =>
+      run.snapshot && openUserTask
+        ? userTaskVariables(run.snapshot, runEvents(), openUserTask)
+        : displayVars,
+    [run.snapshot, openUserTask, runEvents, displayVars],
   );
 
   // A run now drives itself onward after a human task (see `submitUserTask`),
@@ -1810,7 +1821,7 @@ export function ExampleRunner({
                     onChange={(k, v) =>
                       setReviewValues((prev) => ({ ...prev, [k]: v }))
                     }
-                    context={displayVars}
+                    context={reviewContext}
                     onValidityChange={setReviewFormValid}
                   />
                 </Suspense>

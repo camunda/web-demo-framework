@@ -7,6 +7,7 @@ import {
   type JobHandler,
   type RoundResult,
   type Snapshot,
+  type WasmEvent,
 } from "@nanobpm/bojtos-kit";
 import type { RunImage } from "./imageInput";
 
@@ -83,6 +84,8 @@ export interface ExampleRunControls {
     variablesJson: string,
   ): Snapshot | null;
   reset(): Promise<void>;
+  /** The engine's event log — the only place a non-root scope's local variables appear. */
+  events(): WasmEvent[];
   /**
    * Hold this run's picked/uploaded image (contract B) in run-scoped context,
    * keyed to its process instance — the actual pixels live here, never in a
@@ -383,6 +386,8 @@ export function useExampleRun({
     [deployInto, settle],
   );
 
+  const events = useCallback(() => sessionRef.current?.events() ?? [], []);
+
   return {
     phase,
     error,
@@ -397,6 +402,7 @@ export function useExampleRun({
     throwJobError,
     correlateMessage,
     reset,
+    events,
     redeploy,
     setRunImage,
     getRunImage,
