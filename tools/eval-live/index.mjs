@@ -36,7 +36,12 @@ import { chromium } from "playwright";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const EXAMPLES_DIR = join(ROOT, "src/examples");
-const ENDPOINT = process.env.LIVE_ENDPOINT ?? "http://localhost:11434/v1";
+// Same rules as `normaliseEndpoint` in src/framework/brains/endpoint.ts.
+const ENDPOINT = (() => {
+  let url = (process.env.LIVE_ENDPOINT ?? "http://localhost:11434/v1").trim().replace(/\/+$/, "");
+  if (url.endsWith("/chat/completions")) url = url.slice(0, -"/chat/completions".length);
+  return /\/v\d+$/.test(url) ? url : `${url}/v1`;
+})();
 const SCENARIO_BUDGET_MS = Number(process.env.LIVE_TIMEOUT_MIN ?? 20) * 60_000;
 // setTimeout fires at once for anything above 2^31-1 ms.
 if (!Number.isFinite(SCENARIO_BUDGET_MS) || SCENARIO_BUDGET_MS <= 0 || SCENARIO_BUDGET_MS > 2 ** 31 - 1) {
@@ -501,20 +506,24 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
 
 async function scenariosOf(browser, base, example) {
   const page = await browser.newPage();
-  await page.goto(`${base}/examples/${example}`);
-  await page.getByText("Ready", { exact: true }).first().waitFor({ timeout: 120_000 });
-  const labels = await page.locator(".scenario-toggle").getByRole("button").allInnerTexts();
-  await page.close();
-  const filter = process.env.LIVE_SCENARIO;
-  const all = labels.length ? labels.map((l) => l.trim()) : ["(default input)"];
-  return filter ? all.filter((l) => l.includes(filter)) : all;
+  try {
+    await page.goto(`${base}/examples/${example}`);
+    await page.getByText("Ready", { exact: true }).first().waitFor({ timeout: 120_000 });
+    const labels = await page.locator(".scenario-toggle").getByRole("button").allInnerTexts();
+    const filter = process.env.LIVE_SCENARIO;
+    const all = labels.length ? labels.map((l) => l.trim()) : ["(default input)"];
+    return filter ? all.filter((l) => l.includes(filter)) : all;
+  } finally {
+    await page.close().catch(() => {});
+  }
 }
 
 // --- plumbing --------------------------------------------------------------
 
 async function startDevServer() {
   const port = 5199;
-  const vite = spawn(join(ROOT, "node_modules/.bin/vite"), [ROOT, "--port", String(port), "--strictPort"], {
+  // Through node, not the .bin shim, which Windows can't spawn directly.
+  const vite = spawn(process.execPath, [join(ROOT, "node_modules/vite/bin/vite.js"), ROOT, "--port", String(port), "--strictPort"], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   const base = `http://localhost:${port}`;
@@ -529,7 +538,7 @@ async function startDevServer() {
 }
 
 async function main() {
-  const models = await fetch(`${ENDPOINT.replace(/\/$/, "")}/models`).then((r) => r.json()).catch(() => null);
+  const models = await fetch(`${ENDPOINT}/models`).then((r) => r.json()).catch(() => null);
   if (!models?.data?.length) {
     console.error(`No models served at ${ENDPOINT}/models — start Ollama (or set LIVE_ENDPOINT) first.`);
     process.exit(2);
@@ -540,10 +549,24 @@ async function main() {
     : await startDevServer();
   let browser;
   const results = [];
+  const record = (r) => {
+    results.push(r);
+    // Rewritten every time, so an aborted sweep still leaves what it finished.
+    writeFileSync(join(OUT, "report.json"), JSON.stringify(results, null, 2));
+  };
   try {
     browser = await chromium.launch({ headless: process.env.LIVE_HEADED !== "1" });
     for (const example of agentExamples()) {
-      for (const scenario of await scenariosOf(browser, server.base, example)) {
+      let scenarios;
+      try {
+        scenarios = await scenariosOf(browser, server.base, example);
+      } catch (e) {
+        const fail = [`couldn't load the example: ${String(e.message ?? e).split("\n")[0]}`];
+        record({ example, scenario: "(all)", pass: false, fail, warn: [], notes: [] });
+        console.log(`✘ ${example}\n    FAIL ${fail[0]}`);
+        continue;
+      }
+      for (const scenario of scenarios) {
         process.stdout.write(`… ${example} / ${scenario}\n`);
         // The scripted run is the reference path: a live run that takes a
         // different one is often the model, but sometimes a variable only the
@@ -559,7 +582,7 @@ async function main() {
           );
         }
         r.pass = r.fail.length === 0;
-        results.push(r);
+        record(r);
         const head = `${r.pass ? "✔" : "✘"} ${example} / ${scenario}  (${Math.round(r.ms / 1000)}s, ${r.model || "?"})`;
         console.log(head);
         for (const f of r.fail) console.log(`    FAIL ${f}`);
@@ -581,7 +604,6 @@ async function main() {
     return;
   }
 
-  writeFileSync(join(OUT, "report.json"), JSON.stringify(results, null, 2));
   const passed = results.filter((r) => r.pass).length;
   console.log(`\n${passed}/${results.length} scenarios passed. Traces and failure screenshots: ${OUT}`);
   if (passed !== results.length) process.exitCode = 1;
