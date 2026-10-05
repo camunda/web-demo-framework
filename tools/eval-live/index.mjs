@@ -278,7 +278,8 @@ async function answerHumanTask(page, ctx, result) {
   const label = task?.name || formId || "human task";
   result.humanTasks.push(label);
 
-  if (await card.getByText("The agent didn't finish its checks").count()) {
+  // An agent this harness cancelled never reached its required-tool check.
+  if (!ctx.interrupted && (await card.getByText("The agent didn't finish its checks").count())) {
     result.fail.push(`${label}: "The agent didn't finish its checks" — a required tool never ran`);
   }
 
@@ -403,13 +404,16 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
   const started = Date.now();
   const deadline = started + SCENARIO_BUDGET_MS;
   const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  const page = await context.newPage();
+  const slug = `${example}--${scenario}--${brain}`.replace(/[^a-z0-9]+/gi, "-").slice(0, 110);
+  const screenshot = () => page.screenshot({ path: join(OUT, `${slug}.png`), fullPage: true, timeout: 10_000 }).catch(() => {});
   // Closing the context cancels whatever wait is pending, setup included.
   let overBudget = false;
-  const budget = setTimeout(() => {
+  const budget = setTimeout(async () => {
     overBudget = true;
+    await screenshot();
     context.close().catch(() => {});
   }, SCENARIO_BUDGET_MS);
-  const page = await context.newPage();
   const trace = new Trace();
   const ctx = { trace, scenario, userTasks: userTasksOf(example), forms: formsOf(example), leftBlank: new Set(), pressed: false, interrupted: false };
   page.on("pageerror", (e) => result.warn.push(`page error: ${e.message.slice(0, 160)}`));
@@ -489,9 +493,8 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
 
   result.ms = Date.now() - started;
   result.pass = result.fail.length === 0;
-  const slug = `${example}--${scenario}--${brain}`.replace(/[^a-z0-9]+/gi, "-").slice(0, 110);
   writeFileSync(join(OUT, `${slug}.trace.txt`), trace.lines.join("\n") + "\n");
-  if (!result.pass) await page.screenshot({ path: join(OUT, `${slug}.png`), fullPage: true }).catch(() => {});
+  if (!result.pass && !overBudget) await screenshot();
   await context.close().catch(() => {});
   return result;
 }
