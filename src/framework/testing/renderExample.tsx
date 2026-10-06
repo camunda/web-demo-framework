@@ -44,8 +44,8 @@ export interface RunnerHarness {
   status(): string;
   /** Every line in the Activity panel, oldest first (the panel shows newest first). */
   trace(): string[];
-  /** The instance variables the page is currently showing. */
-  variables(): unknown;
+  /** Top-level instance variables the page is showing: name → rendered text. */
+  variables(): Record<string, string>;
   /**
    * Whether `text` appears anywhere outside the rendered diagram. bpmn-js
    * paints every element's name into the SVG, so a plain `getByText` for a
@@ -107,12 +107,13 @@ export async function renderExample(
     trace,
     settle,
     variables() {
-      const el = document.querySelector(".vars");
-      try {
-        return JSON.parse(el?.textContent ?? "{}");
-      } catch {
-        return {};
-      }
+      const list = document.querySelector(".vars-list");
+      // Throw rather than return {}, so a `not.toHaveProperty` can't pass on a missing panel.
+      if (!list) throw new Error("no Instance variables panel on the page");
+      const out: Record<string, string> = {};
+      for (const dt of list.querySelectorAll(":scope > dl > .vars-row > dt"))
+        out[dt.textContent ?? ""] = dt.nextElementSibling?.textContent ?? "";
+      return out;
     },
     showsOutsideDiagram(text: string) {
       return screen

@@ -42,6 +42,7 @@ import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
+import { VariableList } from "./VariableList";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
@@ -1944,12 +1945,9 @@ export function ExampleRunner({
                 }}
               >
                 <summary className="vars-head">Instance variables</summary>
-                <pre className="vars">
-                  {safeStringify(
-                    Object.keys(displayVars).length > 0 ? displayVars : pendingSeed,
-                    2,
-                  )}
-                </pre>
+                <VariableList
+                  value={Object.keys(displayVars).length > 0 ? displayVars : pendingSeed}
+                />
               </details>
             }
             decisions={

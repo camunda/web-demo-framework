@@ -552,6 +552,45 @@ body {
   color: var(--ink-muted);
 }
 
+.vars-list {
+  white-space: normal;
+}
+.vars-list dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 14px;
+  row-gap: 3px;
+  margin: 0;
+}
+.vars-row {
+  display: contents;
+}
+.vars-list dt {
+  color: var(--ink-muted-2);
+}
+.vars-list dd {
+  margin: 0;
+  color: var(--ink);
+  min-width: 0;
+}
+.vars-row-nested > dt,
+.vars-row-nested > dd {
+  grid-column: 1 / -1;
+}
+.vars-row-nested > dd {
+  margin-bottom: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.vars-muted,
+.vars-none {
+  color: var(--ink-muted-2);
+  font-style: italic;
+}
+.vars-none {
+  margin: 0;
+}
+
 /* The live instance payload, as the activity panel's footer (see the
    `variables` slot on TraceTimeline). A <details> rather than a nested
    CollapsibleCard, same reasoning as `.engine-view` below. */
