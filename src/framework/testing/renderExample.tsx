@@ -58,7 +58,8 @@ export interface RunnerHarness {
   run(): Promise<void>;
   /**
    * Complete the open human task. `fill` runs first, to answer whatever the
-   * form requires.
+   * form requires, and is retried until it stops throwing — so it must fail
+   * on a missing field before it changes anything.
    */
   completeUserTask(fill?: () => void): Promise<void>;
 }
@@ -133,7 +134,8 @@ export async function renderExample(
     },
     async completeUserTask(fill) {
       const button = await screen.findByRole("button", { name: "Complete task" });
-      fill?.();
+      // The button renders before form-js has imported the fields `fill` reaches for.
+      if (fill) await waitFor(fill, { timeout: RUN_TIMEOUT });
       await waitFor(() => expect(button).toBeEnabled(), { timeout: RUN_TIMEOUT });
       const before = trace().length;
       fireEvent.click(button);
