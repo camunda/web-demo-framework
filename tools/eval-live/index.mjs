@@ -274,7 +274,8 @@ async function connectBrain(page) {
   return (await page.locator("#endpoint-model").innerText()).trim();
 }
 
-async function answerHumanTask(page, ctx, result) {
+/** The read-only checks on the open human task; returns what answering it needs. */
+async function inspectHumanTask(page, ctx, result) {
   const button = page.getByRole("button", { name: "Complete task", exact: true });
   const card = page.locator(".panel").filter({ has: button }).last();
   const desc = await card.locator(".panel-desc").innerText().catch(() => "");
@@ -290,84 +291,89 @@ async function answerHumanTask(page, ctx, result) {
 
   const schema = formId ? ctx.forms.get(formId) : undefined;
   const form = card.locator(".fjs-form").first();
-  if (schema) {
-    await form.waitFor({ timeout: 30_000 });
-    const fields = componentsOf(schema).filter((c) => c.key && c.label);
-    const optionsOf = (c) => (c.values ?? []).map((v) => form.getByRole("radio", { name: v.label, exact: true }).first());
-    const anyChecked = async (c) => {
-      for (const o of optionsOf(c)) if (await o.isChecked().catch(() => false)) return true;
-      return false;
-    };
+  const open = { button, label, form, fields: [], optionsOf: () => [], anyChecked: async () => false };
+  if (!schema) return open;
 
-    // Fields the model maps a value into must arrive prefilled.
-    for (const c of fields.filter((f) => task?.inputTargets.includes(f.key))) {
-      if (c.type === "radio") {
-        if (!(await anyChecked(c))) {
-          result.fail.push(`${label}: "${c.label}" (${c.key}) is input-mapped but arrived unselected`);
-        }
+  await form.waitFor({ timeout: 30_000 });
+  open.fields = componentsOf(schema).filter((c) => c.key && c.label);
+  open.optionsOf = (c) => (c.values ?? []).map((v) => form.getByRole("radio", { name: v.label, exact: true }).first());
+  open.anyChecked = async (c) => {
+    for (const o of open.optionsOf(c)) if (await o.isChecked().catch(() => false)) return true;
+    return false;
+  };
+
+  // Fields the model maps a value into must arrive prefilled.
+  for (const c of open.fields.filter((f) => task?.inputTargets.includes(f.key))) {
+    if (c.type === "radio") {
+      if (!(await open.anyChecked(c))) {
+        result.fail.push(`${label}: "${c.label}" (${c.key}) is input-mapped but arrived unselected`);
+      }
+      continue;
+    }
+    const input = form.getByLabel(c.label, { exact: false }).first();
+    const value = (await input.count()) ? await input.inputValue().catch(() => "") : "";
+    if (!value.trim()) {
+      result.fail.push(`${label}: "${c.label}" (${c.key}) is input-mapped but arrived empty`);
+    }
+  }
+
+  // Every `{{…}}` should render something, checked within its own component.
+  const components = templateChecks(schema);
+  const rendered = await form.locator(".fjs-form-field-text").evaluateAll((els) =>
+    els.map((el) => [...el.children].map((b) => b.innerText.replace(/\s+/g, " ").trim())),
+  );
+  if (rendered.length !== components.length) {
+    result.warn.push(`${label}: ${rendered.length} text blocks rendered for ${components.length} in the form; template checks skipped`);
+    return open;
+  }
+  components.forEach((component, i) => {
+    const blocks = rendered[i];
+    if (blocks.length < component.paragraphs) {
+      result.fail.push(`${label}: ${component.paragraphs - blocks.length} paragraph(s) of ${component.id} rendered empty`);
+    }
+    for (const probe of component.probes) {
+      if (!probe.regex) continue;
+      const m = blocks.map((b) => probe.regex.exec(b)).find(Boolean);
+      if (!m) {
+        result.warn.push(`${label}: couldn't locate "${probe.line.slice(0, 60)}" in ${component.id}`);
         continue;
       }
-      const input = form.getByLabel(c.label, { exact: false }).first();
-      const value = (await input.count()) ? await input.inputValue().catch(() => "") : "";
-      if (!value.trim()) {
-        result.fail.push(`${label}: "${c.label}" (${c.key}) is input-mapped but arrived empty`);
-      }
-    }
-
-    // Every `{{…}}` should render something, checked within its own component.
-    const components = templateChecks(schema);
-    const rendered = await form.locator(".fjs-form-field-text").evaluateAll((els) =>
-      els.map((el) => [...el.children].map((b) => b.innerText.replace(/\s+/g, " ").trim())),
-    );
-    if (rendered.length !== components.length) {
-      result.warn.push(`${label}: ${rendered.length} text blocks rendered for ${components.length} in the form; template checks skipped`);
-    } else {
-      components.forEach((component, i) => {
-        const blocks = rendered[i];
-        if (blocks.length < component.paragraphs) {
-          result.fail.push(`${label}: ${component.paragraphs - blocks.length} paragraph(s) of ${component.id} rendered empty`);
-        }
-        for (const probe of component.probes) {
-          if (!probe.regex) continue;
-          const m = blocks.map((b) => probe.regex.exec(b)).find(Boolean);
-          if (!m) {
-            result.warn.push(`${label}: couldn't locate "${probe.line.slice(0, 60)}" in ${component.id}`);
-            continue;
-          }
-          probe.exprs.forEach((exprs, g) => {
-            const got = (m[g + 1] ?? "").trim();
-            // Blank because this harness left an optional field empty earlier.
-            if (exprs.every((e) => ctx.leftBlank.has(e))) return;
-            if (!got || got === "undefined" || got === "null") {
-              const shown = exprs.map((e) => `{{${e.slice(0, 50)}}}`).join(" ");
-              result.fail.push(`${label}: ${shown} renders blank in "${probe.line.slice(0, 60)}"`);
-            }
-          });
+      probe.exprs.forEach((exprs, g) => {
+        const got = (m[g + 1] ?? "").trim();
+        // Blank because this harness left an optional field empty earlier.
+        if (exprs.every((e) => ctx.leftBlank.has(e))) return;
+        if (!got || got === "undefined" || got === "null") {
+          const shown = exprs.map((e) => `{{${e.slice(0, 50)}}}`).join(" ");
+          result.fail.push(`${label}: ${shown} renders blank in "${probe.line.slice(0, 60)}"`);
         }
       });
     }
+  });
+  return open;
+}
 
-    // Answer: first option for choices, a placeholder for required text/numbers.
-    for (const c of fields) {
-      if (c.type === "radio" && c.values?.length) {
-        if (!(await anyChecked(c))) {
-          // `check()` misreports here: form-js re-renders the group on change.
-          await optionsOf(c)[0].click();
-        }
-        continue;
+async function answerHumanTask(page, ctx, open, result) {
+  const { button, label, form, fields, optionsOf, anyChecked } = open;
+  // Answer: first option for choices, a placeholder for required text/numbers.
+  for (const c of fields) {
+    if (c.type === "radio" && c.values?.length) {
+      if (!(await anyChecked(c))) {
+        // `check()` misreports here: form-js re-renders the group on change.
+        await optionsOf(c)[0].click();
       }
-      const input = form.getByLabel(c.label, { exact: false }).first();
-      const filled = (await input.count()) && (await input.inputValue().catch(() => "")).trim();
-      if (!c.validate?.required) {
-        if (!filled) ctx.leftBlank.add(c.key);
-        continue;
-      }
-      if (!(await input.count()) || filled) continue;
-      // Typed, not `fill()`ed: form-js's number field ignores a programmatic fill.
-      await input.pressSequentially(c.type === "number" ? "100" : "Automated live-eval reviewer note.");
-      // A radio clicked within ~300 ms of typing a cleared number field is lost.
-      await page.waitForTimeout(600);
+      continue;
     }
+    const input = form.getByLabel(c.label, { exact: false }).first();
+    const filled = (await input.count()) && (await input.inputValue().catch(() => "")).trim();
+    if (!c.validate?.required) {
+      if (!filled) ctx.leftBlank.add(c.key);
+      continue;
+    }
+    if (!(await input.count()) || filled) continue;
+    // Typed, not `fill()`ed: form-js's number field ignores a programmatic fill.
+    await input.pressSequentially(c.type === "number" ? "100" : "Automated live-eval reviewer note.");
+    // A radio clicked within ~300 ms of typing a cleared number field is lost.
+    await page.waitForTimeout(600);
   }
 
   try {
@@ -389,15 +395,20 @@ async function openTaskIsInAgent(page, ctx) {
   return Boolean(formId && ctx.userTasks.get(formId)?.inAgent);
 }
 
-async function resolveWaitingEvent(page, ctx, result, from) {
+async function waitingEventChoice(page, ctx) {
   const card = page.locator(".panel").filter({ has: page.getByText("Something else happens", { exact: true }) });
-  if (!(await card.count())) return false;
+  if (!(await card.count())) return null;
   const buttons = card.getByRole("button").filter({ hasNotText: "Something else happens" });
   const lapse = card.getByRole("button", { name: /Let the timer lapse/ });
   const choice = /never answers/i.test(ctx.scenario) && (await lapse.count())
     ? lapse.first()
     : buttons.filter({ hasNotText: /Let the timer lapse/ }).first();
-  if (!(await choice.count())) return false;
+  return (await choice.count()) ? choice : null;
+}
+
+async function resolveWaitingEvent(page, ctx, result, from) {
+  const choice = await waitingEventChoice(page, ctx);
+  if (!choice) return false;
   ctx.pressed = true;
   result.notes.push(`pressed "${(await choice.innerText()).trim()}"`);
   await clickAndWaitForProgress(page, ctx.trace, choice, from);
@@ -450,12 +461,15 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
         // agent is parked on its own human task — answering it first would skip
         // the interrupt. After the agent has finished there is nothing to
         // interrupt, and a press would only start another case.
-        if (/\bpress\b/i.test(scenario) && !ctx.pressed && (await openTaskIsInAgent(page, ctx)) &&
-          (await resolveWaitingEvent(page, ctx, result, s))) {
+        const interruptNow = /\bpress\b/i.test(scenario) && !ctx.pressed &&
+          (await openTaskIsInAgent(page, ctx)) && Boolean(await waitingEventChoice(page, ctx));
+        // Checked either way: a task about to be cancelled was still shown.
+        const open = await inspectHumanTask(page, ctx, result);
+        if (interruptNow && (await resolveWaitingEvent(page, ctx, result, s))) {
           ctx.interrupted = true;
           continue;
         }
-        if (!(await answerHumanTask(page, ctx, result))) ended = s;
+        if (!(await answerHumanTask(page, ctx, open, result))) ended = s;
         continue;
       }
       if (s === "Paused" && (await resolveWaitingEvent(page, ctx, result, s))) continue;
@@ -473,6 +487,11 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
       result.fail.push("never ran on the live brain (scripted fallback?)");
     }
     for (const l of trace.matching(/LLM call failed/)) result.fail.push(l);
+    // The runner's own engine-operation failures; a failed publish leaves the
+    // run where it was, so it can still go on to reach Completed.
+    for (const l of trace.matching(/^▶ .*failed$|^▶ run stopped|^⏭ step failed|^▶ nothing started|failed to resolve the manual job/)) {
+      result.fail.push(l);
+    }
     // From the engine's counts, not the trace: a model that says "done" again
     // after its one nudge is accepted without any "never ran" line.
     if (!ctx.interrupted) {
@@ -488,13 +507,11 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
     for (const l of trace.matching(/doesn't exist/)) result.warn.push(l);
     for (const l of trace.matching(/Turn budget spent|activated nothing — completing|model named no tool/)) result.warn.push(l);
   } catch (e) {
-    result.fail.push(
-      overBudget
-        ? `exceeded the ${SCENARIO_BUDGET_MS / 60_000} min scenario budget`
-        : `harness: ${String(e.message ?? e).split("\n")[0]}`,
-    );
+    if (!overBudget) result.fail.push(`harness: ${String(e.message ?? e).split("\n")[0]}`);
   }
   clearTimeout(budget);
+  // Also when the run finished while the timeout's screenshot was being taken.
+  if (overBudget) result.fail.push(`exceeded the ${SCENARIO_BUDGET_MS / 60_000} min scenario budget`);
 
   result.ms = Date.now() - started;
   result.pass = result.fail.length === 0;
