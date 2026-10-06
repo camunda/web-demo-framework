@@ -203,7 +203,9 @@ class Trace {
   lines = [];
   seen = new Set();
   async capture(page) {
-    const text = await page.locator(".timeline").first().innerText().catch(() => "");
+    // The panel renders newest row first; read rows oldest-first so the saved trace reads in run order.
+    const rows = await page.locator(".timeline").first().locator(":scope > *").allInnerTexts().catch(() => []);
+    const text = rows.reverse().join("\n");
     for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
       if (this.seen.has(line)) continue;
       this.seen.add(line);

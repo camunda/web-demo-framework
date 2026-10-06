@@ -42,7 +42,7 @@ const STATUSES = [
 export interface RunnerHarness {
   /** The status badge's current text. */
   status(): string;
-  /** Every line in the Activity panel, in order. */
+  /** Every line in the Activity panel, oldest first (the panel shows newest first). */
   trace(): string[];
   /** The instance variables the page is currently showing. */
   variables(): unknown;
@@ -96,7 +96,8 @@ export async function renderExample(
     if (!timeline || timeline.querySelector(".log-empty")) return [];
     return Array.from(timeline.children)
       .map((el) => (el.textContent ?? "").trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .reverse();
   };
 
   await settle();
