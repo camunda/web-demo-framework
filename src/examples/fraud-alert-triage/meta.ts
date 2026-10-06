@@ -6,10 +6,10 @@ const meta: ExampleMeta = {
   id: "fraud-alert-triage",
   title: "Fraud alert triage agent",
   blurb:
-    "An event-driven agent with no start form at all: a published alert is the only way in, and a second alert for the same customer correlates into the running case instead of opening a new one — cancelling the agent mid-investigation, even while it is parked on the human it chose to consult.",
+    "Run \"Mundane\", then press \"A second alert arrives\" while the agent is still investigating.",
   hero: {
     headline: "No form, no polling. The *event* is the process.",
-    lede: "Camunda's event-driven agent pattern, running here on a wasm engine in your browser. One subscription starts the case and interrupts it: fire a second alert while the agent is waiting on its analyst and watch the whole investigation get torn down.",
+    lede: "An incoming alert opens a case. If a second alert arrives for the same customer, it interrupts the investigation already in progress instead of opening a duplicate case.",
     tagline: "Event-driven agent",
   },
   pageUrl: "https://camunda.com/orchestrate/agents/#event-driven-agent",
