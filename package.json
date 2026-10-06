@@ -19,7 +19,8 @@
     "eval": "node --import ./tools/eval/register.mjs tools/eval/index.mjs",
     "eval:vision": "node tools/eval-vision/index.mjs",
     "spike:urban": "node --experimental-strip-types tools/spike-urban-bojtos/demo.ts",
-    "budget": "node tools/bundle-budget/check.mjs"
+    "budget": "node tools/bundle-budget/check.mjs",
+    "eval:live": "node tools/eval-live/index.mjs"
   },
   "dependencies": {
     "@bpmn-io/form-js-viewer": "^1.24.1",
@@ -61,6 +62,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "bpmn-moddle": "^8.1.0",
     "jsdom": "^30.0.1",
+    "playwright": "1.59.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.5",
     "vitest": "^4.1.10"
