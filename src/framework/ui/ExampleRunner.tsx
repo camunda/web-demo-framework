@@ -425,12 +425,15 @@ export function ExampleRunner({
   // allowed to force the input editor open (see `startFormBlocking`).
   const [startFormValid, setStartFormValid] = useState<boolean | null>(null);
   const startFormRef = useRef<FormRendererHandle>(null);
-  const [reviewValues, setReviewValues] = useState<Record<string, unknown>>({});
-  // The rendered review form's live validity (required fields filled, etc.) —
-  // "Complete task" must stay disabled while this is false, and
-  // `reviewFormRef.current!.validate()` is the actual gate re-checked at
-  // submit time, not just this display flag.
-  const [reviewFormValid, setReviewFormValid] = useState(false);
+  // The review form's answers and live validity, tagged with the task they were
+  // entered for (see `reviewValues` below). "Complete task" must stay disabled
+  // while `valid` is false; `reviewFormRef.current!.validate()` is the actual
+  // gate re-checked at submit time, not just this display flag.
+  const [reviewState, setReviewState] = useState<{
+    taskKey: string | null;
+    values: Record<string, unknown>;
+    valid: boolean;
+  }>({ taskKey: null, values: {}, valid: false });
   const reviewFormRef = useRef<FormRendererHandle>(null);
 
   const runningRef = useRef(false);
@@ -519,14 +522,34 @@ export function ExampleRunner({
   );
 
   // A run now drives itself onward after a human task (see `submitUserTask`),
-  // so the *next* task can open while these still hold the last one's answers.
-  // Left alone, its fields would be re-submitted with the new task, and its
-  // "valid" verdict would enable Complete task before the new form's required
-  // fields had been touched.
-  useEffect(() => {
-    setReviewValues({});
-    setReviewFormValid(false);
-  }, [openUserTask?.key]);
+  // so the *next* task can open while the state still holds the last one's
+  // answers. Read only for the task they were entered for, so the next task
+  // starts empty and invalid in the very render it appears — a reset in an
+  // effect came a render late, after the form had already imported them.
+  const openTaskKey = openUserTask?.key ?? null;
+  const reviewValues = useMemo(
+    () => (reviewState.taskKey === openTaskKey ? reviewState.values : {}),
+    [reviewState, openTaskKey],
+  );
+  const reviewFormValid = reviewState.taskKey === openTaskKey && reviewState.valid;
+  const setReviewValue = useCallback(
+    (key: string, value: unknown) =>
+      setReviewState((prev) => ({
+        taskKey: openTaskKey,
+        values: { ...(prev.taskKey === openTaskKey ? prev.values : {}), [key]: value },
+        valid: prev.taskKey === openTaskKey && prev.valid,
+      })),
+    [openTaskKey],
+  );
+  const setReviewFormValid = useCallback(
+    (valid: boolean) =>
+      setReviewState((prev) => ({
+        taskKey: openTaskKey,
+        values: prev.taskKey === openTaskKey ? prev.values : {},
+        valid,
+      })),
+    [openTaskKey],
+  );
 
   /**
    * Job types this example holds out of the automatic drive loop (see
@@ -992,7 +1015,7 @@ export function ExampleRunner({
     }
 
     setLog([]);
-    setReviewValues({});
+    setReviewState({ taskKey: null, values: {}, valid: false });
     // Only the *reference* to the image (imageId/imageName) rides in the
     // process variables — never the pixels (see `imageInput.ts`). The bytes are
     // put into run-scoped context below, keyed to the instance just created.
@@ -1815,12 +1838,13 @@ export function ExampleRunner({
               {reviewSchema && (
                 <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
                   <FormRenderer
+                    // A new task gets a new form: the same schema with merged data
+                    // that happens to match would otherwise skip its import.
+                    key={openUserTask.key}
                     ref={reviewFormRef}
                     schema={reviewSchema}
                     values={reviewValues}
-                    onChange={(k, v) =>
-                      setReviewValues((prev) => ({ ...prev, [k]: v }))
-                    }
+                    onChange={setReviewValue}
                     context={reviewContext}
                     onValidityChange={setReviewFormValid}
                   />
