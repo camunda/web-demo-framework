@@ -6,10 +6,10 @@ const meta: ExampleMeta = {
   id: "credit-line-increase",
   title: "Credit line increase agent",
   blurb:
-    "A long-running agent whose first tool fires a request at a credit bureau and then genuinely stops — the wait is the continuation of that one tool call, and it consumes nothing while it lasts. An SLA timer scoped to that single wait reports back into the agent's own loop, so a bureau that misses its deadline is information the agent acts on rather than an ejection.",
+    "Press Run, then either send the bureau's reply or let the timer lapse and watch the agent decide what to do.",
   hero: {
     headline: "The wait *is* the tool call.",
-    lede: "Camunda's long-running agent pattern, running here on a wasm engine in your browser. One tool call submits the bureau request and doesn't return until the report lands or the SLA elapses — hours or days on a real cluster, and no worker, no poll loop, nothing to retry in the meantime.",
+    lede: "The agent waits for a credit bureau to reply, and nothing runs while it waits. If the bureau misses its deadline, a timer on the diagram hands the next step back to the agent.",
     tagline: "Long-running agent",
   },
   pageUrl: "https://camunda.com/orchestrate/agents/#long-running-agent",

@@ -6,10 +6,10 @@ const meta: ExampleMeta = {
   id: "expense-decision",
   title: "Expense decision agent",
   blurb:
-    "A DMN decision table settles the clear-cut expense claims outright, and for those the agent is never invoked at all. Only the residual it can't judge — a foreign currency, a gray-zone amount, a category it doesn't cover — reaches the agent, which has one real tool and one documented exception a flat rule band can't express.",
+    "Run \"Clear approve\" and the agent never starts. Run a gray-zone claim and it does.",
   hero: {
     headline: "The rule table decides. The agent handles *what's left*.",
-    lede: "Camunda's decision agent pattern, running here on a wasm engine in your browser — with a real DMN table deployed alongside the diagram. Run the clear-approve claim and watch the agent never start; run the 90 EUR dinner and watch it convert the currency and apply the one exception the table has no way to express.",
+    lede: "A DMN decision table settles the clear-cut claims without calling the agent. The agent only sees the borderline claims, and it can escalate them instead of guessing.",
     tagline: "Decision agent",
   },
   pageUrl: "https://camunda.com/orchestrate/agents/#decision-agent",

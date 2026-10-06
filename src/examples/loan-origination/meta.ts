@@ -5,7 +5,7 @@ const meta: ExampleMeta = {
   id: "loan-origination",
   title: "Loan origination agent",
   blurb:
-    "An AI agent gathers a loan case with its own tools — customer lookup, credit bureau, an underwriting policy, a status update — then every application passes through a mandatory senior-officer review before a gateway routes it to an offer or a decline. The agent advises; the process governs.",
+    "An AI agent gathers the loan case with its own tools. Every application then goes to a senior officer before it gets an offer or a decline.",
   pageUrl: "https://camunda.com/orchestrate/agents/",
   sourceUrl: "https://docs.camunda.io/docs/components/agentic-orchestration/ai-agents/",
 };
