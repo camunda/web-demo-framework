@@ -106,6 +106,9 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
     // changed `values`/`context` from the outside" (a preset scenario button,
     // a live run updating `context`) — which does need a re-import.
     const lastDataRef = useRef<string | null>(null);
+    // form-js fires `changed` with no errors mid-import, before validating, so
+    // only the import's own validate() may report validity while one runs.
+    const importingRef = useRef(0);
 
     // Cache of `collectKeys(schema)`, recomputed only when the schema object
     // itself changes — `handleChanged` runs on every keystroke and walking
@@ -169,6 +172,7 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
         // recognises the resulting prop update as our own echo rather than
         // an external change that needs a full re-import.
         lastDataRef.current = stableStringify(data);
+        if (importingRef.current > 0) return;
         onValidityChangeRef.current?.(Object.keys(errors ?? {}).length === 0);
       };
       form.on("changed", handleChanged);
@@ -198,13 +202,16 @@ export const FormRenderer = forwardRef<FormRendererHandle, FormRendererProps>(
       const serialized = stableStringify(data);
       if (serialized === lastDataRef.current) return;
       lastDataRef.current = serialized;
+      importingRef.current += 1;
       form
         .importSchema(schema, data)
         .then(() => {
+          importingRef.current -= 1;
           const errors = form.validate();
           onValidityChangeRef.current?.(Object.keys(errors).length === 0);
         })
         .catch((e: unknown) => {
+          importingRef.current -= 1;
           // A malformed schema is the form author's bug — surface it in the
           // console rather than leaving a blank panel with no explanation.
           console.error("form-js failed to import schema", e);
