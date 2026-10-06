@@ -421,7 +421,7 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
   }, SCENARIO_BUDGET_MS);
   const trace = new Trace();
   const ctx = { trace, scenario, userTasks: userTasksOf(example), forms: formsOf(example), leftBlank: new Set(), pressed: false, interrupted: false };
-  page.on("pageerror", (e) => result.warn.push(`page error: ${e.message.slice(0, 160)}`));
+  page.on("pageerror", (e) => result.fail.push(`uncaught page error: ${e.message.slice(0, 160)}`));
 
   try {
     const hash = encodeURIComponent(JSON.stringify({ brain }));
@@ -486,7 +486,7 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
       }
     }
     for (const l of trace.matching(/doesn't exist/)) result.warn.push(l);
-    for (const l of trace.matching(/Turn budget spent|activated nothing — completing/)) result.warn.push(l);
+    for (const l of trace.matching(/Turn budget spent|activated nothing — completing|model named no tool/)) result.warn.push(l);
   } catch (e) {
     result.fail.push(
       overBudget
@@ -523,18 +523,33 @@ async function scenariosOf(browser, base, example) {
 async function startDevServer() {
   const port = 5199;
   // Through node, not the .bin shim, which Windows can't spawn directly.
-  const vite = spawn(process.execPath, [join(ROOT, "node_modules/vite/bin/vite.js"), ROOT, "--port", String(port), "--strictPort"], {
+  const vite = spawn(process.execPath, [join(ROOT, "node_modules/vite/bin/vite.js"), ROOT, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const base = `http://localhost:${port}`;
-  const until = Date.now() + 60_000;
-  while (Date.now() < until) {
-    if (vite.exitCode !== null) throw new Error(`vite exited (${vite.exitCode}) — is port ${port} in use?`);
-    if (await fetch(base).then((r) => r.ok, () => false)) return { base, stop: () => vite.kill() };
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  vite.kill();
-  throw new Error("vite dev server didn't come up");
+  // An explicit address: `localhost` can resolve to a different server on ::1.
+  const base = `http://127.0.0.1:${port}`;
+  // Wait for *this* process to say it's ready: an HTTP probe alone would also
+  // accept whatever else is already listening on the port.
+  let output = "";
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("vite dev server didn't come up")), 60_000);
+    const onData = (chunk) => {
+      output += chunk.toString().replace(/\x1b\[[0-9;]*m/g, "");
+      // Vite's banner is "ready in 91 ms"; "Port … is already in use" must not match.
+      if (/\bready in \d/.test(output)) { clearTimeout(timer); resolve(); }
+    };
+    vite.stdout.on("data", onData);
+    vite.stderr.on("data", onData);
+    vite.on("error", (e) => { clearTimeout(timer); reject(e); });
+    vite.on("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`vite exited (${code}) — is port ${port} in use?\n${output.trim().slice(-400)}`));
+    });
+  }).catch((e) => {
+    vite.kill();
+    throw e;
+  });
+  return { base, stop: () => vite.kill() };
 }
 
 async function main() {
