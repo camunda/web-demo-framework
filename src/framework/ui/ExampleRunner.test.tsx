@@ -165,6 +165,23 @@ describe("ExampleRunner — pacing to the diagram's token walk", () => {
     expect(next.at - watch.seen[i].at).toBeGreaterThanOrEqual(850);
   }, 40_000);
 
+  // Submitting a task moves the token too; the next round used to start at once.
+  it("waits for the walk after a human task is submitted", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+    const watch = watchTrace();
+    await app.completeUserTask(() => {
+      fireEvent.click(screen.getByText("Approve release"));
+    });
+    watch.stop();
+
+    const i = watch.seen.findIndex((s) => s.text.startsWith("👤"));
+    expect(i).toBeGreaterThan(-1);
+    const next = watch.seen[i + 1];
+    expect(next).toBeDefined();
+    expect(next.at - watch.seen[i].at).toBeGreaterThanOrEqual(600);
+  }, 40_000);
+
   // Step must not hand the controls back while the diagram is still walking.
   it("keeps Step locked until the start's walk has finished", async () => {
     await renderExample({

@@ -893,6 +893,7 @@ export function ExampleRunner({
       runningRef.current = true;
       setRunning(true);
       try {
+        const hopsBefore = rootActivations();
         let snap: Snapshot | null;
         let successText: string;
         if (choice === "complete") {
@@ -911,7 +912,7 @@ export function ExampleRunner({
           trace({ kind: "vars", text: successText, elementId: job.elementId });
           const vars = displayableVars(snap, rootInstanceKeyRef.current);
           if (vars) setDisplayVars({ ...vars });
-          await new Promise((r) => setTimeout(r, BEAT));
+          await pace(rootActivations() - hopsBefore);
           await driveLoop(workersRef.current, agentsRef.current, snap, seq);
         } else {
           trace({
@@ -1435,6 +1436,7 @@ export function ExampleRunner({
       try {
         // The key comes off the subscription the engine actually opened, so it
         // can't drift from what the instance resolved.
+        const hopsBefore = rootActivations();
         const snap = run.correlateMessage(
           sub.messageName,
           sub.correlationKey,
@@ -1455,7 +1457,7 @@ export function ExampleRunner({
         });
         const vars = displayableVars(snap, rootInstanceKeyRef.current);
         if (vars) setDisplayVars({ ...vars });
-        await new Promise((r) => setTimeout(r, BEAT));
+        await pace(rootActivations() - hopsBefore);
         await driveLoop(workersRef.current, agentsRef.current, snap, seq);
       } finally {
         if (runSeqRef.current === seq) {
@@ -1475,6 +1477,7 @@ export function ExampleRunner({
     runningRef.current = true;
     setRunning(true);
     try {
+      const hopsBefore = rootActivations();
       const snap = run.advanceTime(Math.max(racingTimer.dueInMs, 0) + 1);
       if (!snap) {
         trace({ kind: "error", text: "▶ advancing the clock failed" });
@@ -1483,7 +1486,7 @@ export function ExampleRunner({
       trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
       const vars = displayableVars(snap, rootInstanceKeyRef.current);
       if (vars) setDisplayVars({ ...vars });
-      await new Promise((r) => setTimeout(r, BEAT));
+      await pace(rootActivations() - hopsBefore);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
       if (runSeqRef.current === seq) {
@@ -1500,6 +1503,7 @@ export function ExampleRunner({
     // with no linked schema (reviewFormRef unset) has nothing to validate.
     if (reviewFormRef.current && !reviewFormRef.current.validate()) return;
     const seq = ++runSeqRef.current;
+    const hopsBefore = rootActivations();
     const snap = run.completeUserTask(
       openUserTask.key,
       JSON.stringify(reviewValues),
@@ -1526,6 +1530,7 @@ export function ExampleRunner({
     runningRef.current = true;
     setRunning(true);
     try {
+      await pace(rootActivations() - hopsBefore);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
       if (runSeqRef.current === seq) {
