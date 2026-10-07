@@ -384,6 +384,12 @@ export function ExampleRunner({
     );
     return i === -1 ? null : i;
   }, [example.scenarios, startValues]);
+  // Chosen, not derived: Custom stays selected even when its payload happens
+  // to equal a preset. Any edit in the start form also switches to it.
+  const [customInput, setCustomInput] = useState(false);
+  // What Custom held when the reader last left it for a preset; Custom restores it.
+  const [customDraft, setCustomDraft] = useState<Record<string, unknown> | null>(null);
+  const shownScenario = customInput ? null : selectedScenario;
   // Length, not truthiness: `scenarios: []` is a truthy empty array, which
   // rendered an empty labelled group and told the reader to pick from it.
   const hasScenarios = !!example.scenarios?.length;
@@ -1540,149 +1546,6 @@ export function ExampleRunner({
         </section>
       )}
 
-      {example.imageInput && (
-        <ImageInputPanel
-          imageInput={example.imageInput}
-          value={imageSelection}
-          onSelect={setImageSelection}
-          disabled={inputLocked}
-        />
-      )}
-
-      <div className="scenario">
-        <span className="scenario-label" id="scenario-label">
-          {/* `||`, not `??`: an empty label would render an empty heading, and
-              the pills group is `aria-labelledby` this element — so it would
-              lose its accessible name too. */}
-          {example.scenariosLabel || "Example input"}
-        </span>
-        {hasScenarios && (
-          <div
-            className="scenario-toggle"
-            role="group"
-            aria-labelledby="scenario-label"
-          >
-            {(example.scenarios ?? []).map((s, i) => (
-              <Button
-                key={s.label}
-                size="sm"
-                variant="secondary"
-                aria-pressed={i === selectedScenario}
-                disabled={inputLocked}
-                onClick={() =>
-                  setStartValues((prev) => ({ ...prev, ...s.variables }))
-                }
-              >
-                {s.label}
-              </Button>
-            ))}
-          </div>
-        )}
-        <button
-          type="button"
-          className="scenario-input-button"
-          onClick={() => setStartEditorOpen(!startEditorOpen)}
-          aria-expanded={startEditorOpen}
-          aria-controls="start-input-editor"
-          title={
-            startSchema
-              ? "Edit the starting payload"
-              : "Show the starting payload"
-          }
-        >
-          {/* Without a start form the panel below is a read-only <pre>, so
-              offering to edit it promises something this example can't do. */}
-          {startSchema && (
-            <>
-              <span className="scenario-edit-icon" aria-hidden>
-                ✎
-              </span>{" "}
-            </>
-          )}
-          {startSchema ? "Edit input" : "View input"}
-        </button>
-        {inputLocked ? (
-          <span className="scenario-hint">
-            {running
-              ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
-              : stepping
-                ? // Reset is disabled mid-step, so this must not suggest it.
-                  "Locked while this step finishes"
-                : "This run is still open — press ↺ Reset to start a new one"}
-          </span>
-        ) : needsStartForm ? (
-          <span className="scenario-hint">
-            Fill in the input to enable Run
-          </span>
-        ) : (
-          // The resting state used to say nothing, which left the row looking
-          // like a display filter rather than the payload the instance is
-          // created with — readers didn't connect it to the run at all.
-          <span className="scenario-hint">
-            {hasScenarios
-              ? "Pick the input this process instance starts with, then press ▶ Run"
-              : "The input this process instance starts with"}
-          </span>
-        )}
-      </div>
-
-      {/* Hidden rather than unmounted while collapsed: the start form reports
-          its validity through `onValidityChange`, and Run is gated on it — an
-          unmounted form never reports, so Run would stay disabled forever. */}
-      <div
-        className="inline-input-editor"
-        id="start-input-editor"
-        hidden={!startEditorOpen}
-      >
-        <div className="inline-input-editor-head">
-          <div>
-            <div className="inline-input-editor-title">
-              {model.startFormId ? "Start form" : "Start payload"}
-            </div>
-            <div className="inline-input-editor-copy">
-              {model.startFormId
-                ? `Rendered from the model's start form "${model.startFormId}".`
-                : "The variables the instance starts with."}
-            </div>
-            {/* Edited input is where a scripted agent's fixed rules show:
-                anything they weren't written for falls through to the
-                fallback (usually human review), which reads as a bug unless
-                it's said up front. */}
-            {displayAgent && (brain.kind === "scripted" || !brain.chat) && (
-              <p className="inline-input-editor-note">
-                The scripted agent follows fixed rules written for these
-                examples. Input it doesn't recognise usually goes to human
-                review.{" "}
-                {compact
-                  ? "Open the editable version to connect a real model."
-                  : "Switch the agent brain to a model to have it reason about what you type."}
-              </p>
-            )}
-          </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setStartEditorOpen(false)}
-          >
-            Done
-          </Button>
-        </div>
-        {startSchema ? (
-          <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
-            <FormRenderer
-              ref={startFormRef}
-              schema={startSchema}
-              values={startValues}
-              onChange={(k, v) => setStartValues((prev) => ({ ...prev, [k]: v }))}
-              disabled={inputLocked}
-              onValidityChange={setStartFormValid}
-            />
-          </Suspense>
-        ) : (
-          <pre className="vars">{safeStringify(startValues, 2)}</pre>
-        )}
-      </div>
-
       {!compact && (displayAgent || example.imageInput) && (
         <CollapsibleCard
           sectionId="brain"
@@ -1703,45 +1566,215 @@ export function ExampleRunner({
         </CollapsibleCard>
       )}
 
-      <div className="controls">
-        <Button
-          data-tour={TOUR_ANCHOR.runButton}
-          onClick={() => void start()}
-          disabled={!canRun}
+      {/* One region for "choose the input, then start it": grouping the two is
+          what says pick-then-run, in place of an instruction sentence. */}
+      <section className="start-card" aria-label="Start a process instance">
+        {example.imageInput && (
+          <ImageInputPanel
+            imageInput={example.imageInput}
+            value={imageSelection}
+            onSelect={setImageSelection}
+            disabled={inputLocked}
+          />
+        )}
+
+        <div className="scenario">
+          <span className="scenario-label" id="scenario-label">
+            {/* `||`, not `??`: an empty label would render an empty heading, and
+                the pills group is `aria-labelledby` this element — so it would
+                lose its accessible name too. */}
+            {example.scenariosLabel || "Example input"}
+          </span>
+          {hasScenarios && (
+            <div
+              className="scenario-toggle"
+              role="group"
+              aria-labelledby="scenario-label"
+            >
+              {(example.scenarios ?? []).map((s, i) => (
+                <Button
+                  key={s.label}
+                  size="sm"
+                  variant="secondary"
+                  aria-pressed={i === shownScenario}
+                  disabled={inputLocked}
+                  onClick={() => {
+                    if (customInput) setCustomDraft(startValues);
+                    setCustomInput(false);
+                    setStartEditorOpen(false);
+                    setStartValues((prev) => ({ ...prev, ...s.variables }));
+                  }}
+                >
+                  {s.label}
+                </Button>
+              ))}
+              {/* The input's own option: current once chosen, or whenever the
+                  input matches no preset. */}
+              {startSchema && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={`scenario-custom${shownScenario === null ? " is-current" : ""}`}
+                  aria-label="Custom — edit input"
+                  aria-expanded={startEditorOpen}
+                  aria-controls="start-input-editor"
+                  onClick={() => {
+                    // Locked: still lets the reader look at the input, without switching to it.
+                    if (customInput || inputLocked) {
+                      setStartEditorOpen(!startEditorOpen);
+                    } else {
+                      if (customDraft) setStartValues(customDraft);
+                      setCustomInput(true);
+                      setStartEditorOpen(true);
+                    }
+                  }}
+                >
+                  ✎ Custom
+                </Button>
+              )}
+            </div>
+          )}
+          {!(hasScenarios && startSchema) && (
+            <button
+              type="button"
+              className="scenario-input-button"
+              onClick={() => setStartEditorOpen(!startEditorOpen)}
+              aria-expanded={startEditorOpen}
+              aria-controls="start-input-editor"
+              title={
+                startSchema
+                  ? "Edit the starting payload"
+                  : "Show the starting payload"
+              }
+            >
+              {/* Without a start form the panel below is a read-only <pre>, so
+                  offering to edit it promises something this example can't do. */}
+              {startSchema && (
+                <>
+                  <span className="scenario-edit-icon" aria-hidden>
+                    ✎
+                  </span>{" "}
+                </>
+              )}
+              {startSchema ? "Edit input" : "View input"}
+            </button>
+          )}
+          {inputLocked ? (
+            <span className="scenario-hint">
+              {running
+                ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
+                : stepping
+                  ? // Reset is disabled mid-step, so this must not suggest it.
+                    "Locked while this step finishes"
+                  : "This run is still open — press ↺ Reset to start a new one"}
+            </span>
+          ) : needsStartForm ? (
+            <span className="scenario-hint">
+              Fill in the input to enable Run
+            </span>
+          ) : null}
+        </div>
+
+        {/* Hidden rather than unmounted while collapsed: the start form reports
+            its validity through `onValidityChange`, and Run is gated on it — an
+            unmounted form never reports, so Run would stay disabled forever. */}
+        <div
+          className="inline-input-editor"
+          id="start-input-editor"
+          hidden={!startEditorOpen}
         >
-          ▶ Run
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => void step()}
-          // Deliberately not disabled once the root instance has completed.
-          // Run isn't, and `step()` handles that state the same way Run does —
-          // `beginRun` starts a fresh instance and this takes its first round.
-          // Disabling it here stranded the embed, which autostarts: the reader
-          // arrives after the run has finished, so Step was never once usable.
-          // (`canRun` tests the open user task, not completion.)
-          disabled={!canRun}
-        >
-          ⏭ Step
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => void stop()}
-          disabled={run.phase !== "ready" || stepping}
-        >
-          ↺ Reset
-        </Button>
-        {example.tour && (
+          <div className="inline-input-editor-head">
+            <div>
+              <div className="inline-input-editor-title">
+                {model.startFormId ? "Start form" : "Start payload"}
+              </div>
+              <div className="inline-input-editor-copy">
+                {model.startFormId
+                  ? `Rendered from the model's start form "${model.startFormId}".`
+                  : "The variables the instance starts with."}
+              </div>
+              {/* Edited input is where a scripted agent's fixed rules show:
+                  anything they weren't written for falls through to the
+                  fallback (usually human review), which reads as a bug unless
+                  it's said up front. */}
+              {displayAgent && (brain.kind === "scripted" || !brain.chat) && (
+                <p className="inline-input-editor-note">
+                  The scripted agent follows fixed rules written for these
+                  examples. Input it doesn't recognise usually goes to human
+                  review.{" "}
+                  {compact
+                    ? "Open the editable version to connect a real model."
+                    : "Switch the agent brain to a model to have it reason about what you type."}
+                </p>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setStartEditorOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+          {startSchema ? (
+            <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+              <FormRenderer
+                ref={startFormRef}
+                schema={startSchema}
+                values={startValues}
+                onChange={(k, v) => {
+                  setCustomInput(true);
+                  setStartValues((prev) => ({ ...prev, [k]: v }));
+                }}
+                disabled={inputLocked}
+                onValidityChange={setStartFormValid}
+              />
+            </Suspense>
+          ) : (
+            <pre className="vars">{safeStringify(startValues, 2)}</pre>
+          )}
+        </div>
+
+        <div className="controls">
+          <Button
+            data-tour={TOUR_ANCHOR.runButton}
+            onClick={() => void start()}
+            disabled={!canRun}
+          >
+            ▶ Run
+          </Button>
           <Button
             variant="secondary"
-            onClick={startTour}
-            disabled={tour.active}
+            onClick={() => void step()}
+            // Deliberately not disabled once the root instance has completed.
+            // Run isn't, and `step()` handles that state the same way Run does —
+            // `beginRun` starts a fresh instance and this takes its first round.
+            // Disabling it here stranded the embed, which autostarts: the reader
+            // arrives after the run has finished, so Step was never once usable.
+            // (`canRun` tests the open user task, not completion.)
+            disabled={!canRun}
           >
-            {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
+            ⏭ Step
           </Button>
-        )}
-        {statusBadge}
-      </div>
+          <Button
+            variant="secondary"
+            onClick={() => void stop()}
+            disabled={run.phase !== "ready" || stepping}
+          >
+            ↺ Reset
+          </Button>
+          {example.tour && (
+            <Button
+              variant="secondary"
+              onClick={startTour}
+              disabled={tour.active}
+            >
+              {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
+            </Button>
+          )}
+          {statusBadge}
+        </div>
+      </section>
 
       {run.phase === "error" && (
         <Alert variant="destructive">

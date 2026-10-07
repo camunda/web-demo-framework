@@ -492,33 +492,30 @@ describe("ExampleRunner — the example input toggle", () => {
 
   /**
    * Reader feedback: "it was not completely clear to me that the EXAMPLE
-   * SHIPMENT was the actual input for the process instance". The row said
-   * nothing at rest — the hint slot only filled in once the input was locked —
-   * so a domain label like "Example shipment" read as a display filter rather
-   * than the payload the instance is created with.
-   *
-   * The heading keeps the example's own domain noun, so this hint is the only
-   * thing making that connection. Losing it silently puts the confusion back.
+   * SHIPMENT was the actual input for the process instance". A later round
+   * asked for the instruction sentence that answered it to go. What makes the
+   * connection now is grouping: the input and ▶ Run share one region.
    */
-  it("says what the input is for before a run has started", async () => {
+  it("puts the input and Run in one start region, with no instruction sentence", async () => {
     await renderExample(seedExportCompliance);
-    expect(screen.getByText("Example shipment")).toBeInTheDocument();
+    const region = screen.getByRole("region", { name: "Start a process instance" });
+    expect(region).toContainElement(screen.getByRole("group", { name: "Example shipment" }));
+    expect(region).toContainElement(screen.getByRole("button", { name: "▶ Run" }));
     expect(
-      screen.getByText(/pick the input this process instance starts with/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/pick the input this process instance starts with/i),
+    ).not.toBeInTheDocument();
   }, 40_000);
 
   /**
    * order-process has no `scenarios` and no `scenariosLabel`, so it exercises
-   * both fallbacks: the default heading, and the hint with its "pick one" half
-   * dropped — there are no pills to pick from.
+   * both fallbacks: the default heading, and no Custom option — a lone one
+   * would be a picker with nothing to pick from.
    */
-  it("drops the pick-one wording when there is nothing to pick", async () => {
+  it("offers no Custom option when there is nothing to pick", async () => {
     await renderExample(orderProcess);
-    expect(screen.getByText("Example input")).toBeInTheDocument();
-    expect(
-      screen.getByText("The input this process instance starts with"),
-    ).toBeInTheDocument();
+    const region = screen.getByRole("region", { name: "Start a process instance" });
+    expect(region).toHaveTextContent("Example input");
+    expect(screen.queryByText("✎ Custom")).not.toBeInTheDocument();
   }, 40_000);
 
   /**
@@ -531,9 +528,49 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(
       screen.queryByRole("group", { name: /example input/i }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByText("The input this process instance starts with"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("✎ Custom")).not.toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * Custom is a choice, not "whatever matches no preset": picking it selects
+   * it even while its input is still identical to the preset it started from.
+   */
+  it("selects Custom even when its input still matches a preset", async () => {
+    await renderExample(bankSupport);
+    const custom = () => screen.getByRole("button", { name: "Custom — edit input" });
+    const loan = () => screen.getByRole("button", { name: /^Loan question/ });
+    expect(loan()).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(custom());
+
+    expect(custom()).toHaveClass("is-current");
+    expect(loan()).toHaveAttribute("aria-pressed", "false");
+  }, 40_000);
+
+  it("closes the editor on a preset, and Custom brings the reader's text back", async () => {
+    window.localStorage.clear();
+    await renderExample(bankSupport);
+    const custom = () => screen.getByRole("button", { name: "Custom — edit input" });
+    const field = () =>
+      screen.getByRole("textbox", { name: /customer request/i, hidden: true }) as HTMLTextAreaElement;
+
+    fireEvent.click(custom());
+    expect(custom()).toHaveAttribute("aria-expanded", "true");
+    // form-js debounces a textarea and flushes on blur.
+    await waitFor(() => {
+      fireEvent.input(field(), { target: { value: "my own words" } });
+      fireEvent.blur(field());
+      expect(screen.getByText("my own words")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Card question/ }));
+    expect(custom()).toHaveAttribute("aria-expanded", "false");
+    expect(custom()).not.toHaveClass("is-current");
+    await waitFor(() => expect(field().value).not.toBe("my own words"));
+
+    fireEvent.click(custom());
+    expect(custom()).toHaveClass("is-current");
+    await waitFor(() => expect(field().value).toBe("my own words"));
   }, 40_000);
 
   /**

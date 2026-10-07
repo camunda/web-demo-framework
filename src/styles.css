@@ -1070,6 +1070,23 @@ body {
 
 /* Example-input picker — an uppercase label beside a segmented pill track
    of the example's preset payloads (ExampleDef.scenarios). */
+.start-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--panel-radius, 12px);
+  background: var(--surface);
+}
+.start-card .scenario,
+.start-card .controls {
+  margin: 0;
+}
+.start-card .controls {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
 .scenario {
   display: flex;
   align-items: center;
@@ -1195,6 +1212,8 @@ body {
 }
 .scenario-toggle button[aria-pressed="true"],
 .scenario-toggle button[aria-pressed="true"]:hover,
+.scenario-toggle button.is-current,
+.scenario-toggle button.is-current:hover,
 .brain-kinds button[aria-pressed="true"],
 .brain-kinds button[aria-pressed="true"]:hover {
   background: var(--surface);
