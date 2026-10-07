@@ -199,7 +199,7 @@ body {
 .example-picker button[aria-current="page"],
 .example-picker button[aria-current="page"]:hover {
   border-color: transparent;
-  background: var(--orange);
+  background: var(--ink);
   color: #fff;
 }
 
@@ -1158,9 +1158,9 @@ body {
 }
 
 /* The segmented track shared by the scenario picker and the brain-mode
-   picker. Children stay design-system `Button`s; these rules flatten the
-   unselected ones into the track and leave the selected one as the orange
-   primary action the design-system tokens already produce. */
+   picker. The selected segment is a raised white thumb, not orange: orange
+   fill is reserved for the primary action (▶ Run), so a chosen setting never
+   reads as a button to press. */
 .scenario-toggle,
 .brain-kinds {
   display: inline-flex;
@@ -1197,8 +1197,11 @@ body {
 .scenario-toggle button[aria-pressed="true"]:hover,
 .brain-kinds button[aria-pressed="true"],
 .brain-kinds button[aria-pressed="true"]:hover {
-  background: var(--orange);
-  color: #fff;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.12),
+    0 0 0 1px var(--line-strong);
 }
 
 /* Agent brain — the demo's gently-graded panel, with the mode track, a
@@ -1320,7 +1323,7 @@ body {
   border-radius: 4px;
 }
 .image-thumb--selected {
-  border-color: var(--orange);
+  border-color: var(--ink);
 }
 .image-drop {
   border: 1px dashed var(--line-strong);

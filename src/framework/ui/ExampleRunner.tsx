@@ -1566,7 +1566,7 @@ export function ExampleRunner({
               <Button
                 key={s.label}
                 size="sm"
-                variant={i === selectedScenario ? "default" : "secondary"}
+                variant="secondary"
                 aria-pressed={i === selectedScenario}
                 disabled={inputLocked}
                 onClick={() =>
