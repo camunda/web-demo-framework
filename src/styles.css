@@ -447,6 +447,10 @@ body {
   font-size: 13px;
   color: var(--ink-muted-2);
 }
+/* A little air between every panel's description and its open body. */
+.panel > [data-slot="collapsible"] > [data-slot="collapsible-content"] > [data-slot="card-content"] {
+  margin-top: 8px;
+}
 .panel-chevron {
   width: 18px;
   height: 18px;
@@ -1225,10 +1229,6 @@ body {
    status chip and the download progress bar. */
 .brain-card {
   background: linear-gradient(180deg, #fff 0%, var(--surface-3) 100%);
-}
-/* A little air between the panel's description and the mode track below it. */
-.brain-card [data-slot="card-content"] {
-  margin-top: 8px;
 }
 .brain {
   display: flex;
