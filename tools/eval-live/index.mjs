@@ -528,7 +528,8 @@ async function scenariosOf(browser, base, example) {
   try {
     await page.goto(`${base}/examples/${example}`);
     await page.getByText("Ready", { exact: true }).first().waitFor({ timeout: 120_000 });
-    const labels = await page.locator(".scenario-toggle").getByRole("button").allInnerTexts();
+    // Custom is the reader's own input, not a preset to evaluate.
+    const labels = await page.locator(".scenario-toggle button:not(.scenario-custom)").allInnerTexts();
     const filter = process.env.LIVE_SCENARIO;
     const all = labels.length ? labels.map((l) => l.trim()) : ["(default input)"];
     return filter ? all.filter((l) => l.includes(filter)) : all;
