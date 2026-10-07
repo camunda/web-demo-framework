@@ -400,6 +400,8 @@ export function ExampleRunner({
   const [customInput, setCustomInput] = useState(false);
   // What Custom held when the reader last left it for a preset; Custom restores it.
   const [customDraft, setCustomDraft] = useState<Record<string, unknown> | null>(null);
+  // One per run: tells the diagram's walk to start over (see RuntimeDiagram `runId`).
+  const [runId, setRunId] = useState(0);
   const shownScenario = customInput ? null : selectedScenario;
   // Length, not truthiness: `scenarios: []` is a truthy empty array, which
   // rendered an empty labelled group and told the reader to pick from it.
@@ -1059,6 +1061,7 @@ export function ExampleRunner({
     // the resolved value against an unresolved subscription and nothing would
     // start.
     const ids = await run.redeploy(draft.resolvedBpmn);
+    setRunId((n) => n + 1);
     const pid = ids?.[0] ?? model.processId;
     trace({
       kind: "start",
@@ -1879,6 +1882,7 @@ export function ExampleRunner({
                 activeIds={run.snapshot?.activeElementIds ?? []}
                 incidentIds={run.snapshot?.incidentElementIds ?? []}
                 path={activationPath}
+                runId={runId}
                 hopMs={HOP}
                 className="diagram"
               />

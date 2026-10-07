@@ -207,6 +207,36 @@ describe("RuntimeDiagram", () => {
     observer.disconnect();
   });
 
+  // Run twice without Reset: React can batch away the empty path between runs,
+  // so the second run's path arrives as long as the first's. Only `runId` says
+  // it is a new run.
+  it("walks a new run from the start even when its path is no shorter", async () => {
+    const PATH = ["StartEvent_1", "Rule_1", "Task_1"];
+    const props = { xml: WALK_XML, activeIds: ["Task_1"], incidentIds: [], hopMs: 30 };
+    const { container, rerender } = render(<RuntimeDiagram {...props} path={[]} runId={1} />);
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Rule_1"]')).toBeInTheDocument(),
+    );
+    rerender(<RuntimeDiagram {...props} path={[...PATH]} runId={1} />);
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active"),
+    );
+    await new Promise((r) => setTimeout(r, 150));
+
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+        (el) => el.getAttribute("data-element-id")!,
+      );
+      if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+    });
+    observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+
+    rerender(<RuntimeDiagram {...props} path={[...PATH]} runId={2} />);
+    await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+    observer.disconnect();
+  });
+
   // A remount (a collapsed panel reopened) gets the whole run's path at once:
   // that is history, not something to replay.
   it("does not replay the path it was mounted with", async () => {

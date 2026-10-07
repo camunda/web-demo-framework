@@ -39,6 +39,12 @@ export interface RuntimeDiagramProps {
    * a business rule task, a gateway — are seen. Shrinking (a reset) clears it.
    */
   path?: string[];
+  /**
+   * Changes once per run. A new run's path can arrive no shorter than the last
+   * one's (React may batch away the empty path between them), so length alone
+   * can't say the walk should start over.
+   */
+  runId?: number;
   /** How long the walking token rests on each element, in ms. */
   hopMs?: number;
   /** Extra class for the container, added alongside `runtime-diagram`. */
@@ -112,6 +118,7 @@ export function RuntimeDiagram({
   activeIds,
   incidentIds,
   path,
+  runId,
   hopMs = 450,
   className,
 }: RuntimeDiagramProps) {
@@ -128,11 +135,15 @@ export function RuntimeDiagram({
   // The walk: elements still to show, the one shown now, and how much of
   // `path` has already been queued. Whatever `path` holds at mount is history
   // — a remount (a collapsed panel reopened) must not replay the whole run.
-  const walkRef = useRef<{ queue: string[]; at: string | null; seen: number; timer: number }>(
-    { queue: [], at: null, seen: path?.length ?? 0, timer: 0 },
-  );
-  const pathRef = useRef({ path, hopMs });
-  pathRef.current = { path, hopMs };
+  const walkRef = useRef<{
+    queue: string[];
+    at: string | null;
+    seen: number;
+    timer: number;
+    run: number | undefined;
+  }>({ queue: [], at: null, seen: path?.length ?? 0, timer: 0, run: runId });
+  const pathRef = useRef({ path, runId, hopMs });
+  pathRef.current = { path, runId, hopMs };
 
   // Connector-template icons for this model (see `diagramIcons.ts`).
   const icons = useMemo(() => diagramIconsFor(xml), [xml]);
@@ -201,9 +212,9 @@ export function RuntimeDiagram({
     if (!importedRef.current) return;
     const walk = walkRef.current;
     const ids = pathRef.current.path ?? [];
-    if (ids.length < walk.seen) {
+    if (pathRef.current.runId !== walk.run || ids.length < walk.seen) {
       window.clearTimeout(walk.timer);
-      Object.assign(walk, { queue: [], at: null, seen: 0, timer: 0 });
+      Object.assign(walk, { queue: [], at: null, seen: 0, timer: 0, run: pathRef.current.runId });
       applyMarkers();
     }
     const fresh = ids.slice(walk.seen);
@@ -289,7 +300,7 @@ export function RuntimeDiagram({
   useEffect(() => {
     consumePath();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumePath reads refs
-  }, [path, hopMs]);
+  }, [path, runId, hopMs]);
 
   useEffect(() => () => window.clearTimeout(walkRef.current.timer), []);
 
