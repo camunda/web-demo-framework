@@ -165,6 +165,23 @@ describe("ExampleRunner — pacing to the diagram's token walk", () => {
     expect(next.at - watch.seen[i].at).toBeGreaterThanOrEqual(850);
   }, 40_000);
 
+  // A run that stops on a human task breaks out of the loop early; it must
+  // still hand the controls back only once the token has finished walking.
+  it("hands back the controls with the token already at rest", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+    expect(app.status()).toBe("Fill out the form below");
+
+    const marked = () =>
+      Array.from(document.querySelectorAll(".diagram .nano-active[data-element-id]"))
+        .map((el) => el.getAttribute("data-element-id"))
+        .join(",");
+    const atRelease = marked();
+    expect(atRelease).not.toBe("");
+    await new Promise((r) => setTimeout(r, 700));
+    expect(marked()).toBe(atRelease);
+  }, 40_000);
+
   // Submitting a task moves the token too; the next round used to start at once.
   it("waits for the walk after a human task is submitted", async () => {
     const app = await renderExample(invoicePayment);

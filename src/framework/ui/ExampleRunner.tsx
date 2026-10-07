@@ -43,6 +43,7 @@ import { TraceTimeline } from "./TraceTimeline";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import { VariableList } from "./VariableList";
+import { WalkPanelPresence, WalkTracker } from "./walkTracker";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
@@ -52,15 +53,8 @@ import { useAutostart } from "../useAutostart";
 const BEAT = 650;
 /** How long the diagram's token rests on each element it walks through. */
 const HOP = 450;
-/** How long the diagram takes to walk `hops` elements — none when it doesn't animate. */
-const walkMs = (hops: number) =>
-  typeof window.matchMedia === "function" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? 0
-    : hops * HOP;
-/** Wait at least a beat, and long enough for the diagram to walk `hops` elements. */
-const pace = (hops: number) =>
-  new Promise((r) => setTimeout(r, Math.max(BEAT, walkMs(hops))));
+/** Extra time a walk may take before the run stops waiting: a lazy diagram still loading, say. */
+const WALK_GRACE = 3000;
 const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
@@ -402,6 +396,8 @@ export function ExampleRunner({
   const [customDraft, setCustomDraft] = useState<Record<string, unknown> | null>(null);
   // One per run: tells the diagram's walk to start over (see RuntimeDiagram `runId`).
   const [runId, setRunId] = useState(0);
+  const runIdRef = useRef(0);
+  const [tracker] = useState(() => new WalkTracker());
   const shownScenario = customInput ? null : selectedScenario;
   // Length, not truthiness: `scenarios: []` is a truthy empty array, which
   // rendered an empty labelled group and told the reader to pick from it.
@@ -664,6 +660,20 @@ export function ExampleRunner({
     elementActivations(run.events(), rootInstanceKeyRef.current).length;
 
   /**
+   * Wait at least `minMs`, and until the diagram has walked everything the run's
+   * instance has activated so far — capped, in case it never gets there.
+   */
+  const settle = (minMs: number) => {
+    const id = runIdRef.current;
+    const target = rootActivations();
+    const cap = minMs + tracker.pending(id, target) * HOP + WALK_GRACE;
+    return Promise.all([
+      new Promise((r) => setTimeout(r, minMs)),
+      tracker.waitFor(id, target, cap),
+    ]);
+  };
+
+  /**
    * Drive `stepWorkers` to quiescence, completion, a human task, or a
    * manually-held job — shared by `start` and by `resolveManualControl`
    * below, which resumes exactly this loop after the reader picks how a
@@ -684,7 +694,6 @@ export function ExampleRunner({
         !rootCompleted(snap, rootInstanceKeyRef.current) &&
         guard++ < 80
       ) {
-        const hopsBefore = rootActivations();
         const round = await run.stepWorkers(workers, { agents });
         // Reset (or a fresh Start/manual-resume that landed while this await
         // was in flight) can bump `runSeqRef` — checking that instead of the
@@ -757,7 +766,7 @@ export function ExampleRunner({
               snap = correlated;
               const correlatedVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (correlatedVars) setDisplayVars({ ...correlatedVars });
-              await pace(rootActivations() - hopsBefore);
+              await settle(BEAT);
               continue;
             }
             // `correlateMessage` returns null when the engine call threw, so
@@ -792,7 +801,7 @@ export function ExampleRunner({
               });
               const signalVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (signalVars) setDisplayVars({ ...signalVars });
-              await pace(rootActivations() - hopsBefore);
+              await settle(BEAT);
               continue;
             }
             // `broadcastSignal` returns null when the engine call threw — say so
@@ -853,15 +862,19 @@ export function ExampleRunner({
                   kind: "step",
                   text: "🕐 the clock advanced — timer fired",
                 });
-                await pace(rootActivations() - hopsBefore);
+                await settle(BEAT);
                 continue;
               }
             }
           }
           break;
         }
-        await pace(rootActivations() - hopsBefore);
+        await settle(BEAT);
       }
+
+      // Every exit above — a human task, a parked race, an incident — still
+      // has to let the diagram finish showing how it got there.
+      await settle(0);
 
       // Every `continue` above re-tests the generation in the `while` head,
       // but falling out of the loop lands here directly — without this a run
@@ -893,7 +906,6 @@ export function ExampleRunner({
       runningRef.current = true;
       setRunning(true);
       try {
-        const hopsBefore = rootActivations();
         let snap: Snapshot | null;
         let successText: string;
         if (choice === "complete") {
@@ -912,7 +924,7 @@ export function ExampleRunner({
           trace({ kind: "vars", text: successText, elementId: job.elementId });
           const vars = displayableVars(snap, rootInstanceKeyRef.current);
           if (vars) setDisplayVars({ ...vars });
-          await pace(rootActivations() - hopsBefore);
+          await settle(BEAT);
           await driveLoop(workersRef.current, agentsRef.current, snap, seq);
         } else {
           trace({
@@ -1062,7 +1074,8 @@ export function ExampleRunner({
     // the resolved value against an unresolved subscription and nothing would
     // start.
     const ids = await run.redeploy(draft.resolvedBpmn);
-    setRunId((n) => n + 1);
+    runIdRef.current += 1;
+    setRunId(runIdRef.current);
     const pid = ids?.[0] ?? model.processId;
     trace({
       kind: "start",
@@ -1155,6 +1168,14 @@ export function ExampleRunner({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
     [run.snapshot],
   );
+  // A closed panel shows nothing, so what happens meanwhile is history once it
+  // reopens — unlike what arrives while an open panel's diagram is still loading.
+  useEffect(() => {
+    if (tracker.panelOpen) return;
+    tracker.run = runId;
+    tracker.consumed = activationPath.length;
+    tracker.notify();
+  }, [tracker, runId, activationPath]);
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
@@ -1225,7 +1246,7 @@ export function ExampleRunner({
         workers = prepared.workers;
         agents = prepared.agents;
         snap = prepared.snap;
-        await pace(rootActivations());
+        await settle(BEAT);
       }
 
       await driveLoop(workers, agents, snap, seq);
@@ -1320,14 +1341,13 @@ export function ExampleRunner({
             ),
           );
           // Stay locked until the diagram has walked the path.
-          await new Promise((r) => setTimeout(r, walkMs(rootActivations())));
+          await settle(0);
         }
         return;
       }
 
       if (!snap || rootCompleted(snap, rootInstanceKeyRef.current)) return;
 
-      const hopsBefore = rootActivations();
       const round = await run.stepWorkers(workers, { agents });
       if (!round) {
         trace({
@@ -1348,7 +1368,7 @@ export function ExampleRunner({
           rootCompleted(round.snapshot, rootInstanceKeyRef.current),
         ),
       );
-      await new Promise((r) => setTimeout(r, walkMs(rootActivations() - hopsBefore)));
+      await settle(0);
     } finally {
       if (runSeqRef.current === seq) {
         runningRef.current = false;
@@ -1436,7 +1456,6 @@ export function ExampleRunner({
       try {
         // The key comes off the subscription the engine actually opened, so it
         // can't drift from what the instance resolved.
-        const hopsBefore = rootActivations();
         const snap = run.correlateMessage(
           sub.messageName,
           sub.correlationKey,
@@ -1457,7 +1476,7 @@ export function ExampleRunner({
         });
         const vars = displayableVars(snap, rootInstanceKeyRef.current);
         if (vars) setDisplayVars({ ...vars });
-        await pace(rootActivations() - hopsBefore);
+        await settle(BEAT);
         await driveLoop(workersRef.current, agentsRef.current, snap, seq);
       } finally {
         if (runSeqRef.current === seq) {
@@ -1477,7 +1496,6 @@ export function ExampleRunner({
     runningRef.current = true;
     setRunning(true);
     try {
-      const hopsBefore = rootActivations();
       const snap = run.advanceTime(Math.max(racingTimer.dueInMs, 0) + 1);
       if (!snap) {
         trace({ kind: "error", text: "▶ advancing the clock failed" });
@@ -1486,7 +1504,7 @@ export function ExampleRunner({
       trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
       const vars = displayableVars(snap, rootInstanceKeyRef.current);
       if (vars) setDisplayVars({ ...vars });
-      await pace(rootActivations() - hopsBefore);
+      await settle(BEAT);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
       if (runSeqRef.current === seq) {
@@ -1503,7 +1521,6 @@ export function ExampleRunner({
     // with no linked schema (reviewFormRef unset) has nothing to validate.
     if (reviewFormRef.current && !reviewFormRef.current.validate()) return;
     const seq = ++runSeqRef.current;
-    const hopsBefore = rootActivations();
     const snap = run.completeUserTask(
       openUserTask.key,
       JSON.stringify(reviewValues),
@@ -1530,7 +1547,7 @@ export function ExampleRunner({
     runningRef.current = true;
     setRunning(true);
     try {
-      await pace(rootActivations() - hopsBefore);
+      await settle(BEAT);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
       if (runSeqRef.current === seq) {
@@ -1869,6 +1886,7 @@ export function ExampleRunner({
             title="Process"
             description={`${model.processName} — live token (green), incidents (red).`}
           >
+            <WalkPanelPresence tracker={tracker} />
             {/* Render the Suspense boundary unconditionally so the lazy
                 diagram chunk starts downloading immediately, in parallel
                 with engine boot, instead of waiting for `run.phase` to
@@ -1888,6 +1906,7 @@ export function ExampleRunner({
                 incidentIds={run.snapshot?.incidentElementIds ?? []}
                 path={activationPath}
                 runId={runId}
+                tracker={tracker}
                 hopMs={HOP}
                 className="diagram"
               />

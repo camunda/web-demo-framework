@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import Viewer from "bpmn-js/lib/Viewer";
 import { diagramIconsFor, installDiagramIcons } from "./diagramIcons";
+import type { WalkTracker } from "./walkTracker";
 
 /**
  * The live diagram: token and incident markers on a model the reader watches
@@ -45,6 +46,12 @@ export interface RuntimeDiagramProps {
    * can't say the walk should start over.
    */
   runId?: number;
+  /**
+   * The runner's record of how far the walk has got. It outlives this component,
+   * so a reopened panel doesn't replay history while a first lazy mount still
+   * walks what arrived during loading, and the runner can wait for the walk.
+   */
+  tracker?: WalkTracker;
   /** How long the walking token rests on each element, in ms. */
   hopMs?: number;
   /** Extra class for the container, added alongside `runtime-diagram`. */
@@ -119,6 +126,7 @@ export function RuntimeDiagram({
   incidentIds,
   path,
   runId,
+  tracker,
   hopMs = 450,
   className,
 }: RuntimeDiagramProps) {
@@ -132,16 +140,19 @@ export function RuntimeDiagram({
   // mid-import would otherwise leave the diagram unmarked until the next change.
   const idsRef = useRef({ activeIds, incidentIds });
   idsRef.current = { activeIds, incidentIds };
-  // The walk: elements still to show, the one shown now, and how much of
-  // `path` has already been queued. Whatever `path` holds at mount is history
-  // — a remount (a collapsed panel reopened) must not replay the whole run.
-  const walkRef = useRef<{
-    queue: string[];
-    at: string | null;
-    seen: number;
-    timer: number;
-    run: number | undefined;
-  }>({ queue: [], at: null, seen: path?.length ?? 0, timer: 0, run: runId });
+  // The walk: elements still to show, the one shown now, and its timer.
+  const walkRef = useRef<{ queue: string[]; at: string | null; timer: number }>({
+    queue: [],
+    at: null,
+    timer: 0,
+  });
+  // How much of which run's `path` has been taken in. Without a tracker, what
+  // `path` holds at mount is history: a remount must not replay the whole run.
+  const localProgressRef = useRef<{ run: number | undefined; consumed: number }>({
+    run: runId,
+    consumed: path?.length ?? 0,
+  });
+  const progress = () => tracker ?? localProgressRef.current;
   const pathRef = useRef({ path, runId, hopMs });
   pathRef.current = { path, runId, hopMs };
 
@@ -206,32 +217,46 @@ export function RuntimeDiagram({
     tokenOverlaysRef.current = nextOverlays;
   };
 
+  const setWalking = (walking: boolean) => {
+    if (!tracker) return;
+    tracker.walking = walking;
+    tracker.notify();
+  };
+
   /** Queue what `path` gained since last time and start walking it. */
   const consumePath = () => {
     // Until import finishes the registry is empty, so every id would look off-diagram.
     if (!importedRef.current) return;
     const walk = walkRef.current;
+    const done = progress();
     const ids = pathRef.current.path ?? [];
-    if (pathRef.current.runId !== walk.run || ids.length < walk.seen) {
+    if (pathRef.current.runId !== done.run || ids.length < done.consumed) {
       window.clearTimeout(walk.timer);
-      Object.assign(walk, { queue: [], at: null, seen: 0, timer: 0, run: pathRef.current.runId });
+      Object.assign(walk, { queue: [], at: null, timer: 0 });
+      done.run = pathRef.current.runId;
+      done.consumed = 0;
       applyMarkers();
     }
-    const fresh = ids.slice(walk.seen);
-    walk.seen = ids.length;
+    const fresh = ids.slice(done.consumed);
+    done.consumed = ids.length;
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const registry = viewerRef.current?.get<{ get: (id: string) => unknown }>("elementRegistry");
     // A called process's elements are in the log too, but not on this diagram.
     const onDiagram = fresh.filter((id) => registry?.get(id));
-    if (onDiagram.length === 0 || reduced) return;
+    if (onDiagram.length === 0 || reduced) {
+      setWalking(walk.at !== null);
+      return;
+    }
     walk.queue.push(...onDiagram);
+    setWalking(true);
     if (walk.timer) return;
     const hop = () => {
       walk.at = walk.queue.shift() ?? null;
       walk.timer = walk.at ? window.setTimeout(hop, pathRef.current.hopMs) : 0;
       applyMarkers();
+      if (!walk.at) setWalking(false);
     };
     hop();
   };
@@ -252,6 +277,7 @@ export function RuntimeDiagram({
         if (!current) return;
         fitWithPadding(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
+        if (tracker) tracker.ready = true;
         applyMarkers();
         consumePath();
         if (containerRef.current)
@@ -265,6 +291,7 @@ export function RuntimeDiagram({
       viewer.destroy();
       viewerRef.current = null;
       importedRef.current = false;
+      if (tracker) tracker.ready = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-import only on new XML
   }, [xml]);
@@ -302,7 +329,15 @@ export function RuntimeDiagram({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumePath reads refs
   }, [path, runId, hopMs]);
 
-  useEffect(() => () => window.clearTimeout(walkRef.current.timer), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(walkRef.current.timer);
+      // Whatever was queued is dropped with the component; nothing is walking now.
+      setWalking(false);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount only
+    [],
+  );
 
   // bpmn-js re-renders an element's visual whenever its markers change, which
   // drops any child we appended — so re-install on every mutation rather than

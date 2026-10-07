@@ -1,6 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { fitWithPadding, RuntimeDiagram, type CanvasLike } from "./RuntimeDiagram";
+import { WalkTracker } from "./walkTracker";
 
 /**
  * The "locked" part of this component is structural — a plain bpmn-js `Viewer`
@@ -235,6 +236,92 @@ describe("RuntimeDiagram", () => {
     rerender(<RuntimeDiagram {...props} path={[...PATH]} runId={2} />);
     await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
     observer.disconnect();
+  });
+
+  describe("with the runner's tracker", () => {
+    const watchWalk = (container: HTMLElement) => {
+      const seen: string[] = [];
+      const observer = new MutationObserver(() => {
+        const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+          (el) => el.getAttribute("data-element-id")!,
+        );
+        if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+      });
+      observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+      return { seen, stop: () => observer.disconnect() };
+    };
+
+    // The diagram chunk is lazy: autostart can run before it first mounts. That
+    // first mount must walk what it missed, not file it as history.
+    it("walks what arrived before a lazy first mount", async () => {
+      const tracker = new WalkTracker();
+      tracker.panelOpen = true;
+      const { container } = render(<div />);
+      const walk = watchWalk(container);
+      render(
+        <RuntimeDiagram
+          xml={WALK_XML}
+          activeIds={["Task_1"]}
+          incidentIds={[]}
+          path={["StartEvent_1", "Rule_1", "Task_1"]}
+          runId={1}
+          tracker={tracker}
+          hopMs={30}
+        />,
+        { container },
+      );
+      await waitFor(() => expect(walk.seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+      walk.stop();
+    });
+
+    // While the panel was closed the runner kept the tracker level with the path.
+    it("does not replay what happened while its panel was closed", async () => {
+      const tracker = new WalkTracker();
+      Object.assign(tracker, { panelOpen: true, run: 1, consumed: 3 });
+      const { container } = render(<div />);
+      const walk = watchWalk(container);
+      render(
+        <RuntimeDiagram
+          xml={WALK_XML}
+          activeIds={["Task_1"]}
+          incidentIds={[]}
+          path={["StartEvent_1", "Rule_1", "Task_1"]}
+          runId={1}
+          tracker={tracker}
+          hopMs={30}
+        />,
+        { container },
+      );
+      await waitFor(() =>
+        expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active"),
+      );
+      await new Promise((r) => setTimeout(r, 150));
+      walk.stop();
+      expect(walk.seen).toEqual(["Task_1"]);
+    });
+
+    // What the runner waits on is the walk itself, import delay included.
+    it("lets the runner wait for the walk to finish, not for an estimate", async () => {
+      const tracker = new WalkTracker();
+      tracker.panelOpen = true;
+      const started = performance.now();
+      const finished = tracker.waitFor(1, 3, 10_000).then(() => performance.now());
+      const { container } = render(
+        <RuntimeDiagram
+          xml={WALK_XML}
+          activeIds={["Task_1"]}
+          incidentIds={[]}
+          path={["StartEvent_1", "Rule_1", "Task_1"]}
+          runId={1}
+          tracker={tracker}
+          hopMs={60}
+        />,
+      );
+      const at = await finished;
+      // Three hops of 60ms, after however long the import took.
+      expect(at - started).toBeGreaterThanOrEqual(170);
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active");
+    });
   });
 
   // A remount (a collapsed panel reopened) gets the whole run's path at once:
