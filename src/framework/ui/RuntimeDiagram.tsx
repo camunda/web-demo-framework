@@ -217,9 +217,10 @@ export function RuntimeDiagram({
     tokenOverlaysRef.current = nextOverlays;
   };
 
-  const setWalking = (walking: boolean) => {
+  const reportHops = () => {
     if (!tracker) return;
-    tracker.walking = walking;
+    const walk = walkRef.current;
+    tracker.hopsLeft = walk.queue.length + (walk.at ? 1 : 0);
     tracker.notify();
   };
 
@@ -246,17 +247,17 @@ export function RuntimeDiagram({
     // A called process's elements are in the log too, but not on this diagram.
     const onDiagram = fresh.filter((id) => registry?.get(id));
     if (onDiagram.length === 0 || reduced) {
-      setWalking(walk.at !== null);
+      reportHops();
       return;
     }
     walk.queue.push(...onDiagram);
-    setWalking(true);
+    reportHops();
     if (walk.timer) return;
     const hop = () => {
       walk.at = walk.queue.shift() ?? null;
       walk.timer = walk.at ? window.setTimeout(hop, pathRef.current.hopMs) : 0;
       applyMarkers();
-      if (!walk.at) setWalking(false);
+      reportHops();
     };
     hop();
   };
@@ -333,7 +334,8 @@ export function RuntimeDiagram({
     () => () => {
       window.clearTimeout(walkRef.current.timer);
       // Whatever was queued is dropped with the component; nothing is walking now.
-      setWalking(false);
+      Object.assign(walkRef.current, { queue: [], at: null, timer: 0 });
+      reportHops();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount only
     [],

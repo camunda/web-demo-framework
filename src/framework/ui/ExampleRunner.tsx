@@ -1531,10 +1531,6 @@ export function ExampleRunner({
     // otherwise completing the last task would blank the card.
     const vars = displayableVars(snap, rootInstanceKeyRef.current);
     setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
-    if (rootCompleted(snap, rootInstanceKeyRef.current)) {
-      trace({ kind: "done", text: "✅ process instance completed" });
-      return;
-    }
     if (!snap) return;
 
     // Completing the task only moves the token; whatever it unblocks — a job,
@@ -1547,6 +1543,13 @@ export function ExampleRunner({
     runningRef.current = true;
     setRunning(true);
     try {
+      if (rootCompleted(snap, rootInstanceKeyRef.current)) {
+        // Finishing still walks the token to the end before the controls return.
+        await settle(0);
+        if (runSeqRef.current === seq)
+          trace({ kind: "done", text: "✅ process instance completed" });
+        return;
+      }
       await settle(BEAT);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
@@ -1951,7 +1954,7 @@ export function ExampleRunner({
               )}
               <Button
                 onClick={submitUserTask}
-                disabled={!!reviewSchema && !reviewFormValid}
+                disabled={running || stepping || (!!reviewSchema && !reviewFormValid)}
               >
                 Complete task
               </Button>

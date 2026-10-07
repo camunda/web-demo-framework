@@ -17,18 +17,17 @@ export class WalkTracker {
   run: number | undefined = undefined;
   /** Entries of that run's path the diagram has taken in, walked or skipped. */
   consumed = 0;
-  walking = false;
+  /** Hops taken in but not finished yet: queued, plus the one on screen. */
+  hopsLeft = 0;
   /** A diagram is mounted and has imported its XML. */
   ready = false;
   /** The panel holding the diagram is open; when it isn't, nothing is shown to wait for. */
   panelOpen = false;
-  /** A ready diagram went away, so the next mount is a reopen, not a first load. */
-  detached = false;
   private waiters = new Set<Waiter>();
 
   private idleFor(run: number, target: number) {
     if (!this.panelOpen) return true;
-    return this.ready && this.run === run && this.consumed >= target && !this.walking;
+    return this.ready && this.run === run && this.consumed >= target && this.hopsLeft === 0;
   }
 
   /** Resolves once the diagram has walked the first `target` entries of `run`, or after `capMs`. */
@@ -41,9 +40,10 @@ export class WalkTracker {
     });
   }
 
-  /** Entries of `run` not yet taken in by the diagram. */
+  /** Hops `run` still has to play: entries not taken in yet, plus those queued or on screen. */
   pending(run: number, target: number) {
-    return Math.max(0, target - (this.run === run ? this.consumed : 0));
+    if (this.run !== run) return target;
+    return Math.max(0, target - this.consumed) + this.hopsLeft;
   }
 
   notify() {

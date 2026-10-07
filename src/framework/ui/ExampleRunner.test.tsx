@@ -182,6 +182,48 @@ describe("ExampleRunner — pacing to the diagram's token walk", () => {
     expect(marked()).toBe(atRelease);
   }, 40_000);
 
+  // The form opens while the walk to it is still playing. A valid form must not
+  // offer Complete then: the click would be silently ignored.
+  it("disables Complete task while the run is still busy, even with a valid form", async () => {
+    const app = await renderExample(invoicePayment);
+    const runButton = await screen.findByRole("button", { name: "▶ Run" });
+    await waitFor(() => expect(runButton).toBeEnabled(), { timeout: 20_000 });
+    fireEvent.click(runButton);
+
+    const complete = await screen.findByRole("button", { name: "Complete task" }, { timeout: 20_000 });
+    await waitFor(() => fireEvent.click(screen.getByText("Approve release")));
+    expect(app.status()).toBe("Running…");
+    expect(complete).toBeDisabled();
+
+    await app.settle();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Complete task" })).toBeEnabled());
+  }, 40_000);
+
+  // Submitting the last task finishes the instance; the walk to its end event
+  // still has to play out before the controls come back.
+  it("keeps the controls locked while a finishing submission walks to the end", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+    await app.completeUserTask(() => {
+      fireEvent.click(screen.getByText("Approve release"));
+    });
+    expect(app.status()).toBe("Fill out the form below");
+
+    // The final sign-off: submitting it completes the instance.
+    const complete = () => screen.getByRole("button", { name: "Complete task" });
+    await waitFor(() => {
+      fireEvent.click(screen.getByText("Confirm - case closed"));
+      expect(complete()).toBeEnabled();
+    }, { timeout: 20_000 });
+    fireEvent.click(complete());
+
+    // Busy while walking: no Run, and no second submit that would be ignored.
+    await waitFor(() => expect(app.status()).toBe("Running…"));
+    expect(screen.getByRole("button", { name: "▶ Run" })).toBeDisabled();
+    await waitFor(() => expect(app.status()).toBe("Completed"), { timeout: 20_000 });
+    expect(app.trace().at(-1)).toContain("process instance completed");
+  }, 60_000);
+
   // Submitting a task moves the token too; the next round used to start at once.
   it("waits for the walk after a human task is submitted", async () => {
     const app = await renderExample(invoicePayment);

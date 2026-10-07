@@ -19,12 +19,12 @@ describe("WalkTracker", () => {
     let done = false;
     const wait = t.waitFor(1, 3, 10_000).then(() => (done = true));
 
-    Object.assign(t, { run: 1, consumed: 3, walking: true });
+    Object.assign(t, { run: 1, consumed: 3, hopsLeft: 2 });
     t.notify();
     await Promise.resolve();
     expect(done).toBe(false);
 
-    t.walking = false;
+    t.hopsLeft = 0;
     t.notify();
     await wait;
     expect(done).toBe(true);
@@ -34,10 +34,19 @@ describe("WalkTracker", () => {
     const t = open();
     let done = false;
     void t.waitFor(2, 3, 10_000).then(() => (done = true));
-    Object.assign(t, { run: 1, consumed: 9, walking: false });
+    Object.assign(t, { run: 1, consumed: 9, hopsLeft: 0 });
     t.notify();
     await new Promise((r) => setTimeout(r, 10));
     expect(done).toBe(false);
+  });
+
+  // Taken in is not the same as shown: queued and on-screen hops still take time.
+  it("counts hops already taken in but not yet played as pending", () => {
+    const t = open();
+    Object.assign(t, { run: 1, consumed: 7, hopsLeft: 7 });
+    expect(t.pending(1, 7)).toBe(7);
+    expect(t.pending(1, 9)).toBe(9);
+    expect(t.pending(2, 4)).toBe(4);
   });
 
   // A diagram that never imports (malformed XML) must not hang the run.
