@@ -113,14 +113,23 @@ describe("ExampleRunner — a run with no human in it", () => {
 
     fireEvent.click(step);
 
-    // A fresh instance, advanced by exactly one dispatch round — so the trace
-    // has been replaced by that round rather than still holding the last run.
+    // A fresh instance, stopped before its first job — so the trace has been
+    // replaced by that start rather than still holding the last run.
+    await waitFor(
+      () => expect(app.trace().join("\n")).toMatch(/instance started/i),
+      { timeout: 20_000 },
+    );
+    expect(app.trace().join("\n")).not.toMatch(/round handled/i);
+    expect(app.status()).not.toBe("Completed");
+    expect(app.trace().at(-1)).not.toContain("process instance completed");
+
+    // The next Step dispatches the first round.
+    await app.settle();
+    fireEvent.click(screen.getByRole("button", { name: "⏭ Step" }));
     await waitFor(
       () => expect(app.trace().join("\n")).toMatch(/round handled/i),
       { timeout: 20_000 },
     );
-    expect(app.status()).not.toBe("Completed");
-    expect(app.trace().at(-1)).not.toContain("process instance completed");
 
     await app.settle();
   }, 40_000);

@@ -29,7 +29,7 @@ import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { userTaskVariables } from "../userTaskVariables";
 import { useEmbedReadyReporter } from "../embedHeight";
-import { describeRound, elementActivations, sequenceFlowsSince } from "../stepSummary";
+import { describeRound, describeStart, elementActivations, sequenceFlowsSince } from "../stepSummary";
 import { useBrain } from "../useBrain";
 import type { BrainKind, VisionFn } from "../brains/types";
 import { makeScriptedVisionBrain } from "../brains/vision";
@@ -1281,23 +1281,32 @@ export function ExampleRunner({
     // newer run's state in the `finally` below.
     const seq = ++runSeqRef.current;
     try {
-      let workers = workersRef.current;
-      let agents = agentsRef.current;
-      let snap = run.snapshot;
-      // Starting a run resets the engine, and with it the event log — so a fresh
-      // Step reads from 0 and its summary includes the path the instance took on
-      // creation (through a business rule task or gateway) before any job ran.
-      let eventsBefore = run.events().length;
+      const workers = workersRef.current;
+      const agents = agentsRef.current;
+      const snap = run.snapshot;
+      const eventsBefore = run.events().length;
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
         setCompileError(null);
         const prepared = await beginRun(seq);
         if (!prepared) return;
-        workers = prepared.workers;
-        agents = prepared.agents;
-        snap = prepared.snap;
-        eventsBefore = 0;
+        // A fresh Step stops once the instance exists, before any job runs, so
+        // the reader sees where it parked and what it passed on the way.
+        const created = prepared.snap;
+        if (created && created.instances.length > 0) {
+          const vars = displayableVars(created, rootInstanceKeyRef.current);
+          if (vars) setDisplayVars({ ...vars });
+          trace(
+            describeStart(
+              created,
+              sequenceFlowsSince(run.events(), 0),
+              elementLabels,
+              rootCompleted(created, rootInstanceKeyRef.current),
+            ),
+          );
+        }
+        return;
       }
 
       if (!snap || rootCompleted(snap, rootInstanceKeyRef.current)) return;
@@ -1759,7 +1768,7 @@ export function ExampleRunner({
             onClick={() => void step()}
             // Deliberately not disabled once the root instance has completed.
             // Run isn't, and `step()` handles that state the same way Run does —
-            // `beginRun` starts a fresh instance and this takes its first round.
+            // `beginRun` starts a fresh instance, and this Step stops there.
             // Disabling it here stranded the embed, which autostarts: the reader
             // arrives after the run has finished, so Step was never once usable.
             // (`canRun` tests the open user task, not completion.)

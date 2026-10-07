@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RoundResult, SettleReason, Snapshot, WasmEvent } from "@nanobpm/bojtos-kit";
-import { describeRound, elementActivations, sequenceFlowsSince } from "./stepSummary";
+import { describeRound, describeStart, elementActivations, sequenceFlowsSince } from "./stepSummary";
 
 const labelFor = (id: string) => (id === "Task_1" ? "Review" : id);
 
@@ -60,6 +60,35 @@ describe("elementActivations", () => {
       { seq: 3, now: 0, type: "ElementActivated", element_id: "Task", instance_key: 6 },
     ];
     expect(elementActivations(events, "6")).toEqual(["Start", "Task"]);
+  });
+});
+
+describe("describeStart", () => {
+  it("names the path a new instance took and where it stopped", () => {
+    const entry = describeStart(
+      snap({ activeElementIds: ["Task_1"] }),
+      [
+        { from: "Start", to: "Rule" },
+        { from: "Rule", to: "Task_1" },
+      ],
+      labelFor,
+      false,
+    );
+    expect(entry).toEqual({
+      kind: "step",
+      text: "⏭ instance started via Start → Rule, Rule → Review — now at Review",
+    });
+  });
+
+  it("says so when the instance finished or opened a human task on creation", () => {
+    expect(describeStart(snap(), [], labelFor, true).kind).toBe("done");
+    const human = describeStart(
+      snap({ userTasks: [{ state: "Created" } as Snapshot["userTasks"][number]] }),
+      [],
+      labelFor,
+      false,
+    );
+    expect(human.kind).toBe("human");
   });
 });
 
