@@ -1508,7 +1508,7 @@ export function ExampleRunner({
     if ((run.snapshot?.incidentElementIds.length ?? 0) > 0)
       return <Badge variant="danger">Incident</Badge>;
     if (openUserTask)
-      return <Badge variant="warning">Waiting for a human</Badge>;
+      return <Badge variant="warning">Fill out the form below</Badge>;
     if (rootCompleted(run.snapshot, rootInstanceKeyRef.current))
       return <Badge variant="success">Completed</Badge>;
     // An incomplete run that has quiesced short of completion — via Step, or

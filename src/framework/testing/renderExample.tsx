@@ -34,7 +34,7 @@ const STATUSES = [
   "Running…",
   "Stepping…",
   "Incident",
-  "Waiting for a human",
+  "Fill out the form below",
   "Completed",
   "Paused",
 ] as const;

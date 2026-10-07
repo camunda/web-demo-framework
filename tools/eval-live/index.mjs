@@ -53,7 +53,7 @@ mkdirSync(OUT, { recursive: true });
 
 const STATUSES = [
   "Booting engine…", "Engine error", "Ready", "Running…", "Stepping…",
-  "Incident", "Waiting for a human", "Completed", "Paused",
+  "Incident", "Fill out the form below", "Completed", "Paused",
 ];
 const IN_FLIGHT = new Set(["", "Booting engine…", "Running…", "Stepping…"]);
 
@@ -387,7 +387,7 @@ async function answerHumanTask(page, ctx, open, result) {
     result.fail.push(`${label}: form still invalid after filling every required field`);
     return false;
   }
-  await clickAndWaitForProgress(page, ctx.trace, button, "Waiting for a human");
+  await clickAndWaitForProgress(page, ctx.trace, button, "Fill out the form below");
   return true;
 }
 
@@ -458,7 +458,7 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
       if (s === "Completed") { ended = s; break; }
       if (s === "timeout") { result.fail.push(`still running after ${SCENARIO_BUDGET_MS / 60_000} min`); ended = s; break; }
       if (s === "Incident" || s === "Engine error") { result.fail.push(`status: ${s}`); ended = s; break; }
-      if (s === "Waiting for a human") {
+      if (s === "Fill out the form below") {
         // A scenario that says "press" means the event should land while the
         // agent is parked on its own human task — answering it first would skip
         // the interrupt. After the agent has finished there is nothing to

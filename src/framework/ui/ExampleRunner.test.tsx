@@ -133,7 +133,7 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
 
     // The agent called its release tool and the process is parked on the
     // reviewer, mid-loop.
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.trace().join("\n")).toContain("RequestPaymentRelease");
 
     await app.completeUserTask(() => {
@@ -146,7 +146,7 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     const trace = app.trace().join("\n");
     expect(trace).toContain("Release payment");
     expect(trace).toContain("scripted agent: done");
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Final compliance sign-off")).toBe(true);
 
     // Driving straight on left the next task's form holding the finished
@@ -166,7 +166,7 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     const app = await renderExample(invoicePayment);
     await app.run();
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Step/ })).toBeDisabled();
     // Reset is the way out of a parked run, so it must stay live.
@@ -210,7 +210,7 @@ describe("ExampleRunner — a process only a message can start", () => {
     const trace = app.trace().join("\n");
     expect(trace).toContain('publishing "alert-raised"');
     expect(trace).toContain("CASE-1");
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Triage the alert")).toBe(true);
   }, 30_000);
 
@@ -220,7 +220,7 @@ describe("ExampleRunner — a process only a message can start", () => {
 
     // The interrupt arrives while the process waits on a person — there is no
     // held job to hang the choice off, which is the case this has to cover.
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     // And the drive loop must not have fired it on its own on the way here;
     // that would interrupt every run.
     expect(app.trace().join("\n")).not.toContain("alert-withdrawn");
@@ -317,7 +317,7 @@ describe("ExampleRunner — a timer racing an event the reader was offered", () 
     // The timeout reports back into the agent's loop, which then escalates to a
     // human — the outcome the "bureau never answers" scenario promises.
     expect(trace).toContain("No credit bureau reply within the SLA window");
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Escalate to underwriting ops")).toBe(true);
     // And the reply button is gone — the race is resolved the other way now.
     expect(screen.queryByRole("button", { name: "📨 The credit bureau replies" })).toBeNull();
@@ -338,7 +338,7 @@ describe("ExampleRunner — when the agent really does give up early", () => {
     // The process took the gateway's default path to the human task with
     // `RecordComplianceDecision` — the example's one `requiredTools` entry —
     // never having run, which is exactly what the warning is for.
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(screen.getByText(ALERT)).toBeInTheDocument();
   }, 30_000);
 
@@ -675,7 +675,7 @@ describe("ExampleRunner — changing the example input mid-run", () => {
     fireEvent.click(screen.getByRole("button", { name: /likely flagged/i }));
     await app.run();
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(cleared()).toBeDisabled();
     expect(screen.getByText(/still open — press ↺ Reset/i)).toBeInTheDocument();
 
