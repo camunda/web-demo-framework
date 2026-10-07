@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { RoundResult, SettleReason, Snapshot } from "@nanobpm/bojtos-kit";
-import { describeRound, newSequenceFlows } from "./stepSummary";
+import type { RoundResult, SettleReason, Snapshot, WasmEvent } from "@nanobpm/bojtos-kit";
+import { describeRound, elementActivations, sequenceFlowsSince } from "./stepSummary";
 
 const labelFor = (id: string) => (id === "Task_1" ? "Review" : id);
 
@@ -26,19 +26,40 @@ function snap(overrides: Partial<Snapshot> = {}): Snapshot {
   };
 }
 
-describe("newSequenceFlows", () => {
-  it("returns only the flows past the previous count", () => {
-    const current = [
-      { from: "A", to: "B" },
-      { from: "B", to: "C" },
-      { from: "B", to: "C" }, // a loop retaking the same flow
-    ];
-    expect(newSequenceFlows(current, 1)).toEqual([
-      { from: "B", to: "C" },
-      { from: "B", to: "C" },
+// Shaped like expense-decision's Clear reject: start → DMN → gateway → task.
+const EVENTS: WasmEvent[] = [
+  { seq: 1, now: 0, type: "ElementActivated", element_id: "Start" },
+  { seq: 2, now: 0, type: "SequenceFlowTaken", from: "Start", to: "Rule" },
+  { seq: 3, now: 0, type: "ElementActivated", element_id: "Rule" },
+  { seq: 4, now: 0, type: "SequenceFlowTaken", from: "Rule", to: "Gateway" },
+  { seq: 5, now: 0, type: "ElementActivated", element_id: "Gateway" },
+  { seq: 6, now: 0, type: "SequenceFlowTaken", from: "Gateway", to: "Gateway" },
+  { seq: 7, now: 0, type: "ElementActivated", element_id: "Gateway" },
+];
+
+describe("sequenceFlowsSince", () => {
+  it("returns the flows past an event index, in the order they were taken", () => {
+    expect(sequenceFlowsSince(EVENTS, 3)).toEqual([
+      { from: "Rule", to: "Gateway" },
+      { from: "Gateway", to: "Gateway" }, // a loop retaking a flow still counts
     ]);
-    expect(newSequenceFlows(current, 0)).toEqual(current);
-    expect(newSequenceFlows(current, 3)).toEqual([]);
+    expect(sequenceFlowsSince(EVENTS, 0)[0]).toEqual({ from: "Start", to: "Rule" });
+    expect(sequenceFlowsSince(EVENTS, EVENTS.length)).toEqual([]);
+  });
+});
+
+describe("elementActivations", () => {
+  it("lists every activated element in order, repeats included", () => {
+    expect(elementActivations(EVENTS)).toEqual(["Start", "Rule", "Gateway", "Gateway"]);
+  });
+
+  it("keeps to one instance when given its key", () => {
+    const events: WasmEvent[] = [
+      { seq: 1, now: 0, type: "ElementActivated", element_id: "Start", instance_key: 6 },
+      { seq: 2, now: 0, type: "ElementActivated", element_id: "ChildStart", instance_key: 9 },
+      { seq: 3, now: 0, type: "ElementActivated", element_id: "Task", instance_key: 6 },
+    ];
+    expect(elementActivations(events, "6")).toEqual(["Start", "Task"]);
   });
 });
 

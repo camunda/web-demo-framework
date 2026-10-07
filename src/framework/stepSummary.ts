@@ -1,19 +1,37 @@
-import type { RoundResult, SequenceFlowDto } from "@nanobpm/bojtos-kit";
+import type { RoundResult, SequenceFlowDto, WasmEvent } from "@nanobpm/bojtos-kit";
 import type { TraceEntry } from "./types";
 
 export type LabelFor = (elementId: string) => string;
 
 /**
- * `snapshot.takenSequenceFlows` only appends — every flow traversal (including
- * a loop retaking the same flow) is pushed once and never removed — so the
- * flows a single round took are exactly the tail past the previous snapshot's
- * length. No need to diff by identity (which would collapse repeats).
+ * The flows taken since `fromIndex` in the engine's event log, in the order
+ * they were taken. Not `snapshot.takenSequenceFlows`: that list is not in
+ * traversal order (it comes back sorted by source element), so slicing it by
+ * a previous length returned the wrong flows.
  */
-export function newSequenceFlows(
-  current: SequenceFlowDto[],
-  previousCount: number,
+export function sequenceFlowsSince(
+  events: WasmEvent[],
+  fromIndex: number,
 ): SequenceFlowDto[] {
-  return current.slice(previousCount);
+  return events
+    .slice(fromIndex)
+    .filter((e) => e.type === "SequenceFlowTaken")
+    .map((e) => ({ from: String(e.from), to: String(e.to) }));
+}
+
+/**
+ * Every element the engine activated, in order — the path the token took.
+ * Given `instanceKey`, only that instance's: a called process runs as its own
+ * instance, on a diagram that isn't this one.
+ */
+export function elementActivations(events: WasmEvent[], instanceKey?: string | null): string[] {
+  return events
+    .filter(
+      (e) =>
+        e.type === "ElementActivated" &&
+        (instanceKey == null || String(e.instance_key) === instanceKey),
+    )
+    .map((e) => String(e.element_id));
 }
 
 /**

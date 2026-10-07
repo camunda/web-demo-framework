@@ -33,6 +33,13 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>`;
 
 describe("RuntimeDiagram", () => {
+  const WALK_XML = XML.replace(
+    '<bpmn:task id="Task_1" name="Do the thing" />',
+    '<bpmn:businessRuleTask id="Rule_1" /><bpmn:task id="Task_1" name="Do the thing" />',
+  ).replace(
+    '<bpmndi:BPMNShape id="Task_1_di"',
+    '<bpmndi:BPMNShape id="Rule_1_di" bpmnElement="Rule_1"><dc:Bounds x="400" y="78" width="100" height="80" /></bpmndi:BPMNShape><bpmndi:BPMNShape id="Task_1_di"',
+  );
   // The sizing lives on `runtime-diagram`; without it bpmn-js has no definite
   // height to fit against and the canvas collapses to the SVG's intrinsic 150px.
   it("always carries its own sizing class, with or without a caller class", () => {
@@ -130,6 +137,44 @@ describe("RuntimeDiagram", () => {
     window.removeEventListener("unhandledrejection", onError as EventListener);
     window.removeEventListener("error", onError as EventListener);
     expect(errors).toEqual([]);
+  });
+
+  /**
+   * Reviewer: on expense-decision's "Clear reject", even Step never showed the
+   * token on the business rule task — the engine passes it, and the gateway, in
+   * the same command, so no snapshot ever has it active. The walk replays what
+   * the engine activated, one element at a time, before settling.
+   */
+  it("walks the token through elements the engine passed instantly", async () => {
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={WALK_XML} activeIds={[]} incidentIds={[]} path={[]} hopMs={30} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Rule_1"]')).toBeInTheDocument(),
+    );
+
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+        (el) => el.getAttribute("data-element-id")!,
+      );
+      if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+    });
+    observer.observe(container, { subtree: true, attributes: true, attributeFilter: ["class"] });
+
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        // `Child_1` stands for a called process's element: in the log, not on this diagram.
+        path={["StartEvent_1", "Rule_1", "Child_1", "Task_1"]}
+        hopMs={30}
+      />,
+    );
+
+    await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+    observer.disconnect();
   });
 
   it("is built on a viewer with no pan or zoom modules", async () => {

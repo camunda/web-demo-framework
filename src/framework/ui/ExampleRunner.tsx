@@ -29,7 +29,7 @@ import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { userTaskVariables } from "../userTaskVariables";
 import { useEmbedReadyReporter } from "../embedHeight";
-import { describeRound, newSequenceFlows } from "../stepSummary";
+import { describeRound, elementActivations, sequenceFlowsSince } from "../stepSummary";
 import { useBrain } from "../useBrain";
 import type { BrainKind, VisionFn } from "../brains/types";
 import { makeScriptedVisionBrain } from "../brains/vision";
@@ -50,6 +50,11 @@ import { useAutostart } from "../useAutostart";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
+/** How long the diagram's token rests on each element it walks through. */
+const HOP = 450;
+/** Wait at least a beat, and long enough for the diagram to walk `hops` elements. */
+const pace = (hops: number) =>
+  new Promise((r) => setTimeout(r, Math.max(BEAT, hops * HOP)));
 const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
@@ -667,6 +672,7 @@ export function ExampleRunner({
         !rootCompleted(snap, rootInstanceKeyRef.current) &&
         guard++ < 80
       ) {
+        const hopsBefore = elementActivations(run.events(), rootInstanceKeyRef.current).length;
         const round = await run.stepWorkers(workers, { agents });
         // Reset (or a fresh Start/manual-resume that landed while this await
         // was in flight) can bump `runSeqRef` — checking that instead of the
@@ -842,7 +848,7 @@ export function ExampleRunner({
           }
           break;
         }
-        await new Promise((r) => setTimeout(r, BEAT));
+        await pace(elementActivations(run.events(), rootInstanceKeyRef.current).length - hopsBefore);
       }
 
       // Every `continue` above re-tests the generation in the `while` head,
@@ -1129,6 +1135,12 @@ export function ExampleRunner({
     !!run.snapshot &&
     run.snapshot.instances.length > 0 &&
     !rootCompleted(run.snapshot, rootInstanceKeyRef.current);
+  // Re-read on every snapshot: each engine command publishes one, after its events.
+  const activationPath = useMemo(
+    () => (run.snapshot ? elementActivations(run.events(), rootInstanceKeyRef.current) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
+    [run.snapshot],
+  );
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
@@ -1199,7 +1211,7 @@ export function ExampleRunner({
         workers = prepared.workers;
         agents = prepared.agents;
         snap = prepared.snap;
-        await new Promise((r) => setTimeout(r, BEAT));
+        await pace(elementActivations(run.events(), rootInstanceKeyRef.current).length);
       }
 
       await driveLoop(workers, agents, snap, seq);
@@ -1272,6 +1284,10 @@ export function ExampleRunner({
       let workers = workersRef.current;
       let agents = agentsRef.current;
       let snap = run.snapshot;
+      // Starting a run resets the engine, and with it the event log — so a fresh
+      // Step reads from 0 and its summary includes the path the instance took on
+      // creation (through a business rule task or gateway) before any job ran.
+      let eventsBefore = run.events().length;
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
@@ -1281,13 +1297,11 @@ export function ExampleRunner({
         workers = prepared.workers;
         agents = prepared.agents;
         snap = prepared.snap;
+        eventsBefore = 0;
       }
 
       if (!snap || rootCompleted(snap, rootInstanceKeyRef.current)) return;
 
-      // `takenSequenceFlows` only appends — the flows this one round takes
-      // are exactly what lands past this length (see `newSequenceFlows`).
-      const prevFlowCount = snap.takenSequenceFlows.length;
       const round = await run.stepWorkers(workers, { agents });
       if (!round) {
         trace({
@@ -1298,10 +1312,7 @@ export function ExampleRunner({
       }
       const vars = displayableVars(round.snapshot, rootInstanceKeyRef.current);
       if (vars) setDisplayVars({ ...vars });
-      const flows = newSequenceFlows(
-        round.snapshot.takenSequenceFlows,
-        prevFlowCount,
-      );
+      const flows = sequenceFlowsSince(run.events(), eventsBefore);
       trace(
         describeRound(
           round,
@@ -1843,6 +1854,8 @@ export function ExampleRunner({
                 xml={draft.resolvedBpmn}
                 activeIds={run.snapshot?.activeElementIds ?? []}
                 incidentIds={run.snapshot?.incidentElementIds ?? []}
+                path={activationPath}
+                hopMs={HOP}
                 className="diagram"
               />
             </Suspense>

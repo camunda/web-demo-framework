@@ -32,6 +32,15 @@ export interface RuntimeDiagramProps {
   activeIds: string[];
   /** Element ids to highlight as incidents — marker class `nano-incident`. */
   incidentIds: string[];
+  /**
+   * Every element the engine has activated this run, in order (append-only).
+   * When it grows, the token walks the new elements one at a time before
+   * settling on `activeIds`, so elements the engine passes through instantly —
+   * a business rule task, a gateway — are seen. Shrinking (a reset) clears it.
+   */
+  path?: string[];
+  /** How long the walking token rests on each element, in ms. */
+  hopMs?: number;
   /** Extra class for the container, added alongside `runtime-diagram`. */
   className?: string;
 }
@@ -102,6 +111,8 @@ export function RuntimeDiagram({
   xml,
   activeIds,
   incidentIds,
+  path,
+  hopMs = 450,
   className,
 }: RuntimeDiagramProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +125,11 @@ export function RuntimeDiagram({
   // mid-import would otherwise leave the diagram unmarked until the next change.
   const idsRef = useRef({ activeIds, incidentIds });
   idsRef.current = { activeIds, incidentIds };
+  // The walk: elements still to show, the one shown now, and how much of
+  // `path` has already been queued.
+  const walkRef = useRef<{ queue: string[]; at: string | null; seen: number; timer: number }>(
+    { queue: [], at: null, seen: 0, timer: 0 },
+  );
 
   // Connector-template icons for this model (see `diagramIcons.ts`).
   const icons = useMemo(() => diagramIconsFor(xml), [xml]);
@@ -133,8 +149,11 @@ export function RuntimeDiagram({
       }
     }
 
+    // Mid-walk the token stands where the walk is, not on the final frontier.
+    const walking = walkRef.current.at;
+    const tokenIds = walking ? [walking] : idsRef.current.activeIds;
     const next: { id: string; cls: string }[] = [
-      ...idsRef.current.activeIds.map((id) => ({ id, cls: "nano-active" })),
+      ...tokenIds.map((id) => ({ id, cls: "nano-active" })),
       ...idsRef.current.incidentIds.map((id) => ({ id, cls: "nano-incident" })),
     ];
     for (const { id, cls } of next) {
@@ -158,7 +177,7 @@ export function RuntimeDiagram({
       }
     }
     const nextOverlays: string[] = [];
-    for (const id of idsRef.current.activeIds) {
+    for (const id of tokenIds) {
       try {
         nextOverlays.push(
           overlays.add(id, {
@@ -232,6 +251,36 @@ export function RuntimeDiagram({
     applyMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
   }, [activeIds, incidentIds]);
+
+  useEffect(() => {
+    const walk = walkRef.current;
+    const ids = path ?? [];
+    if (ids.length < walk.seen) {
+      window.clearTimeout(walk.timer);
+      Object.assign(walk, { queue: [], at: null, seen: 0, timer: 0 });
+      applyMarkers();
+    }
+    const fresh = ids.slice(walk.seen);
+    walk.seen = ids.length;
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const registry = viewerRef.current?.get<{ get: (id: string) => unknown }>("elementRegistry");
+    // A called process's elements are in the log too, but not on this diagram.
+    const onDiagram = fresh.filter((id) => !registry || registry.get(id));
+    if (onDiagram.length === 0 || reduced) return;
+    walk.queue.push(...onDiagram);
+    if (walk.timer) return;
+    const hop = () => {
+      walk.at = walk.queue.shift() ?? null;
+      walk.timer = walk.at ? window.setTimeout(hop, hopMs) : 0;
+      applyMarkers();
+    };
+    hop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
+  }, [path, hopMs]);
+
+  useEffect(() => () => window.clearTimeout(walkRef.current.timer), []);
 
   // bpmn-js re-renders an element's visual whenever its markers change, which
   // drops any child we appended — so re-install on every mutation rather than
