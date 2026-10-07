@@ -181,7 +181,7 @@ A DMN decision table is the first-class decision-maker, not a fallback: it settl
       <bpmn:incoming>Flow_ToEndManual</bpmn:incoming>
     </bpmn:endEvent>
     <bpmn:textAnnotation id="TextAnnotation_0130wya">
-      <bpmn:text>A deterministic decision comes first for the easy cases - the agent is never invoked for these</bpmn:text>
+      <bpmn:text>A deterministic decision comes first for the easy cases — the agent is never invoked for these</bpmn:text>
     </bpmn:textAnnotation>
     <bpmn:association id="Association_1nq3ifs" associationDirection="None" sourceRef="BusinessRuleTask_EvaluatePolicy" targetRef="TextAnnotation_0130wya" />
     <bpmn:textAnnotation id="TextAnnotation_10q8vgq">
