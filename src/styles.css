@@ -1226,6 +1226,10 @@ body {
 .brain-card {
   background: linear-gradient(180deg, #fff 0%, var(--surface-3) 100%);
 }
+/* A little air between the panel's description and the mode track below it. */
+.brain-card [data-slot="card-content"] {
+  margin-top: 8px;
+}
 .brain {
   display: flex;
   flex-direction: column;
