@@ -1,7 +1,9 @@
-import { render, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { fitWithPadding, RuntimeDiagram, type CanvasLike } from "./RuntimeDiagram";
 import { WalkTracker } from "./walkTracker";
+
+afterEach(cleanup);
 
 /**
  * The "locked" part of this component is structural — a plain bpmn-js `Viewer`
