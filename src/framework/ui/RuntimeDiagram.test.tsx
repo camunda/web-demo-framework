@@ -177,6 +177,63 @@ describe("RuntimeDiagram", () => {
     observer.disconnect();
   });
 
+  // An autostarting embed can run before bpmn-js has finished importing; the
+  // walk has to wait for the registry rather than treat every id as off-diagram.
+  it("walks activations that arrived before the import finished", async () => {
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={WALK_XML} activeIds={[]} incidentIds={[]} path={[]} hopMs={30} />,
+    );
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1", "Task_1"]}
+        hopMs={30}
+      />,
+    );
+    expect(container.querySelector('[data-element-id="Rule_1"]')).toBeNull();
+
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+        (el) => el.getAttribute("data-element-id")!,
+      );
+      if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+    });
+    observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+
+    await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+    observer.disconnect();
+  });
+
+  // A remount (a collapsed panel reopened) gets the whole run's path at once:
+  // that is history, not something to replay.
+  it("does not replay the path it was mounted with", async () => {
+    const { container } = render(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1", "Task_1"]}
+        hopMs={30}
+      />,
+    );
+    const marked = new Set<string>();
+    const observer = new MutationObserver(() => {
+      for (const el of Array.from(container.querySelectorAll(".nano-active[data-element-id]")))
+        marked.add(el.getAttribute("data-element-id")!);
+    });
+    observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active"),
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    observer.disconnect();
+    expect([...marked]).toEqual(["Task_1"]);
+  });
+
   it("is built on a viewer with no pan or zoom modules", async () => {
     // The guarantee is "cannot be moved", and it holds because the plain
     // `Viewer` has no navigation modules — not because anything suppresses

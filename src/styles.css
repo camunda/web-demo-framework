@@ -1212,8 +1212,6 @@ body {
 }
 .scenario-toggle button[aria-pressed="true"],
 .scenario-toggle button[aria-pressed="true"]:hover,
-.scenario-toggle button.is-current,
-.scenario-toggle button.is-current:hover,
 .brain-kinds button[aria-pressed="true"],
 .brain-kinds button[aria-pressed="true"]:hover {
   background: var(--surface);

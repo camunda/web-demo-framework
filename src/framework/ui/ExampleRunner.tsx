@@ -52,9 +52,15 @@ import { useAutostart } from "../useAutostart";
 const BEAT = 650;
 /** How long the diagram's token rests on each element it walks through. */
 const HOP = 450;
+/** How long the diagram takes to walk `hops` elements — none when it doesn't animate. */
+const walkMs = (hops: number) =>
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? 0
+    : hops * HOP;
 /** Wait at least a beat, and long enough for the diagram to walk `hops` elements. */
 const pace = (hops: number) =>
-  new Promise((r) => setTimeout(r, Math.max(BEAT, hops * HOP)));
+  new Promise((r) => setTimeout(r, Math.max(BEAT, walkMs(hops))));
 const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
@@ -651,6 +657,10 @@ export function ExampleRunner({
       null)
     : null;
 
+  /** Elements the run's own instance has activated so far — what the diagram walks. */
+  const rootActivations = () =>
+    elementActivations(run.events(), rootInstanceKeyRef.current).length;
+
   /**
    * Drive `stepWorkers` to quiescence, completion, a human task, or a
    * manually-held job — shared by `start` and by `resolveManualControl`
@@ -672,7 +682,7 @@ export function ExampleRunner({
         !rootCompleted(snap, rootInstanceKeyRef.current) &&
         guard++ < 80
       ) {
-        const hopsBefore = elementActivations(run.events(), rootInstanceKeyRef.current).length;
+        const hopsBefore = rootActivations();
         const round = await run.stepWorkers(workers, { agents });
         // Reset (or a fresh Start/manual-resume that landed while this await
         // was in flight) can bump `runSeqRef` — checking that instead of the
@@ -745,7 +755,7 @@ export function ExampleRunner({
               snap = correlated;
               const correlatedVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (correlatedVars) setDisplayVars({ ...correlatedVars });
-              await new Promise((r) => setTimeout(r, BEAT));
+              await pace(rootActivations() - hopsBefore);
               continue;
             }
             // `correlateMessage` returns null when the engine call threw, so
@@ -780,7 +790,7 @@ export function ExampleRunner({
               });
               const signalVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (signalVars) setDisplayVars({ ...signalVars });
-              await new Promise((r) => setTimeout(r, BEAT));
+              await pace(rootActivations() - hopsBefore);
               continue;
             }
             // `broadcastSignal` returns null when the engine call threw — say so
@@ -841,14 +851,14 @@ export function ExampleRunner({
                   kind: "step",
                   text: "🕐 the clock advanced — timer fired",
                 });
-                await new Promise((r) => setTimeout(r, BEAT));
+                await pace(rootActivations() - hopsBefore);
                 continue;
               }
             }
           }
           break;
         }
-        await pace(elementActivations(run.events(), rootInstanceKeyRef.current).length - hopsBefore);
+        await pace(rootActivations() - hopsBefore);
       }
 
       // Every `continue` above re-tests the generation in the `while` head,
@@ -1211,7 +1221,7 @@ export function ExampleRunner({
         workers = prepared.workers;
         agents = prepared.agents;
         snap = prepared.snap;
-        await pace(elementActivations(run.events(), rootInstanceKeyRef.current).length);
+        await pace(rootActivations());
       }
 
       await driveLoop(workers, agents, snap, seq);
@@ -1305,12 +1315,15 @@ export function ExampleRunner({
               rootCompleted(created, rootInstanceKeyRef.current),
             ),
           );
+          // Stay locked until the diagram has walked the path.
+          await new Promise((r) => setTimeout(r, walkMs(rootActivations())));
         }
         return;
       }
 
       if (!snap || rootCompleted(snap, rootInstanceKeyRef.current)) return;
 
+      const hopsBefore = rootActivations();
       const round = await run.stepWorkers(workers, { agents });
       if (!round) {
         trace({
@@ -1331,6 +1344,7 @@ export function ExampleRunner({
           rootCompleted(round.snapshot, rootInstanceKeyRef.current),
         ),
       );
+      await new Promise((r) => setTimeout(r, walkMs(rootActivations() - hopsBefore)));
     } finally {
       if (runSeqRef.current === seq) {
         runningRef.current = false;
@@ -1634,8 +1648,9 @@ export function ExampleRunner({
                 <Button
                   size="sm"
                   variant="secondary"
-                  className={`scenario-custom${shownScenario === null ? " is-current" : ""}`}
+                  className="scenario-custom"
                   aria-label="Custom — edit input"
+                  aria-pressed={shownScenario === null}
                   aria-expanded={startEditorOpen}
                   aria-controls="start-input-editor"
                   disabled={inputLocked}

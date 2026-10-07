@@ -8,6 +8,7 @@ import { seedExportCompliance } from "../../examples/seed-export-compliance";
 import { creditLineIncrease } from "../../examples/credit-line-increase";
 import { expenseDecision } from "../../examples/expense-decision";
 import { bankSupport } from "../../examples/bank-support";
+import learnSignalBroadcast from "../../examples/learn-signal-broadcast";
 
 // Stands in for driver.js, whose every layout pass is scheduled on
 // `requestAnimationFrame` — so what it draws can't be asserted here anyway.
@@ -132,6 +133,56 @@ describe("ExampleRunner — a run with no human in it", () => {
     );
 
     await app.settle();
+  }, 40_000);
+});
+
+describe("ExampleRunner — pacing to the diagram's token walk", () => {
+  // A line's arrival time: the panel shows newest first, so new rows are prepended.
+  const watchTrace = () => {
+    const seen: { text: string; at: number }[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const r of records)
+        for (const node of Array.from(r.addedNodes))
+          if (node instanceof HTMLElement && node.parentElement?.classList.contains("timeline"))
+            seen.push({ text: node.textContent ?? "", at: performance.now() });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return { seen, stop: () => observer.disconnect() };
+  };
+
+  // A broadcast activates both service tasks: two hops of the walk, longer
+  // than a beat, so the next round must wait for the walk rather than a beat.
+  it("waits for the walk after a signal broadcast before the next round", async () => {
+    const app = await renderExample(learnSignalBroadcast);
+    const watch = watchTrace();
+    await app.run();
+    watch.stop();
+
+    const i = watch.seen.findIndex((s) => s.text.includes("broadcasting signal"));
+    expect(i).toBeGreaterThan(-1);
+    const next = watch.seen[i + 1];
+    expect(next).toBeDefined();
+    expect(next.at - watch.seen[i].at).toBeGreaterThanOrEqual(850);
+  }, 40_000);
+
+  // Step must not hand the controls back while the diagram is still walking.
+  it("keeps Step locked until the start's walk has finished", async () => {
+    await renderExample({
+      ...expenseDecision,
+      seed: expenseDecision.scenarios!.find((s) => s.label.startsWith("Clear reject"))!.variables,
+    });
+    const step = () => screen.getByRole("button", { name: "⏭ Step" });
+    await waitFor(() => expect(step()).toBeEnabled(), { timeout: 20_000 });
+
+    fireEvent.click(step());
+    await waitFor(() => expect(screen.getByText(/instance started/)).toBeInTheDocument(), {
+      timeout: 20_000,
+    });
+    const startedAt = performance.now();
+    expect(step()).toBeDisabled();
+    await waitFor(() => expect(step()).toBeEnabled(), { timeout: 20_000 });
+    // Start, policy task, gateway, notify: four hops of 450ms.
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(1500);
   }, 40_000);
 });
 
@@ -552,8 +603,13 @@ describe("ExampleRunner — the example input toggle", () => {
 
     fireEvent.click(custom());
 
-    expect(custom()).toHaveClass("is-current");
+    expect(custom()).toHaveAttribute("aria-pressed", "true");
     expect(loan()).toHaveAttribute("aria-pressed", "false");
+
+    // Selection is announced separately from whether the editor is open.
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(custom()).toHaveAttribute("aria-expanded", "false");
+    expect(custom()).toHaveAttribute("aria-pressed", "true");
   }, 40_000);
 
   it("closes the editor on a preset, and Custom brings the reader's text back", async () => {
@@ -574,11 +630,11 @@ describe("ExampleRunner — the example input toggle", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Card question/ }));
     expect(custom()).toHaveAttribute("aria-expanded", "false");
-    expect(custom()).not.toHaveClass("is-current");
+    expect(custom()).toHaveAttribute("aria-pressed", "false");
     await waitFor(() => expect(field().value).not.toBe("my own words"));
 
     fireEvent.click(custom());
-    expect(custom()).toHaveClass("is-current");
+    expect(custom()).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(field().value).toBe("my own words"));
   }, 40_000);
 

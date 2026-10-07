@@ -126,10 +126,13 @@ export function RuntimeDiagram({
   const idsRef = useRef({ activeIds, incidentIds });
   idsRef.current = { activeIds, incidentIds };
   // The walk: elements still to show, the one shown now, and how much of
-  // `path` has already been queued.
+  // `path` has already been queued. Whatever `path` holds at mount is history
+  // — a remount (a collapsed panel reopened) must not replay the whole run.
   const walkRef = useRef<{ queue: string[]; at: string | null; seen: number; timer: number }>(
-    { queue: [], at: null, seen: 0, timer: 0 },
+    { queue: [], at: null, seen: path?.length ?? 0, timer: 0 },
   );
+  const pathRef = useRef({ path, hopMs });
+  pathRef.current = { path, hopMs };
 
   // Connector-template icons for this model (see `diagramIcons.ts`).
   const icons = useMemo(() => diagramIconsFor(xml), [xml]);
@@ -192,6 +195,36 @@ export function RuntimeDiagram({
     tokenOverlaysRef.current = nextOverlays;
   };
 
+  /** Queue what `path` gained since last time and start walking it. */
+  const consumePath = () => {
+    // Until import finishes the registry is empty, so every id would look off-diagram.
+    if (!importedRef.current) return;
+    const walk = walkRef.current;
+    const ids = pathRef.current.path ?? [];
+    if (ids.length < walk.seen) {
+      window.clearTimeout(walk.timer);
+      Object.assign(walk, { queue: [], at: null, seen: 0, timer: 0 });
+      applyMarkers();
+    }
+    const fresh = ids.slice(walk.seen);
+    walk.seen = ids.length;
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const registry = viewerRef.current?.get<{ get: (id: string) => unknown }>("elementRegistry");
+    // A called process's elements are in the log too, but not on this diagram.
+    const onDiagram = fresh.filter((id) => registry?.get(id));
+    if (onDiagram.length === 0 || reduced) return;
+    walk.queue.push(...onDiagram);
+    if (walk.timer) return;
+    const hop = () => {
+      walk.at = walk.queue.shift() ?? null;
+      walk.timer = walk.at ? window.setTimeout(hop, pathRef.current.hopMs) : 0;
+      applyMarkers();
+    };
+    hop();
+  };
+
   useEffect(() => {
     if (!containerRef.current) return;
     const viewer = new Viewer({ container: containerRef.current });
@@ -209,6 +242,7 @@ export function RuntimeDiagram({
         fitWithPadding(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
         applyMarkers();
+        consumePath();
         if (containerRef.current)
           installDiagramIcons(containerRef.current, iconsRef.current);
       })
@@ -253,31 +287,8 @@ export function RuntimeDiagram({
   }, [activeIds, incidentIds]);
 
   useEffect(() => {
-    const walk = walkRef.current;
-    const ids = path ?? [];
-    if (ids.length < walk.seen) {
-      window.clearTimeout(walk.timer);
-      Object.assign(walk, { queue: [], at: null, seen: 0, timer: 0 });
-      applyMarkers();
-    }
-    const fresh = ids.slice(walk.seen);
-    walk.seen = ids.length;
-    const reduced =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const registry = viewerRef.current?.get<{ get: (id: string) => unknown }>("elementRegistry");
-    // A called process's elements are in the log too, but not on this diagram.
-    const onDiagram = fresh.filter((id) => !registry || registry.get(id));
-    if (onDiagram.length === 0 || reduced) return;
-    walk.queue.push(...onDiagram);
-    if (walk.timer) return;
-    const hop = () => {
-      walk.at = walk.queue.shift() ?? null;
-      walk.timer = walk.at ? window.setTimeout(hop, hopMs) : 0;
-      applyMarkers();
-    };
-    hop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
+    consumePath();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consumePath reads refs
   }, [path, hopMs]);
 
   useEffect(() => () => window.clearTimeout(walkRef.current.timer), []);
