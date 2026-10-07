@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import Viewer from "bpmn-js/lib/Viewer";
 import { diagramIconsFor, installDiagramIcons } from "./diagramIcons";
+import type { WalkTracker } from "./walkTracker";
 
 /**
  * The live diagram: token and incident markers on a model the reader watches
@@ -32,6 +33,27 @@ export interface RuntimeDiagramProps {
   activeIds: string[];
   /** Element ids to highlight as incidents — marker class `nano-incident`. */
   incidentIds: string[];
+  /**
+   * Every element the engine has activated this run, in order (append-only).
+   * When it grows, the token walks the new elements one at a time before
+   * settling on `activeIds`, so elements the engine passes through instantly —
+   * a business rule task, a gateway — are seen. Shrinking (a reset) clears it.
+   */
+  path?: string[];
+  /**
+   * Changes once per run. A new run's path can arrive no shorter than the last
+   * one's (React may batch away the empty path between them), so length alone
+   * can't say the walk should start over.
+   */
+  runId?: number;
+  /**
+   * The runner's record of how far the walk has got. It outlives this component,
+   * so a reopened panel doesn't replay history while a first lazy mount still
+   * walks what arrived during loading, and the runner can wait for the walk.
+   */
+  tracker?: WalkTracker;
+  /** How long the walking token rests on each element, in ms. */
+  hopMs?: number;
   /** Extra class for the container, added alongside `runtime-diagram`. */
   className?: string;
 }
@@ -102,6 +124,10 @@ export function RuntimeDiagram({
   xml,
   activeIds,
   incidentIds,
+  path,
+  runId,
+  tracker,
+  hopMs = 450,
   className,
 }: RuntimeDiagramProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +140,21 @@ export function RuntimeDiagram({
   // mid-import would otherwise leave the diagram unmarked until the next change.
   const idsRef = useRef({ activeIds, incidentIds });
   idsRef.current = { activeIds, incidentIds };
+  // The walk: elements still to show, the one shown now, and its timer.
+  const walkRef = useRef<{ queue: string[]; at: string | null; timer: number }>({
+    queue: [],
+    at: null,
+    timer: 0,
+  });
+  // How much of which run's `path` has been taken in. Without a tracker, what
+  // `path` holds at mount is history: a remount must not replay the whole run.
+  const localProgressRef = useRef<{ run: number | undefined; consumed: number }>({
+    run: runId,
+    consumed: path?.length ?? 0,
+  });
+  const progress = () => tracker ?? localProgressRef.current;
+  const pathRef = useRef({ path, runId, hopMs });
+  pathRef.current = { path, runId, hopMs };
 
   // Connector-template icons for this model (see `diagramIcons.ts`).
   const icons = useMemo(() => diagramIconsFor(xml), [xml]);
@@ -133,8 +174,11 @@ export function RuntimeDiagram({
       }
     }
 
+    // Mid-walk the token stands where the walk is, not on the final frontier.
+    const walking = walkRef.current.at;
+    const tokenIds = walking ? [walking] : idsRef.current.activeIds;
     const next: { id: string; cls: string }[] = [
-      ...idsRef.current.activeIds.map((id) => ({ id, cls: "nano-active" })),
+      ...tokenIds.map((id) => ({ id, cls: "nano-active" })),
       ...idsRef.current.incidentIds.map((id) => ({ id, cls: "nano-incident" })),
     ];
     for (const { id, cls } of next) {
@@ -158,7 +202,7 @@ export function RuntimeDiagram({
       }
     }
     const nextOverlays: string[] = [];
-    for (const id of idsRef.current.activeIds) {
+    for (const id of tokenIds) {
       try {
         nextOverlays.push(
           overlays.add(id, {
@@ -171,6 +215,51 @@ export function RuntimeDiagram({
       }
     }
     tokenOverlaysRef.current = nextOverlays;
+  };
+
+  const reportHops = () => {
+    if (!tracker) return;
+    const walk = walkRef.current;
+    tracker.hopsLeft = walk.queue.length + (walk.at ? 1 : 0);
+    tracker.notify();
+  };
+
+  /** Queue what `path` gained since last time and start walking it. */
+  const consumePath = () => {
+    // Until import finishes the registry is empty, so every id would look off-diagram.
+    if (!importedRef.current) return;
+    const walk = walkRef.current;
+    const done = progress();
+    const ids = pathRef.current.path ?? [];
+    if (pathRef.current.runId !== done.run || ids.length < done.consumed) {
+      window.clearTimeout(walk.timer);
+      Object.assign(walk, { queue: [], at: null, timer: 0 });
+      done.run = pathRef.current.runId;
+      done.consumed = 0;
+      applyMarkers();
+    }
+    const fresh = ids.slice(done.consumed);
+    done.consumed = ids.length;
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const registry = viewerRef.current?.get<{ get: (id: string) => unknown }>("elementRegistry");
+    // A called process's elements are in the log too, but not on this diagram.
+    const onDiagram = fresh.filter((id) => registry?.get(id));
+    if (onDiagram.length === 0 || reduced) {
+      reportHops();
+      return;
+    }
+    walk.queue.push(...onDiagram);
+    reportHops();
+    if (walk.timer) return;
+    const hop = () => {
+      walk.at = walk.queue.shift() ?? null;
+      walk.timer = walk.at ? window.setTimeout(hop, pathRef.current.hopMs) : 0;
+      applyMarkers();
+      reportHops();
+    };
+    hop();
   };
 
   useEffect(() => {
@@ -189,7 +278,9 @@ export function RuntimeDiagram({
         if (!current) return;
         fitWithPadding(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
+        if (tracker) tracker.ready = true;
         applyMarkers();
+        consumePath();
         if (containerRef.current)
           installDiagramIcons(containerRef.current, iconsRef.current);
       })
@@ -201,6 +292,7 @@ export function RuntimeDiagram({
       viewer.destroy();
       viewerRef.current = null;
       importedRef.current = false;
+      if (tracker) tracker.ready = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-import only on new XML
   }, [xml]);
@@ -232,6 +324,22 @@ export function RuntimeDiagram({
     applyMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
   }, [activeIds, incidentIds]);
+
+  useEffect(() => {
+    consumePath();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consumePath reads refs
+  }, [path, runId, hopMs]);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(walkRef.current.timer);
+      // Whatever was queued is dropped with the component; nothing is walking now.
+      Object.assign(walkRef.current, { queue: [], at: null, timer: 0 });
+      reportHops();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount only
+    [],
+  );
 
   // bpmn-js re-renders an element's visual whenever its markers change, which
   // drops any child we appended — so re-install on every mutation rather than

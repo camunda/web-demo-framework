@@ -1,19 +1,65 @@
-import type { RoundResult, SequenceFlowDto } from "@nanobpm/bojtos-kit";
+import type { RoundResult, SequenceFlowDto, Snapshot, WasmEvent } from "@nanobpm/bojtos-kit";
 import type { TraceEntry } from "./types";
 
 export type LabelFor = (elementId: string) => string;
 
 /**
- * `snapshot.takenSequenceFlows` only appends — every flow traversal (including
- * a loop retaking the same flow) is pushed once and never removed — so the
- * flows a single round took are exactly the tail past the previous snapshot's
- * length. No need to diff by identity (which would collapse repeats).
+ * The flows taken since `fromIndex` in the engine's event log, in the order
+ * they were taken. Not `snapshot.takenSequenceFlows`: that list is not in
+ * traversal order (it comes back sorted by source element), so slicing it by
+ * a previous length returned the wrong flows.
  */
-export function newSequenceFlows(
-  current: SequenceFlowDto[],
-  previousCount: number,
+export function sequenceFlowsSince(
+  events: WasmEvent[],
+  fromIndex: number,
 ): SequenceFlowDto[] {
-  return current.slice(previousCount);
+  return events
+    .slice(fromIndex)
+    .filter((e) => e.type === "SequenceFlowTaken")
+    .map((e) => ({ from: String(e.from), to: String(e.to) }));
+}
+
+/**
+ * Every element the engine activated, in order — the path the token took.
+ * Given `instanceKey`, only that instance's: a called process runs as its own
+ * instance, on a diagram that isn't this one.
+ */
+export function elementActivations(events: WasmEvent[], instanceKey?: string | null): string[] {
+  return events
+    .filter(
+      (e) =>
+        e.type === "ElementActivated" &&
+        (instanceKey == null || String(e.instance_key) === instanceKey),
+    )
+    .map((e) => String(e.element_id));
+}
+
+const HUMAN_WAITING_TEXT =
+  "⏸ waiting for a human — complete the task below to continue";
+
+const viaText = (flows: SequenceFlowDto[], labelFor: LabelFor) =>
+  flows.length
+    ? ` via ${flows.map((f) => `${labelFor(f.from)} → ${labelFor(f.to)}`).join(", ")}`
+    : "";
+
+/**
+ * The first Step of a run only creates the instance, so the reader sees where
+ * it stops before any job runs — including what it passed on the way (a
+ * business rule task, a gateway), which happens inside the create command.
+ */
+export function describeStart(
+  snap: Snapshot,
+  flows: SequenceFlowDto[],
+  labelFor: LabelFor,
+  runCompleted: boolean,
+): TraceEntry {
+  const head = `⏭ instance started${viaText(flows, labelFor)}`;
+  if (runCompleted)
+    return { kind: "done", text: `${head} — ✅ process instance completed` };
+  if (snap.userTasks.some((t) => t.state === "Created"))
+    return { kind: "human", text: `${head} — ${HUMAN_WAITING_TEXT}` };
+  const active = snap.activeElementIds.map(labelFor);
+  return { kind: "step", text: `${head} — now at ${active.length ? active.join(", ") : "—"}` };
 }
 
 /**
@@ -53,16 +99,11 @@ export function describeRound(
   // that stopped on a manually-held job) — check once up front so both
   // branches below can fold it in rather than hiding it behind a generic
   // "now at —"/error line.
-  const humanWaitingText =
-    "⏸ waiting for a human — complete the task below to continue";
+  const humanWaitingText = HUMAN_WAITING_TEXT;
   const userTaskOpened = snap.userTasks.some((t) => t.state === "Created");
   if (round.handled > 0) {
     const activeLabels = snap.activeElementIds.map(labelFor);
-    const flowText = flowsThisRound.length
-      ? ` via ${flowsThisRound
-          .map((f) => `${labelFor(f.from)} → ${labelFor(f.to)}`)
-          .join(", ")}`
-      : "";
+    const flowText = viaText(flowsThisRound, labelFor);
     // A round can both handle jobs *and* finish the instance in the same
     // pass — surface that explicitly as "done" rather than a plain "step"
     // entry, so a final round while stepping doesn't hide the completion.

@@ -53,7 +53,7 @@ mkdirSync(OUT, { recursive: true });
 
 const STATUSES = [
   "Booting engine…", "Engine error", "Ready", "Running…", "Stepping…",
-  "Incident", "Waiting for a human", "Completed", "Paused",
+  "Incident", "Fill out the form below", "Completed", "Paused",
 ];
 const IN_FLIGHT = new Set(["", "Booting engine…", "Running…", "Stepping…"]);
 
@@ -203,7 +203,9 @@ class Trace {
   lines = [];
   seen = new Set();
   async capture(page) {
-    const text = await page.locator(".timeline").first().innerText().catch(() => "");
+    // The panel renders newest row first; read rows oldest-first so the saved trace reads in run order.
+    const rows = await page.locator(".timeline").first().locator(":scope > *").allInnerTexts().catch(() => []);
+    const text = rows.reverse().join("\n");
     for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
       if (this.seen.has(line)) continue;
       this.seen.add(line);
@@ -385,7 +387,7 @@ async function answerHumanTask(page, ctx, open, result) {
     result.fail.push(`${label}: form still invalid after filling every required field`);
     return false;
   }
-  await clickAndWaitForProgress(page, ctx.trace, button, "Waiting for a human");
+  await clickAndWaitForProgress(page, ctx.trace, button, "Fill out the form below");
   return true;
 }
 
@@ -456,7 +458,7 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
       if (s === "Completed") { ended = s; break; }
       if (s === "timeout") { result.fail.push(`still running after ${SCENARIO_BUDGET_MS / 60_000} min`); ended = s; break; }
       if (s === "Incident" || s === "Engine error") { result.fail.push(`status: ${s}`); ended = s; break; }
-      if (s === "Waiting for a human") {
+      if (s === "Fill out the form below") {
         // A scenario that says "press" means the event should land while the
         // agent is parked on its own human task — answering it first would skip
         // the interrupt. After the agent has finished there is nothing to
@@ -526,7 +528,8 @@ async function scenariosOf(browser, base, example) {
   try {
     await page.goto(`${base}/examples/${example}`);
     await page.getByText("Ready", { exact: true }).first().waitFor({ timeout: 120_000 });
-    const labels = await page.locator(".scenario-toggle").getByRole("button").allInnerTexts();
+    // Custom is the reader's own input, not a preset to evaluate.
+    const labels = await page.locator(".scenario-toggle button:not(.scenario-custom)").allInnerTexts();
     const filter = process.env.LIVE_SCENARIO;
     const all = labels.length ? labels.map((l) => l.trim()) : ["(default input)"];
     return filter ? all.filter((l) => l.includes(filter)) : all;

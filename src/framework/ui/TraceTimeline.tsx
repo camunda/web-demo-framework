@@ -216,7 +216,7 @@ export function TraceTimeline({
   /** Whether the model has an AI Agent host — decides how this panel names itself. */
   hasAgent?: boolean;
 }) {
-  const rows = useMemo(() => buildRows(log), [log]);
+  const rows = useMemo(() => buildRows(log).reverse(), [log]);
   const [copied, setCopied] = useState(false);
   const [engineViewOpen, setEngineViewOpen] = usePersistentDisclosure(
     "engine-view",
@@ -224,11 +224,10 @@ export function TraceTimeline({
   );
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Keep the newest step in view as the run grows, same as the flat log
-  // this replaces.
+  // Newest is on top, so keep the top in view as the run grows.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) el.scrollTop = 0;
   }, [rows]);
 
   const copyJson = () => {
@@ -261,8 +260,8 @@ export function TraceTimeline({
       title={hasAgent ? "Agent activity" : "Activity"}
       description={
         hasAgent
-          ? "Agent turns, model replies, and tool calls — read top to bottom as a story."
-          : "Every step the engine took — read top to bottom as a story."
+          ? "Agent turns, model replies, and tool calls — newest at the top."
+          : "Every step the engine took — newest at the top."
       }
     >
       <div className="timeline-toolbar">

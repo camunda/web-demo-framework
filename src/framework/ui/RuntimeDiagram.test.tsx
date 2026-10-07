@@ -1,6 +1,9 @@
-import { render, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { fitWithPadding, RuntimeDiagram, type CanvasLike } from "./RuntimeDiagram";
+import { WalkTracker } from "./walkTracker";
+
+afterEach(cleanup);
 
 /**
  * The "locked" part of this component is structural — a plain bpmn-js `Viewer`
@@ -33,6 +36,13 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>`;
 
 describe("RuntimeDiagram", () => {
+  const WALK_XML = XML.replace(
+    '<bpmn:task id="Task_1" name="Do the thing" />',
+    '<bpmn:businessRuleTask id="Rule_1" /><bpmn:task id="Task_1" name="Do the thing" />',
+  ).replace(
+    '<bpmndi:BPMNShape id="Task_1_di"',
+    '<bpmndi:BPMNShape id="Rule_1_di" bpmnElement="Rule_1"><dc:Bounds x="400" y="78" width="100" height="80" /></bpmndi:BPMNShape><bpmndi:BPMNShape id="Task_1_di"',
+  );
   // The sizing lives on `runtime-diagram`; without it bpmn-js has no definite
   // height to fit against and the canvas collapses to the SVG's intrinsic 150px.
   it("always carries its own sizing class, with or without a caller class", () => {
@@ -130,6 +140,217 @@ describe("RuntimeDiagram", () => {
     window.removeEventListener("unhandledrejection", onError as EventListener);
     window.removeEventListener("error", onError as EventListener);
     expect(errors).toEqual([]);
+  });
+
+  /**
+   * Reviewer: on expense-decision's "Clear reject", even Step never showed the
+   * token on the business rule task — the engine passes it, and the gateway, in
+   * the same command, so no snapshot ever has it active. The walk replays what
+   * the engine activated, one element at a time, before settling.
+   */
+  it("walks the token through elements the engine passed instantly", async () => {
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={WALK_XML} activeIds={[]} incidentIds={[]} path={[]} hopMs={30} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Rule_1"]')).toBeInTheDocument(),
+    );
+
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+        (el) => el.getAttribute("data-element-id")!,
+      );
+      if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+    });
+    observer.observe(container, { subtree: true, attributes: true, attributeFilter: ["class"] });
+
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        // `Child_1` stands for a called process's element: in the log, not on this diagram.
+        path={["StartEvent_1", "Rule_1", "Child_1", "Task_1"]}
+        hopMs={30}
+      />,
+    );
+
+    await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+    observer.disconnect();
+  });
+
+  // An autostarting embed can run before bpmn-js has finished importing; the
+  // walk has to wait for the registry rather than treat every id as off-diagram.
+  it("walks activations that arrived before the import finished", async () => {
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={WALK_XML} activeIds={[]} incidentIds={[]} path={[]} hopMs={30} />,
+    );
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1", "Task_1"]}
+        hopMs={30}
+      />,
+    );
+    expect(container.querySelector('[data-element-id="Rule_1"]')).toBeNull();
+
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+        (el) => el.getAttribute("data-element-id")!,
+      );
+      if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+    });
+    observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+
+    await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+    observer.disconnect();
+  });
+
+  // Run twice without Reset: React can batch away the empty path between runs,
+  // so the second run's path arrives as long as the first's. Only `runId` says
+  // it is a new run.
+  it("walks a new run from the start even when its path is no shorter", async () => {
+    const PATH = ["StartEvent_1", "Rule_1", "Task_1"];
+    const props = { xml: WALK_XML, activeIds: ["Task_1"], incidentIds: [], hopMs: 30 };
+    const { container, rerender } = render(<RuntimeDiagram {...props} path={[]} runId={1} />);
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Rule_1"]')).toBeInTheDocument(),
+    );
+    rerender(<RuntimeDiagram {...props} path={[...PATH]} runId={1} />);
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active"),
+    );
+    await new Promise((r) => setTimeout(r, 150));
+
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+        (el) => el.getAttribute("data-element-id")!,
+      );
+      if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+    });
+    observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+
+    rerender(<RuntimeDiagram {...props} path={[...PATH]} runId={2} />);
+    await waitFor(() => expect(seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+    observer.disconnect();
+  });
+
+  describe("with the runner's tracker", () => {
+    const watchWalk = (container: HTMLElement) => {
+      const seen: string[] = [];
+      const observer = new MutationObserver(() => {
+        const at = Array.from(container.querySelectorAll(".nano-active[data-element-id]")).map(
+          (el) => el.getAttribute("data-element-id")!,
+        );
+        if (at.length === 1 && seen.at(-1) !== at[0]) seen.push(at[0]);
+      });
+      observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+      return { seen, stop: () => observer.disconnect() };
+    };
+
+    // The diagram chunk is lazy: autostart can run before it first mounts. That
+    // first mount must walk what it missed, not file it as history.
+    it("walks what arrived before a lazy first mount", async () => {
+      const tracker = new WalkTracker();
+      tracker.panelOpen = true;
+      const { container } = render(<div />);
+      const walk = watchWalk(container);
+      render(
+        <RuntimeDiagram
+          xml={WALK_XML}
+          activeIds={["Task_1"]}
+          incidentIds={[]}
+          path={["StartEvent_1", "Rule_1", "Task_1"]}
+          runId={1}
+          tracker={tracker}
+          hopMs={30}
+        />,
+        { container },
+      );
+      await waitFor(() => expect(walk.seen).toEqual(["StartEvent_1", "Rule_1", "Task_1"]));
+      walk.stop();
+    });
+
+    // While the panel was closed the runner kept the tracker level with the path.
+    it("does not replay what happened while its panel was closed", async () => {
+      const tracker = new WalkTracker();
+      Object.assign(tracker, { panelOpen: true, run: 1, consumed: 3 });
+      const { container } = render(<div />);
+      const walk = watchWalk(container);
+      render(
+        <RuntimeDiagram
+          xml={WALK_XML}
+          activeIds={["Task_1"]}
+          incidentIds={[]}
+          path={["StartEvent_1", "Rule_1", "Task_1"]}
+          runId={1}
+          tracker={tracker}
+          hopMs={30}
+        />,
+        { container },
+      );
+      await waitFor(() =>
+        expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active"),
+      );
+      await new Promise((r) => setTimeout(r, 150));
+      walk.stop();
+      expect(walk.seen).toEqual(["Task_1"]);
+    });
+
+    // What the runner waits on is the walk itself, import delay included.
+    it("lets the runner wait for the walk to finish, not for an estimate", async () => {
+      const tracker = new WalkTracker();
+      tracker.panelOpen = true;
+      const started = performance.now();
+      const finished = tracker.waitFor(1, 3, 10_000).then(() => performance.now());
+      const { container } = render(
+        <RuntimeDiagram
+          xml={WALK_XML}
+          activeIds={["Task_1"]}
+          incidentIds={[]}
+          path={["StartEvent_1", "Rule_1", "Task_1"]}
+          runId={1}
+          tracker={tracker}
+          hopMs={60}
+        />,
+      );
+      const at = await finished;
+      // Three hops of 60ms, after however long the import took.
+      expect(at - started).toBeGreaterThanOrEqual(170);
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active");
+    });
+  });
+
+  // A remount (a collapsed panel reopened) gets the whole run's path at once:
+  // that is history, not something to replay.
+  it("does not replay the path it was mounted with", async () => {
+    const { container } = render(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1", "Task_1"]}
+        hopMs={30}
+      />,
+    );
+    const marked = new Set<string>();
+    const observer = new MutationObserver(() => {
+      for (const el of Array.from(container.querySelectorAll(".nano-active[data-element-id]")))
+        marked.add(el.getAttribute("data-element-id")!);
+    });
+    observer.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-active"),
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    observer.disconnect();
+    expect([...marked]).toEqual(["Task_1"]);
   });
 
   it("is built on a viewer with no pan or zoom modules", async () => {

@@ -8,6 +8,7 @@ import { seedExportCompliance } from "../../examples/seed-export-compliance";
 import { creditLineIncrease } from "../../examples/credit-line-increase";
 import { expenseDecision } from "../../examples/expense-decision";
 import { bankSupport } from "../../examples/bank-support";
+import learnSignalBroadcast from "../../examples/learn-signal-broadcast";
 
 // Stands in for driver.js, whose every layout pass is scheduled on
 // `requestAnimationFrame` — so what it draws can't be asserted here anyway.
@@ -113,16 +114,151 @@ describe("ExampleRunner — a run with no human in it", () => {
 
     fireEvent.click(step);
 
-    // A fresh instance, advanced by exactly one dispatch round — so the trace
-    // has been replaced by that round rather than still holding the last run.
+    // A fresh instance, stopped before its first job — so the trace has been
+    // replaced by that start rather than still holding the last run.
+    await waitFor(
+      () => expect(app.trace().join("\n")).toMatch(/instance started/i),
+      { timeout: 20_000 },
+    );
+    expect(app.trace().join("\n")).not.toMatch(/round handled/i);
+    expect(app.status()).not.toBe("Completed");
+    expect(app.trace().at(-1)).not.toContain("process instance completed");
+
+    // The next Step dispatches the first round.
+    await app.settle();
+    fireEvent.click(screen.getByRole("button", { name: "⏭ Step" }));
     await waitFor(
       () => expect(app.trace().join("\n")).toMatch(/round handled/i),
       { timeout: 20_000 },
     );
-    expect(app.status()).not.toBe("Completed");
-    expect(app.trace().at(-1)).not.toContain("process instance completed");
 
     await app.settle();
+  }, 40_000);
+});
+
+describe("ExampleRunner — pacing to the diagram's token walk", () => {
+  // A line's arrival time: the panel shows newest first, so new rows are prepended.
+  const watchTrace = () => {
+    const seen: { text: string; at: number }[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const r of records)
+        for (const node of Array.from(r.addedNodes))
+          if (node instanceof HTMLElement && node.parentElement?.classList.contains("timeline"))
+            seen.push({ text: node.textContent ?? "", at: performance.now() });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return { seen, stop: () => observer.disconnect() };
+  };
+
+  // A broadcast activates both service tasks: two hops of the walk, longer
+  // than a beat, so the next round must wait for the walk rather than a beat.
+  it("waits for the walk after a signal broadcast before the next round", async () => {
+    const app = await renderExample(learnSignalBroadcast);
+    const watch = watchTrace();
+    await app.run();
+    watch.stop();
+
+    const i = watch.seen.findIndex((s) => s.text.includes("broadcasting signal"));
+    expect(i).toBeGreaterThan(-1);
+    const next = watch.seen[i + 1];
+    expect(next).toBeDefined();
+    expect(next.at - watch.seen[i].at).toBeGreaterThanOrEqual(850);
+  }, 40_000);
+
+  // A run that stops on a human task breaks out of the loop early; it must
+  // still hand the controls back only once the token has finished walking.
+  it("hands back the controls with the token already at rest", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+    expect(app.status()).toBe("Fill out the form below");
+
+    const marked = () =>
+      Array.from(document.querySelectorAll(".diagram .nano-active[data-element-id]"))
+        .map((el) => el.getAttribute("data-element-id"))
+        .join(",");
+    const atRelease = marked();
+    expect(atRelease).not.toBe("");
+    await new Promise((r) => setTimeout(r, 700));
+    expect(marked()).toBe(atRelease);
+  }, 40_000);
+
+  // The form opens while the walk to it is still playing. A valid form must not
+  // offer Complete then: the click would be silently ignored.
+  it("disables Complete task while the run is still busy, even with a valid form", async () => {
+    const app = await renderExample(invoicePayment);
+    const runButton = await screen.findByRole("button", { name: "▶ Run" });
+    await waitFor(() => expect(runButton).toBeEnabled(), { timeout: 20_000 });
+    fireEvent.click(runButton);
+
+    const complete = await screen.findByRole("button", { name: "Complete task" }, { timeout: 20_000 });
+    await waitFor(() => fireEvent.click(screen.getByText("Approve release")));
+    expect(app.status()).toBe("Running…");
+    expect(complete).toBeDisabled();
+
+    await app.settle();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Complete task" })).toBeEnabled());
+  }, 40_000);
+
+  // Submitting the last task finishes the instance; the walk to its end event
+  // still has to play out before the controls come back.
+  it("keeps the controls locked while a finishing submission walks to the end", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+    await app.completeUserTask(() => {
+      fireEvent.click(screen.getByText("Approve release"));
+    });
+    expect(app.status()).toBe("Fill out the form below");
+
+    // The final sign-off: submitting it completes the instance.
+    const complete = () => screen.getByRole("button", { name: "Complete task" });
+    await waitFor(() => {
+      fireEvent.click(screen.getByText("Confirm - case closed"));
+      expect(complete()).toBeEnabled();
+    }, { timeout: 20_000 });
+    fireEvent.click(complete());
+
+    // Busy while walking: no Run, and no second submit that would be ignored.
+    await waitFor(() => expect(app.status()).toBe("Running…"));
+    expect(screen.getByRole("button", { name: "▶ Run" })).toBeDisabled();
+    await waitFor(() => expect(app.status()).toBe("Completed"), { timeout: 20_000 });
+    expect(app.trace().at(-1)).toContain("process instance completed");
+  }, 60_000);
+
+  // Submitting a task moves the token too; the next round used to start at once.
+  it("waits for the walk after a human task is submitted", async () => {
+    const app = await renderExample(invoicePayment);
+    await app.run();
+    const watch = watchTrace();
+    await app.completeUserTask(() => {
+      fireEvent.click(screen.getByText("Approve release"));
+    });
+    watch.stop();
+
+    const i = watch.seen.findIndex((s) => s.text.startsWith("👤"));
+    expect(i).toBeGreaterThan(-1);
+    const next = watch.seen[i + 1];
+    expect(next).toBeDefined();
+    expect(next.at - watch.seen[i].at).toBeGreaterThanOrEqual(600);
+  }, 40_000);
+
+  // Step must not hand the controls back while the diagram is still walking.
+  it("keeps Step locked until the start's walk has finished", async () => {
+    await renderExample({
+      ...expenseDecision,
+      seed: expenseDecision.scenarios!.find((s) => s.label.startsWith("Clear reject"))!.variables,
+    });
+    const step = () => screen.getByRole("button", { name: "⏭ Step" });
+    await waitFor(() => expect(step()).toBeEnabled(), { timeout: 20_000 });
+
+    fireEvent.click(step());
+    await waitFor(() => expect(screen.getByText(/instance started/)).toBeInTheDocument(), {
+      timeout: 20_000,
+    });
+    const startedAt = performance.now();
+    expect(step()).toBeDisabled();
+    await waitFor(() => expect(step()).toBeEnabled(), { timeout: 20_000 });
+    // Start, policy task, gateway, notify: four hops of 450ms.
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(1500);
   }, 40_000);
 });
 
@@ -133,7 +269,7 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
 
     // The agent called its release tool and the process is parked on the
     // reviewer, mid-loop.
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.trace().join("\n")).toContain("RequestPaymentRelease");
 
     await app.completeUserTask(() => {
@@ -146,7 +282,7 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     const trace = app.trace().join("\n");
     expect(trace).toContain("Release payment");
     expect(trace).toContain("scripted agent: done");
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Final compliance sign-off")).toBe(true);
 
     // Driving straight on left the next task's form holding the finished
@@ -166,7 +302,7 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     const app = await renderExample(invoicePayment);
     await app.run();
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(screen.getByRole("button", { name: /Run/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Step/ })).toBeDisabled();
     // Reset is the way out of a parked run, so it must stay live.
@@ -210,7 +346,7 @@ describe("ExampleRunner — a process only a message can start", () => {
     const trace = app.trace().join("\n");
     expect(trace).toContain('publishing "alert-raised"');
     expect(trace).toContain("CASE-1");
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Triage the alert")).toBe(true);
   }, 30_000);
 
@@ -220,7 +356,7 @@ describe("ExampleRunner — a process only a message can start", () => {
 
     // The interrupt arrives while the process waits on a person — there is no
     // held job to hang the choice off, which is the case this has to cover.
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     // And the drive loop must not have fired it on its own on the way here;
     // that would interrupt every run.
     expect(app.trace().join("\n")).not.toContain("alert-withdrawn");
@@ -317,7 +453,7 @@ describe("ExampleRunner — a timer racing an event the reader was offered", () 
     // The timeout reports back into the agent's loop, which then escalates to a
     // human — the outcome the "bureau never answers" scenario promises.
     expect(trace).toContain("No credit bureau reply within the SLA window");
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Escalate to underwriting ops")).toBe(true);
     // And the reply button is gone — the race is resolved the other way now.
     expect(screen.queryByRole("button", { name: "📨 The credit bureau replies" })).toBeNull();
@@ -338,7 +474,7 @@ describe("ExampleRunner — when the agent really does give up early", () => {
     // The process took the gateway's default path to the human task with
     // `RecordComplianceDecision` — the example's one `requiredTools` entry —
     // never having run, which is exactly what the warning is for.
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(screen.getByText(ALERT)).toBeInTheDocument();
   }, 30_000);
 
@@ -492,33 +628,30 @@ describe("ExampleRunner — the example input toggle", () => {
 
   /**
    * Reader feedback: "it was not completely clear to me that the EXAMPLE
-   * SHIPMENT was the actual input for the process instance". The row said
-   * nothing at rest — the hint slot only filled in once the input was locked —
-   * so a domain label like "Example shipment" read as a display filter rather
-   * than the payload the instance is created with.
-   *
-   * The heading keeps the example's own domain noun, so this hint is the only
-   * thing making that connection. Losing it silently puts the confusion back.
+   * SHIPMENT was the actual input for the process instance". A later round
+   * asked for the instruction sentence that answered it to go. What makes the
+   * connection now is grouping: the input and ▶ Run share one region.
    */
-  it("says what the input is for before a run has started", async () => {
+  it("puts the input and Run in one start region, with no instruction sentence", async () => {
     await renderExample(seedExportCompliance);
-    expect(screen.getByText("Example shipment")).toBeInTheDocument();
+    const region = screen.getByRole("region", { name: "Start a process instance" });
+    expect(region).toContainElement(screen.getByRole("group", { name: "Example shipment" }));
+    expect(region).toContainElement(screen.getByRole("button", { name: "▶ Run" }));
     expect(
-      screen.getByText(/pick the input this process instance starts with/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/pick the input this process instance starts with/i),
+    ).not.toBeInTheDocument();
   }, 40_000);
 
   /**
    * order-process has no `scenarios` and no `scenariosLabel`, so it exercises
-   * both fallbacks: the default heading, and the hint with its "pick one" half
-   * dropped — there are no pills to pick from.
+   * both fallbacks: the default heading, and no Custom option — a lone one
+   * would be a picker with nothing to pick from.
    */
-  it("drops the pick-one wording when there is nothing to pick", async () => {
+  it("offers no Custom option when there is nothing to pick", async () => {
     await renderExample(orderProcess);
-    expect(screen.getByText("Example input")).toBeInTheDocument();
-    expect(
-      screen.getByText("The input this process instance starts with"),
-    ).toBeInTheDocument();
+    const region = screen.getByRole("region", { name: "Start a process instance" });
+    expect(region).toHaveTextContent("Example input");
+    expect(screen.queryByText("✎ Custom")).not.toBeInTheDocument();
   }, 40_000);
 
   /**
@@ -531,9 +664,54 @@ describe("ExampleRunner — the example input toggle", () => {
     expect(
       screen.queryByRole("group", { name: /example input/i }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByText("The input this process instance starts with"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("✎ Custom")).not.toBeInTheDocument();
+  }, 40_000);
+
+  /**
+   * Custom is a choice, not "whatever matches no preset": picking it selects
+   * it even while its input is still identical to the preset it started from.
+   */
+  it("selects Custom even when its input still matches a preset", async () => {
+    await renderExample(bankSupport);
+    const custom = () => screen.getByRole("button", { name: "Custom — edit input" });
+    const loan = () => screen.getByRole("button", { name: /^Loan question/ });
+    expect(loan()).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(custom());
+
+    expect(custom()).toHaveAttribute("aria-pressed", "true");
+    expect(loan()).toHaveAttribute("aria-pressed", "false");
+
+    // Selection is announced separately from whether the editor is open.
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(custom()).toHaveAttribute("aria-expanded", "false");
+    expect(custom()).toHaveAttribute("aria-pressed", "true");
+  }, 40_000);
+
+  it("closes the editor on a preset, and Custom brings the reader's text back", async () => {
+    window.localStorage.clear();
+    await renderExample(bankSupport);
+    const custom = () => screen.getByRole("button", { name: "Custom — edit input" });
+    const field = () =>
+      screen.getByRole("textbox", { name: /customer request/i, hidden: true }) as HTMLTextAreaElement;
+
+    fireEvent.click(custom());
+    expect(custom()).toHaveAttribute("aria-expanded", "true");
+    // form-js debounces a textarea and flushes on blur.
+    await waitFor(() => {
+      fireEvent.input(field(), { target: { value: "my own words" } });
+      fireEvent.blur(field());
+      expect(screen.getByText("my own words")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Card question/ }));
+    expect(custom()).toHaveAttribute("aria-expanded", "false");
+    expect(custom()).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(field().value).not.toBe("my own words"));
+
+    fireEvent.click(custom());
+    expect(custom()).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(field().value).toBe("my own words"));
   }, 40_000);
 
   /**
@@ -570,9 +748,11 @@ describe("ExampleRunner — changing the example input mid-run", () => {
     // Re-queried every time: the pills re-render as the run's state changes,
     // and a node captured once goes stale.
     const flagged = () => screen.getByRole("button", { name: /likely flagged/i });
+    const custom = () => screen.getByRole("button", { name: "Custom — edit input" });
     const lock = () => screen.queryByText(/locked while this run/i);
 
     expect(flagged()).toBeEnabled();
+    expect(custom()).toBeEnabled();
     expect(lock()).not.toBeInTheDocument();
 
     // This example has a start form, so Run stays disabled until the form has
@@ -583,10 +763,12 @@ describe("ExampleRunner — changing the example input mid-run", () => {
 
     await waitFor(() => expect(lock()).toBeInTheDocument());
     expect(flagged()).toBeDisabled();
+    expect(custom()).toBeDisabled();
 
     await app.settle();
 
     expect(flagged()).toBeEnabled();
+    expect(custom()).toBeEnabled();
     expect(lock()).not.toBeInTheDocument();
   }, 40_000);
 
@@ -638,7 +820,7 @@ describe("ExampleRunner — changing the example input mid-run", () => {
     fireEvent.click(screen.getByRole("button", { name: /likely flagged/i }));
     await app.run();
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(cleared()).toBeDisabled();
     expect(screen.getByText(/still open — press ↺ Reset/i)).toBeInTheDocument();
 

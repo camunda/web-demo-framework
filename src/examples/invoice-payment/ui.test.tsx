@@ -30,7 +30,7 @@ describe("invoice-payment in the runner", () => {
 
     await app.run();
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     // The mechanism: the proposal reached the form without ever being a root variable.
     expect(app.variables()).not.toHaveProperty("agentProposedAmountUSD");
     expect(app.variables()).not.toHaveProperty("approvedAmountUSD");

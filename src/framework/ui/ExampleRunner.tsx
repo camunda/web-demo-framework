@@ -29,7 +29,7 @@ import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { userTaskVariables } from "../userTaskVariables";
 import { useEmbedReadyReporter } from "../embedHeight";
-import { describeRound, newSequenceFlows } from "../stepSummary";
+import { describeRound, describeStart, elementActivations, sequenceFlowsSince } from "../stepSummary";
 import { useBrain } from "../useBrain";
 import type { BrainKind, VisionFn } from "../brains/types";
 import { makeScriptedVisionBrain } from "../brains/vision";
@@ -42,6 +42,8 @@ import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
+import { VariableList } from "./VariableList";
+import { WalkPanelPresence, WalkTracker } from "./walkTracker";
 import type { ExampleDef, TraceEntry } from "../types";
 import { createTemplateMap, type TemplateMap } from "../templates";
 import { TOUR_ANCHOR, useTour } from "../tour";
@@ -49,6 +51,10 @@ import { useAutostart } from "../useAutostart";
 
 /** Milliseconds the token pauses between dispatch rounds, so a run is watchable. */
 const BEAT = 650;
+/** How long the diagram's token rests on each element it walks through. */
+const HOP = 450;
+/** Extra time a walk may take before the run stops waiting: a lazy diagram still loading, say. */
+const WALK_GRACE = 3000;
 const AGENT_TAB = "__agent__";
 const MODEL_TAB = "__model__";
 /** Tab-id prefix for a prompt/template editor tab, namespaced away from element ids. */
@@ -383,6 +389,16 @@ export function ExampleRunner({
     );
     return i === -1 ? null : i;
   }, [example.scenarios, startValues]);
+  // Chosen, not derived: Custom stays selected even when its payload happens
+  // to equal a preset. Any edit in the start form also switches to it.
+  const [customInput, setCustomInput] = useState(false);
+  // What Custom held when the reader last left it for a preset; Custom restores it.
+  const [customDraft, setCustomDraft] = useState<Record<string, unknown> | null>(null);
+  // One per run: tells the diagram's walk to start over (see RuntimeDiagram `runId`).
+  const [runId, setRunId] = useState(0);
+  const runIdRef = useRef(0);
+  const [tracker] = useState(() => new WalkTracker());
+  const shownScenario = customInput ? null : selectedScenario;
   // Length, not truthiness: `scenarios: []` is a truthy empty array, which
   // rendered an empty labelled group and told the reader to pick from it.
   const hasScenarios = !!example.scenarios?.length;
@@ -639,6 +655,24 @@ export function ExampleRunner({
       null)
     : null;
 
+  /** Elements the run's own instance has activated so far — what the diagram walks. */
+  const rootActivations = () =>
+    elementActivations(run.events(), rootInstanceKeyRef.current).length;
+
+  /**
+   * Wait at least `minMs`, and until the diagram has walked everything the run's
+   * instance has activated so far — capped, in case it never gets there.
+   */
+  const settle = (minMs: number) => {
+    const id = runIdRef.current;
+    const target = rootActivations();
+    const cap = minMs + tracker.pending(id, target) * HOP + WALK_GRACE;
+    return Promise.all([
+      new Promise((r) => setTimeout(r, minMs)),
+      tracker.waitFor(id, target, cap),
+    ]);
+  };
+
   /**
    * Drive `stepWorkers` to quiescence, completion, a human task, or a
    * manually-held job — shared by `start` and by `resolveManualControl`
@@ -732,7 +766,7 @@ export function ExampleRunner({
               snap = correlated;
               const correlatedVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (correlatedVars) setDisplayVars({ ...correlatedVars });
-              await new Promise((r) => setTimeout(r, BEAT));
+              await settle(BEAT);
               continue;
             }
             // `correlateMessage` returns null when the engine call threw, so
@@ -767,7 +801,7 @@ export function ExampleRunner({
               });
               const signalVars = displayableVars(snap, rootInstanceKeyRef.current);
               if (signalVars) setDisplayVars({ ...signalVars });
-              await new Promise((r) => setTimeout(r, BEAT));
+              await settle(BEAT);
               continue;
             }
             // `broadcastSignal` returns null when the engine call threw — say so
@@ -828,15 +862,19 @@ export function ExampleRunner({
                   kind: "step",
                   text: "🕐 the clock advanced — timer fired",
                 });
-                await new Promise((r) => setTimeout(r, BEAT));
+                await settle(BEAT);
                 continue;
               }
             }
           }
           break;
         }
-        await new Promise((r) => setTimeout(r, BEAT));
+        await settle(BEAT);
       }
+
+      // Every exit above — a human task, a parked race, an incident — still
+      // has to let the diagram finish showing how it got there.
+      await settle(0);
 
       // Every `continue` above re-tests the generation in the `while` head,
       // but falling out of the loop lands here directly — without this a run
@@ -886,7 +924,7 @@ export function ExampleRunner({
           trace({ kind: "vars", text: successText, elementId: job.elementId });
           const vars = displayableVars(snap, rootInstanceKeyRef.current);
           if (vars) setDisplayVars({ ...vars });
-          await new Promise((r) => setTimeout(r, BEAT));
+          await settle(BEAT);
           await driveLoop(workersRef.current, agentsRef.current, snap, seq);
         } else {
           trace({
@@ -1036,6 +1074,8 @@ export function ExampleRunner({
     // the resolved value against an unresolved subscription and nothing would
     // start.
     const ids = await run.redeploy(draft.resolvedBpmn);
+    runIdRef.current += 1;
+    setRunId(runIdRef.current);
     const pid = ids?.[0] ?? model.processId;
     trace({
       kind: "start",
@@ -1122,6 +1162,20 @@ export function ExampleRunner({
     !!run.snapshot &&
     run.snapshot.instances.length > 0 &&
     !rootCompleted(run.snapshot, rootInstanceKeyRef.current);
+  // Re-read on every snapshot: each engine command publishes one, after its events.
+  const activationPath = useMemo(
+    () => (run.snapshot ? elementActivations(run.events(), rootInstanceKeyRef.current) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
+    [run.snapshot],
+  );
+  // A closed panel shows nothing, so what happens meanwhile is history once it
+  // reopens — unlike what arrives while an open panel's diagram is still loading.
+  useEffect(() => {
+    if (tracker.panelOpen) return;
+    tracker.run = runId;
+    tracker.consumed = activationPath.length;
+    tracker.notify();
+  }, [tracker, runId, activationPath]);
   /** The start form (if any) is not yet known to be complete. */
   const needsStartForm = !canResume && !!startSchema && startFormValid !== true;
   /**
@@ -1192,7 +1246,7 @@ export function ExampleRunner({
         workers = prepared.workers;
         agents = prepared.agents;
         snap = prepared.snap;
-        await new Promise((r) => setTimeout(r, BEAT));
+        await settle(BEAT);
       }
 
       await driveLoop(workers, agents, snap, seq);
@@ -1262,25 +1316,38 @@ export function ExampleRunner({
     // newer run's state in the `finally` below.
     const seq = ++runSeqRef.current;
     try {
-      let workers = workersRef.current;
-      let agents = agentsRef.current;
-      let snap = run.snapshot;
+      const workers = workersRef.current;
+      const agents = agentsRef.current;
+      const snap = run.snapshot;
+      const eventsBefore = run.events().length;
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
         setCompileError(null);
         const prepared = await beginRun(seq);
         if (!prepared) return;
-        workers = prepared.workers;
-        agents = prepared.agents;
-        snap = prepared.snap;
+        // A fresh Step stops once the instance exists, before any job runs, so
+        // the reader sees where it parked and what it passed on the way.
+        const created = prepared.snap;
+        if (created && created.instances.length > 0) {
+          const vars = displayableVars(created, rootInstanceKeyRef.current);
+          if (vars) setDisplayVars({ ...vars });
+          trace(
+            describeStart(
+              created,
+              sequenceFlowsSince(run.events(), 0),
+              elementLabels,
+              rootCompleted(created, rootInstanceKeyRef.current),
+            ),
+          );
+          // Stay locked until the diagram has walked the path.
+          await settle(0);
+        }
+        return;
       }
 
       if (!snap || rootCompleted(snap, rootInstanceKeyRef.current)) return;
 
-      // `takenSequenceFlows` only appends — the flows this one round takes
-      // are exactly what lands past this length (see `newSequenceFlows`).
-      const prevFlowCount = snap.takenSequenceFlows.length;
       const round = await run.stepWorkers(workers, { agents });
       if (!round) {
         trace({
@@ -1291,10 +1358,7 @@ export function ExampleRunner({
       }
       const vars = displayableVars(round.snapshot, rootInstanceKeyRef.current);
       if (vars) setDisplayVars({ ...vars });
-      const flows = newSequenceFlows(
-        round.snapshot.takenSequenceFlows,
-        prevFlowCount,
-      );
+      const flows = sequenceFlowsSince(run.events(), eventsBefore);
       trace(
         describeRound(
           round,
@@ -1304,6 +1368,7 @@ export function ExampleRunner({
           rootCompleted(round.snapshot, rootInstanceKeyRef.current),
         ),
       );
+      await settle(0);
     } finally {
       if (runSeqRef.current === seq) {
         runningRef.current = false;
@@ -1411,7 +1476,7 @@ export function ExampleRunner({
         });
         const vars = displayableVars(snap, rootInstanceKeyRef.current);
         if (vars) setDisplayVars({ ...vars });
-        await new Promise((r) => setTimeout(r, BEAT));
+        await settle(BEAT);
         await driveLoop(workersRef.current, agentsRef.current, snap, seq);
       } finally {
         if (runSeqRef.current === seq) {
@@ -1439,7 +1504,7 @@ export function ExampleRunner({
       trace({ kind: "step", text: "🕐 the clock advanced — timer fired" });
       const vars = displayableVars(snap, rootInstanceKeyRef.current);
       if (vars) setDisplayVars({ ...vars });
-      await new Promise((r) => setTimeout(r, BEAT));
+      await settle(BEAT);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
       if (runSeqRef.current === seq) {
@@ -1466,10 +1531,6 @@ export function ExampleRunner({
     // otherwise completing the last task would blank the card.
     const vars = displayableVars(snap, rootInstanceKeyRef.current);
     setDisplayVars((prev) => ({ ...prev, ...reviewValues, ...(vars ?? {}) }));
-    if (rootCompleted(snap, rootInstanceKeyRef.current)) {
-      trace({ kind: "done", text: "✅ process instance completed" });
-      return;
-    }
     if (!snap) return;
 
     // Completing the task only moves the token; whatever it unblocks — a job,
@@ -1482,6 +1543,14 @@ export function ExampleRunner({
     runningRef.current = true;
     setRunning(true);
     try {
+      if (rootCompleted(snap, rootInstanceKeyRef.current)) {
+        // Finishing still walks the token to the end before the controls return.
+        await settle(0);
+        if (runSeqRef.current === seq)
+          trace({ kind: "done", text: "✅ process instance completed" });
+        return;
+      }
+      await settle(BEAT);
       await driveLoop(workersRef.current, agentsRef.current, snap, seq);
     } finally {
       if (runSeqRef.current === seq) {
@@ -1501,7 +1570,7 @@ export function ExampleRunner({
     if ((run.snapshot?.incidentElementIds.length ?? 0) > 0)
       return <Badge variant="danger">Incident</Badge>;
     if (openUserTask)
-      return <Badge variant="warning">Waiting for a human</Badge>;
+      return <Badge variant="warning">Fill out the form below</Badge>;
     if (rootCompleted(run.snapshot, rootInstanceKeyRef.current))
       return <Badge variant="success">Completed</Badge>;
     // An incomplete run that has quiesced short of completion — via Step, or
@@ -1539,149 +1608,6 @@ export function ExampleRunner({
         </section>
       )}
 
-      {example.imageInput && (
-        <ImageInputPanel
-          imageInput={example.imageInput}
-          value={imageSelection}
-          onSelect={setImageSelection}
-          disabled={inputLocked}
-        />
-      )}
-
-      <div className="scenario">
-        <span className="scenario-label" id="scenario-label">
-          {/* `||`, not `??`: an empty label would render an empty heading, and
-              the pills group is `aria-labelledby` this element — so it would
-              lose its accessible name too. */}
-          {example.scenariosLabel || "Example input"}
-        </span>
-        {hasScenarios && (
-          <div
-            className="scenario-toggle"
-            role="group"
-            aria-labelledby="scenario-label"
-          >
-            {(example.scenarios ?? []).map((s, i) => (
-              <Button
-                key={s.label}
-                size="sm"
-                variant={i === selectedScenario ? "default" : "secondary"}
-                aria-pressed={i === selectedScenario}
-                disabled={inputLocked}
-                onClick={() =>
-                  setStartValues((prev) => ({ ...prev, ...s.variables }))
-                }
-              >
-                {s.label}
-              </Button>
-            ))}
-          </div>
-        )}
-        <button
-          type="button"
-          className="scenario-input-button"
-          onClick={() => setStartEditorOpen(!startEditorOpen)}
-          aria-expanded={startEditorOpen}
-          aria-controls="start-input-editor"
-          title={
-            startSchema
-              ? "Edit the starting payload"
-              : "Show the starting payload"
-          }
-        >
-          {/* Without a start form the panel below is a read-only <pre>, so
-              offering to edit it promises something this example can't do. */}
-          {startSchema && (
-            <>
-              <span className="scenario-edit-icon" aria-hidden>
-                ✎
-              </span>{" "}
-            </>
-          )}
-          {startSchema ? "Edit input" : "View input"}
-        </button>
-        {inputLocked ? (
-          <span className="scenario-hint">
-            {running
-              ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
-              : stepping
-                ? // Reset is disabled mid-step, so this must not suggest it.
-                  "Locked while this step finishes"
-                : "This run is still open — press ↺ Reset to start a new one"}
-          </span>
-        ) : needsStartForm ? (
-          <span className="scenario-hint">
-            Fill in the input to enable Run
-          </span>
-        ) : (
-          // The resting state used to say nothing, which left the row looking
-          // like a display filter rather than the payload the instance is
-          // created with — readers didn't connect it to the run at all.
-          <span className="scenario-hint">
-            {hasScenarios
-              ? "Pick the input this process instance starts with, then press ▶ Run"
-              : "The input this process instance starts with"}
-          </span>
-        )}
-      </div>
-
-      {/* Hidden rather than unmounted while collapsed: the start form reports
-          its validity through `onValidityChange`, and Run is gated on it — an
-          unmounted form never reports, so Run would stay disabled forever. */}
-      <div
-        className="inline-input-editor"
-        id="start-input-editor"
-        hidden={!startEditorOpen}
-      >
-        <div className="inline-input-editor-head">
-          <div>
-            <div className="inline-input-editor-title">
-              {model.startFormId ? "Start form" : "Start payload"}
-            </div>
-            <div className="inline-input-editor-copy">
-              {model.startFormId
-                ? `Rendered from the model's start form "${model.startFormId}".`
-                : "The variables the instance starts with."}
-            </div>
-            {/* Edited input is where a scripted agent's fixed rules show:
-                anything they weren't written for falls through to the
-                fallback (usually human review), which reads as a bug unless
-                it's said up front. */}
-            {displayAgent && (brain.kind === "scripted" || !brain.chat) && (
-              <p className="inline-input-editor-note">
-                The scripted agent follows fixed rules written for these
-                examples. Input it doesn't recognise usually goes to human
-                review.{" "}
-                {compact
-                  ? "Open the editable version to connect a real model."
-                  : "Switch the agent brain to a model to have it reason about what you type."}
-              </p>
-            )}
-          </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setStartEditorOpen(false)}
-          >
-            Done
-          </Button>
-        </div>
-        {startSchema ? (
-          <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
-            <FormRenderer
-              ref={startFormRef}
-              schema={startSchema}
-              values={startValues}
-              onChange={(k, v) => setStartValues((prev) => ({ ...prev, [k]: v }))}
-              disabled={inputLocked}
-              onValidityChange={setStartFormValid}
-            />
-          </Suspense>
-        ) : (
-          <pre className="vars">{safeStringify(startValues, 2)}</pre>
-        )}
-      </div>
-
       {!compact && (displayAgent || example.imageInput) && (
         <CollapsibleCard
           sectionId="brain"
@@ -1702,45 +1628,216 @@ export function ExampleRunner({
         </CollapsibleCard>
       )}
 
-      <div className="controls">
-        <Button
-          data-tour={TOUR_ANCHOR.runButton}
-          onClick={() => void start()}
-          disabled={!canRun}
+      {/* One region for "choose the input, then start it": grouping the two is
+          what says pick-then-run, in place of an instruction sentence. */}
+      <section className="start-card" aria-label="Start a process instance">
+        {example.imageInput && (
+          <ImageInputPanel
+            imageInput={example.imageInput}
+            value={imageSelection}
+            onSelect={setImageSelection}
+            disabled={inputLocked}
+          />
+        )}
+
+        <div className="scenario">
+          <span className="scenario-label" id="scenario-label">
+            {/* `||`, not `??`: an empty label would render an empty heading, and
+                the pills group is `aria-labelledby` this element — so it would
+                lose its accessible name too. */}
+            {example.scenariosLabel || "Example input"}
+          </span>
+          {hasScenarios && (
+            <div
+              className="scenario-toggle"
+              role="group"
+              aria-labelledby="scenario-label"
+            >
+              {(example.scenarios ?? []).map((s, i) => (
+                <Button
+                  key={s.label}
+                  size="sm"
+                  variant="secondary"
+                  aria-pressed={i === shownScenario}
+                  disabled={inputLocked}
+                  onClick={() => {
+                    if (customInput) setCustomDraft(startValues);
+                    setCustomInput(false);
+                    setStartEditorOpen(false);
+                    setStartValues((prev) => ({ ...prev, ...s.variables }));
+                  }}
+                >
+                  {s.label}
+                </Button>
+              ))}
+              {/* The input's own option: current once chosen, or whenever the
+                  input matches no preset. */}
+              {startSchema && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="scenario-custom"
+                  aria-label="Custom — edit input"
+                  aria-pressed={shownScenario === null}
+                  aria-expanded={startEditorOpen}
+                  aria-controls="start-input-editor"
+                  disabled={inputLocked}
+                  onClick={() => {
+                    if (customInput) {
+                      setStartEditorOpen(!startEditorOpen);
+                    } else {
+                      if (customDraft) setStartValues(customDraft);
+                      setCustomInput(true);
+                      setStartEditorOpen(true);
+                    }
+                  }}
+                >
+                  ✎ Custom
+                </Button>
+              )}
+            </div>
+          )}
+          {!(hasScenarios && startSchema) && (
+            <button
+              type="button"
+              className="scenario-input-button"
+              onClick={() => setStartEditorOpen(!startEditorOpen)}
+              aria-expanded={startEditorOpen}
+              aria-controls="start-input-editor"
+              title={
+                startSchema
+                  ? "Edit the starting payload"
+                  : "Show the starting payload"
+              }
+            >
+              {/* Without a start form the panel below is a read-only <pre>, so
+                  offering to edit it promises something this example can't do. */}
+              {startSchema && (
+                <>
+                  <span className="scenario-edit-icon" aria-hidden>
+                    ✎
+                  </span>{" "}
+                </>
+              )}
+              {startSchema ? "Edit input" : "View input"}
+            </button>
+          )}
+          {inputLocked ? (
+            <span className="scenario-hint">
+              {running
+                ? "Locked while this run is in flight — wait for it to finish, or press ↺ Reset"
+                : stepping
+                  ? // Reset is disabled mid-step, so this must not suggest it.
+                    "Locked while this step finishes"
+                  : "This run is still open — press ↺ Reset to start a new one"}
+            </span>
+          ) : needsStartForm ? (
+            <span className="scenario-hint">
+              Fill in the input to enable Run
+            </span>
+          ) : null}
+        </div>
+
+        {/* Hidden rather than unmounted while collapsed: the start form reports
+            its validity through `onValidityChange`, and Run is gated on it — an
+            unmounted form never reports, so Run would stay disabled forever. */}
+        <div
+          className="inline-input-editor"
+          id="start-input-editor"
+          hidden={!startEditorOpen}
         >
-          ▶ Run
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => void step()}
-          // Deliberately not disabled once the root instance has completed.
-          // Run isn't, and `step()` handles that state the same way Run does —
-          // `beginRun` starts a fresh instance and this takes its first round.
-          // Disabling it here stranded the embed, which autostarts: the reader
-          // arrives after the run has finished, so Step was never once usable.
-          // (`canRun` tests the open user task, not completion.)
-          disabled={!canRun}
-        >
-          ⏭ Step
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => void stop()}
-          disabled={run.phase !== "ready" || stepping}
-        >
-          ↺ Reset
-        </Button>
-        {example.tour && (
+          <div className="inline-input-editor-head">
+            <div>
+              <div className="inline-input-editor-title">
+                {model.startFormId ? "Start form" : "Start payload"}
+              </div>
+              <div className="inline-input-editor-copy">
+                {model.startFormId
+                  ? `Rendered from the model's start form "${model.startFormId}".`
+                  : "The variables the instance starts with."}
+              </div>
+              {/* Edited input is where a scripted agent's fixed rules show:
+                  anything they weren't written for falls through to the
+                  fallback (usually human review), which reads as a bug unless
+                  it's said up front. */}
+              {displayAgent && (brain.kind === "scripted" || !brain.chat) && (
+                <p className="inline-input-editor-note">
+                  The scripted agent follows fixed rules written for these
+                  examples. Input it doesn't recognise usually goes to human
+                  review.{" "}
+                  {compact
+                    ? "Open the editable version to connect a real model."
+                    : "Switch the agent brain to a model to have it reason about what you type."}
+                </p>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setStartEditorOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+          {startSchema ? (
+            <Suspense fallback={<div className="form-fallback">Loading form…</div>}>
+              <FormRenderer
+                ref={startFormRef}
+                schema={startSchema}
+                values={startValues}
+                onChange={(k, v) => {
+                  setCustomInput(true);
+                  setStartValues((prev) => ({ ...prev, [k]: v }));
+                }}
+                disabled={inputLocked}
+                onValidityChange={setStartFormValid}
+              />
+            </Suspense>
+          ) : (
+            <pre className="vars">{safeStringify(startValues, 2)}</pre>
+          )}
+        </div>
+
+        <div className="controls">
+          <Button
+            data-tour={TOUR_ANCHOR.runButton}
+            onClick={() => void start()}
+            disabled={!canRun}
+          >
+            ▶ Run
+          </Button>
           <Button
             variant="secondary"
-            onClick={startTour}
-            disabled={tour.active}
+            onClick={() => void step()}
+            // Deliberately not disabled once the root instance has completed.
+            // Run isn't, and `step()` handles that state the same way Run does —
+            // `beginRun` starts a fresh instance, and this Step stops there.
+            // Disabling it here stranded the embed, which autostarts: the reader
+            // arrives after the run has finished, so Step was never once usable.
+            // (`canRun` tests the open user task, not completion.)
+            disabled={!canRun}
           >
-            {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
+            ⏭ Step
           </Button>
-        )}
-        {statusBadge}
-      </div>
+          <Button
+            variant="secondary"
+            onClick={() => void stop()}
+            disabled={run.phase !== "ready" || stepping}
+          >
+            ↺ Reset
+          </Button>
+          {example.tour && (
+            <Button
+              variant="secondary"
+              onClick={startTour}
+              disabled={tour.active}
+            >
+              {tour.active ? "Touring…" : `🧭 ${example.tour.label}`}
+            </Button>
+          )}
+          {statusBadge}
+        </div>
+      </section>
 
       {run.phase === "error" && (
         <Alert variant="destructive">
@@ -1792,6 +1889,7 @@ export function ExampleRunner({
             title="Process"
             description={`${model.processName} — live token (green), incidents (red).`}
           >
+            <WalkPanelPresence tracker={tracker} />
             {/* Render the Suspense boundary unconditionally so the lazy
                 diagram chunk starts downloading immediately, in parallel
                 with engine boot, instead of waiting for `run.phase` to
@@ -1809,6 +1907,10 @@ export function ExampleRunner({
                 xml={draft.resolvedBpmn}
                 activeIds={run.snapshot?.activeElementIds ?? []}
                 incidentIds={run.snapshot?.incidentElementIds ?? []}
+                path={activationPath}
+                runId={runId}
+                tracker={tracker}
+                hopMs={HOP}
                 className="diagram"
               />
             </Suspense>
@@ -1852,7 +1954,7 @@ export function ExampleRunner({
               )}
               <Button
                 onClick={submitUserTask}
-                disabled={!!reviewSchema && !reviewFormValid}
+                disabled={running || stepping || (!!reviewSchema && !reviewFormValid)}
               >
                 Complete task
               </Button>
@@ -1944,12 +2046,9 @@ export function ExampleRunner({
                 }}
               >
                 <summary className="vars-head">Instance variables</summary>
-                <pre className="vars">
-                  {safeStringify(
-                    Object.keys(displayVars).length > 0 ? displayVars : pendingSeed,
-                    2,
-                  )}
-                </pre>
+                <VariableList
+                  value={Object.keys(displayVars).length > 0 ? displayVars : pendingSeed}
+                />
               </details>
             }
             decisions={

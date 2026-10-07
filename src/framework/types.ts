@@ -266,8 +266,8 @@ export interface ExampleDef extends ExampleMeta {
   scenarios?: Scenario[];
   /**
    * Heading for the scenario picker, e.g. "Invoice to review". Defaults to
-   * "Example input". Whichever it is, the hint under the row is what tells the
-   * reader it's the payload the instance starts with.
+   * "Example input". It heads the start region, which holds the input and ▶ Run
+   * together — that grouping is what ties it to the instance being started.
    */
   scenariosLabel?: string;
   /** Editable handlers, keyed by element id — or a task listener's key (see `HandlerDef`). */

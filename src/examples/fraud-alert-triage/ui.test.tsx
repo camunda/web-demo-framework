@@ -41,7 +41,7 @@ describe("fraud-alert-triage in the runner", () => {
   it("lets the next handoff in the same case be completed, and submits what it shows (#145)", async () => {
     const app = await renderExample({ ...fraudAlertTriage, seed: CLEARLY_ESCALATED });
     await app.run();
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
 
     // The agent has finished, so the second alert lands in the same case and
     // opens a second handoff task there, queued behind this one.
@@ -52,7 +52,7 @@ describe("fraud-alert-triage in the runner", () => {
       typeNotes("first answer");
     });
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     await waitFor(() =>
       expect(completeButton().closest(".panel")?.textContent).toMatch(/Current alert:\s*ALERT-6605/),
     );

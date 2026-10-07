@@ -119,7 +119,7 @@ export function App() {
               <Button
                 key={e.id}
                 size="sm"
-                variant={e.id === example.id ? "default" : "secondary"}
+                variant="secondary"
                 aria-current={e.id === example.id ? "page" : undefined}
                 onClick={() => goToExample(e.id)}
               >
@@ -137,7 +137,7 @@ export function App() {
                   <Button
                     key={e.id}
                     size="sm"
-                    variant={e.id === example.id ? "default" : "secondary"}
+                    variant="secondary"
                     aria-current={e.id === example.id ? "page" : undefined}
                     onClick={() => goToExample(e.id)}
                   >

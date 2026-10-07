@@ -65,7 +65,7 @@ describe("bank-support in the runner", () => {
 
     await app.run();
 
-    expect(app.status()).toBe("Waiting for a human");
+    expect(app.status()).toBe("Fill out the form below");
     expect(app.showsOutsideDiagram("Review escalated case")).toBe(true);
 
     await app.completeUserTask(() => {

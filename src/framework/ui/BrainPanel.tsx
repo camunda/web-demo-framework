@@ -156,7 +156,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
             <Button
               key={k.kind}
               size="sm"
-              variant={brain.kind === k.kind ? "default" : "secondary"}
+              variant="secondary"
               aria-pressed={brain.kind === k.kind}
               onClick={() => brain.setKind(k.kind)}
             >
@@ -264,7 +264,7 @@ function TextBrain({ brain }: { brain: BrainControls }) {
                 <Button
                   key={m.mode}
                   size="sm"
-                  variant={endpointMode === m.mode ? "default" : "secondary"}
+                  variant="secondary"
                   aria-pressed={endpointMode === m.mode}
                   disabled={brain.status === "connecting"}
                   onClick={() => setEndpointMode(m.mode)}
@@ -475,7 +475,7 @@ function VisionBrain({ brain }: { brain: BrainControls }) {
             <Button
               key={k.kind}
               size="sm"
-              variant={brain.visionKind === k.kind ? "default" : "secondary"}
+              variant="secondary"
               aria-pressed={brain.visionKind === k.kind}
               onClick={() => brain.setVisionKind(k.kind)}
             >
