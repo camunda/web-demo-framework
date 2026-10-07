@@ -1618,9 +1618,9 @@ export function ExampleRunner({
                   aria-label="Custom — edit input"
                   aria-expanded={startEditorOpen}
                   aria-controls="start-input-editor"
+                  disabled={inputLocked}
                   onClick={() => {
-                    // Locked: still lets the reader look at the input, without switching to it.
-                    if (customInput || inputLocked) {
+                    if (customInput) {
                       setStartEditorOpen(!startEditorOpen);
                     } else {
                       if (customDraft) setStartValues(customDraft);

@@ -607,9 +607,11 @@ describe("ExampleRunner — changing the example input mid-run", () => {
     // Re-queried every time: the pills re-render as the run's state changes,
     // and a node captured once goes stale.
     const flagged = () => screen.getByRole("button", { name: /likely flagged/i });
+    const custom = () => screen.getByRole("button", { name: "Custom — edit input" });
     const lock = () => screen.queryByText(/locked while this run/i);
 
     expect(flagged()).toBeEnabled();
+    expect(custom()).toBeEnabled();
     expect(lock()).not.toBeInTheDocument();
 
     // This example has a start form, so Run stays disabled until the form has
@@ -620,10 +622,12 @@ describe("ExampleRunner — changing the example input mid-run", () => {
 
     await waitFor(() => expect(lock()).toBeInTheDocument());
     expect(flagged()).toBeDisabled();
+    expect(custom()).toBeDisabled();
 
     await app.settle();
 
     expect(flagged()).toBeEnabled();
+    expect(custom()).toBeEnabled();
     expect(lock()).not.toBeInTheDocument();
   }, 40_000);
 
