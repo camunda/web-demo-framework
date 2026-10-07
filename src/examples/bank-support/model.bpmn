@@ -369,7 +369,7 @@
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="TextAnnotation_MoreSpecialists_di" bpmnElement="TextAnnotation_MoreSpecialists">
-        <dc:Bounds x="370" y="340" width="260" height="70" />
+        <dc:Bounds x="370" y="340" width="260" height="56" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Flow_ToAgent_di" bpmnElement="Flow_ToAgent">
         <di:waypoint x="198" y="160" />

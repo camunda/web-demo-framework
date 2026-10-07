@@ -246,10 +246,10 @@ A DMN decision table is the first-class decision-maker, not a fallback: it settl
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="TextAnnotation_0130wya_di" bpmnElement="TextAnnotation_0130wya">
-        <dc:Bounds x="220" y="450" width="180" height="82" />
+        <dc:Bounds x="220" y="450" width="250" height="56" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="TextAnnotation_10q8vgq_di" bpmnElement="TextAnnotation_10q8vgq">
-        <dc:Bounds x="618" y="530" width="224" height="96" />
+        <dc:Bounds x="618" y="530" width="224" height="70" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Flow_ToPolicy_di" bpmnElement="Flow_ToPolicy">
         <di:waypoint x="198" y="260" />
