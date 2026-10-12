@@ -718,8 +718,8 @@ export function parseModel(xml: string, opts: ParseModelOptions = {}): ModelInfo
       severity: "warning",
       message:
         `Diagram has ${processes.length} <bpmn:process> elements ` +
-        `(${processes.map((p) => p.processId).join(", ")}); using "${primary.processId}" ` +
-        `as the active process. Pass a processId to parseModel to target another.`,
+        `(${processes.map((p) => p.processId).join(", ")}). Run starts "${primary.processId}"; ` +
+        `the others only run when something starts them, such as a call activity.`,
     });
   }
 
