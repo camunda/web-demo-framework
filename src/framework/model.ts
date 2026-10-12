@@ -397,6 +397,9 @@ function agentHostsOf(process: Element): Element[] {
  */
 const COMPOUND_TOOL_LOCALS = new Set(["subProcess", "adHocSubProcess", "callActivity"]);
 
+/** Activities that only ever run as a job, so a missing job type strands the token. */
+const JOB_ONLY_LOCALS = new Set(["serviceTask", "sendTask"]);
+
 /**
  * Sub-process families that own the flow nodes nested directly within them, so
  * a node's *immediate* container — not merely some ancestor host — decides which
@@ -503,7 +506,18 @@ function parseProcess(process: Element, diagnostics: Diagnostic[]): ProcessSpec 
     }
 
     const jobType = jobTypeOf(el);
-    if (!jobType) continue;
+    if (!jobType) {
+      // Zeebe refuses to deploy these; this engine deploys them and then waits
+      // forever for a job nobody can be offered.
+      if (JOB_ONLY_LOCALS.has(el.localName)) {
+        diagnostics.push({
+          severity: "error",
+          elementId: id,
+          message: `"${el.getAttribute("name") ?? id}" (${id}) has no job type, so no worker could ever pick it up and the run would stop there. Set one under Task definition → Job type.`,
+        });
+      }
+      continue;
+    }
     const spec: TaskSpec = {
       elementId: id,
       label: el.getAttribute("name") ?? id,
