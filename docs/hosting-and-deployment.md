@@ -141,14 +141,22 @@ it together, and breaking any one of them reintroduces the bug:
    itself, so setting it to `https://demos.camunda.io` produces
    `https://https://demos.camunda.io/pr-preview/pr-N/`.
 
-`preview.yml` can also hold the comment back until the preview is live, via
-`wait-for-pages-deployment`. That is gated behind the `PAGES_PREVIEW_WAIT`
-repo variable and **off by default**, because it depends on invariant 1 above:
-it polls `/repos/{repo}/pages/builds`, which is empty while Pages is
-workflow-sourced, so enabling it before the source flip makes every preview
-job poll for 180s and then fail. Set `PAGES_PREVIEW_WAIT` to `true` once the
-flip is done. (The job needs `pages: read` for that endpoint — note it is the
-Pages builds API, not the Deployments API.)
+`preview.yml` can also fail the preview check until the preview is live. That
+is gated behind the `PAGES_PREVIEW_WAIT` repo variable and **off by default**,
+because it depends on invariant 1 above: it polls
+`/repos/{repo}/pages/builds`, which is empty while Pages is workflow-sourced,
+so enabling it before the source flip makes every preview job time out. Set
+`PAGES_PREVIEW_WAIT` to `true` once the flip is done. (The job needs
+`pages: read` for that endpoint — note it is the Pages builds API, not the
+Deployments API.)
+
+It waits for the `gh-pages` **tip** to build, not for its own commit. Pages
+marks a build "errored" when a newer push to `gh-pages` supersedes it, so
+waiting on its own commit (the action's `wait-for-pages-deployment`) failed
+every preview but the last whenever several PRs published within a minute,
+even though all of them were live. The tip always includes every earlier
+preview. The PR comment is posted before this wait, so it can appear a
+minute or so before the link works.
 
 If the custom domain (decision 1) lands, set `PAGES_BASE_URL` to it in the
 same change as the `CNAME` step — otherwise previews start pointing at the
