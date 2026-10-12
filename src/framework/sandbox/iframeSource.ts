@@ -87,6 +87,9 @@ export function buildSandboxDocument(): string {
         if (msg.kind === "run-handler") {
           var handler = compile(msg.source, "Handler code");
           var out = await handler(msg.job, helpersFor(msg.job, msg.id, msg.hasVision));
+          // Checked here, not only host-side: a function or symbol can't even cross postMessage.
+          if (out != null && (typeof out !== "object" || Array.isArray(out)))
+            throw new Error("Handler returned " + (Array.isArray(out) ? "an array" : "a " + typeof out) + " — return an object of variables to merge, or nothing.");
           post({ kind: "result", id: msg.id, value: out === undefined ? undefined : out });
         } else if (msg.kind === "run-agent") {
           var agent = compile(msg.source, "Agent code");
