@@ -778,6 +778,28 @@ describe("ExampleRunner — editing while a run is parked", () => {
   }, 40_000);
 });
 
+describe("ExampleRunner — a scripted agent that doesn't compile", () => {
+  it("disables Run as soon as it is typed, and re-enables it once fixed", async () => {
+    await renderExample(seedExportCompliance);
+    const run = () => screen.getByRole("button", { name: "▶ Run" });
+    await waitFor(() => expect(run()).toBeEnabled(), { timeout: 20_000 });
+
+    const code = screen.getByRole("button", { name: /^Code/ });
+    if (code.getAttribute("aria-expanded") !== "true") fireEvent.click(code);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Agent (scripted)" }, { timeout: 10_000 }));
+    const editor = await screen.findByRole("textbox", { name: "Code editor" });
+    const original = (editor as HTMLTextAreaElement).value;
+
+    fireEvent.change(editor, { target: { value: "async (job) => }" } });
+    expect(run()).toBeDisabled();
+    expect(screen.getByText("Agent code has a syntax error.")).toBeInTheDocument();
+
+    fireEvent.change(editor, { target: { value: original } });
+    expect(run()).toBeEnabled();
+    expect(screen.queryByText("Agent code has a syntax error.")).not.toBeInTheDocument();
+  }, 40_000);
+});
+
 describe("ExampleRunner — changing the example input mid-run", () => {
   /**
    * The scenario pills and the start form are disabled while a run is in
