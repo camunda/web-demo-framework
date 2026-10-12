@@ -139,6 +139,45 @@ function helpers(page, base, result) {
       // The modeler exports on a zero-delay timer after commandStack.changed.
       await page.waitForTimeout(400);
     },
+    async openGroup(group) {
+      const header = page.locator(".model-editor-properties .bio-properties-panel-group-header")
+        .filter({ has: page.locator(".bio-properties-panel-group-header-title", { hasText: new RegExp(`^${group}$`) }) }).first();
+      if (!(await header.evaluate((el) => el.classList.contains("open")))) await header.click();
+      return header;
+    },
+    async addListItem(group) {
+      const header = page.locator(".model-editor-properties .bio-properties-panel-group-header")
+        .filter({ has: page.locator(".bio-properties-panel-group-header-title", { hasText: new RegExp(`^${group}$`) }) }).first();
+      await header.getByTitle("Create new list item").click();
+      await page.waitForTimeout(300);
+    },
+    /** Ids of every field currently in the properties panel. */
+    async fieldIds() {
+      return page.locator(".model-editor-properties").locator("input, select, textarea").evaluateAll((els) => els.map((e) => e.id));
+    },
+    async fillField(id, value) {
+      const el = page.locator(`.model-editor-properties [id="${id}"]`);
+      if ((await el.evaluate((e) => e.tagName)) === "SELECT") await el.selectOption(value);
+      else await el.fill(value);
+      await el.blur();
+      await page.waitForTimeout(400);
+    },
+    /** Pick a palette tool and drop it on the canvas at (x, y) relative to the canvas box. */
+    async createFromPalette(action, x, y) {
+      await page.locator(`.model-editor-canvas .djs-palette [data-action="${action}"]`).click();
+      const box = await page.locator(".model-editor-canvas .djs-container").boundingBox();
+      await page.mouse.click(box.x + x, box.y + y);
+      await page.waitForTimeout(400);
+    },
+    /** Replace the selected element via its context pad's wrench menu. */
+    async replaceSelected(entryId) {
+      await page.locator(`.model-editor-canvas .djs-context-pad [data-action="replace"]`).click();
+      await page.locator(`.djs-popup [data-id="${entryId}"]`).click();
+      await page.waitForTimeout(400);
+    },
+    async selectedId() {
+      return page.locator(".model-editor-properties #bio-properties-panel-id").inputValue().catch(() => "");
+    },
     /** Replace the whole contents of the Monaco editor in the open tab panel. */
     async setEditor(tabName, text) {
       await h.tab(tabName);
