@@ -108,12 +108,36 @@ jobs:
           # public, and a hardcoded fallback would have quietly outlived it.
           # Set the PAGES_BASE_URL repo variable only for a custom domain.
           pages-base-url: ${{ vars.PAGES_BASE_URL }}
-          # Holds the comment back until the preview is actually reachable.
-          # Off until the Pages source is switched to the gh-pages branch:
-          # /pages/builds is empty while Pages is workflow-sourced, so the
-          # step would poll for 180s and then fail. Set the
-          # PAGES_PREVIEW_WAIT repo variable to true once that flip is done.
-          wait-for-pages-deployment: ${{ vars.PAGES_PREVIEW_WAIT || false }}
+          # The action's own wait tracks the Pages build for its one commit,
+          # and Pages errors a build that a newer gh-pages push supersedes —
+          # so PRs pushed together all failed bar the last, though every
+          # preview was live. The step below waits on the branch tip instead.
+          wait-for-pages-deployment: false
+      - name: Wait for GitHub Pages to serve the preview
+        # Off until the Pages source is switched to the gh-pages branch:
+        # /pages/builds is empty while Pages is workflow-sourced.
+        if: vars.PAGES_PREVIEW_WAIT == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # gh-pages only moves forward, so a built tip includes this preview.
+          deadline=$((SECONDS + 600))
+          while (( SECONDS < deadline )); do
+            tip=$(git ls-remote origin refs/heads/gh-pages | cut -f1)
+            read -r commit status < <(gh api "repos/$REPO/pages/builds/latest" --jq '"\(.commit) \(.status)"')
+            echo "gh-pages tip ${tip:0:7}; latest Pages build ${commit:0:7} is ${status}"
+            if [[ "$commit" == "$tip" && "$status" == "built" ]]; then exit 0; fi
+            if [[ "$commit" == "$tip" && "$status" == "errored" ]]; then
+              # A newer push may still be on its way; give it one more look.
+              sleep 20
+              [[ "$(git ls-remote origin refs/heads/gh-pages | cut -f1)" == "$tip" ]] && { echo "::error::Pages failed to build gh-pages ${tip:0:7}"; exit 1; }
+              continue
+            fi
+            sleep 10
+          done
+          echo "::error::Pages didn't build gh-pages within 10 minutes"
+          exit 1
 
   close:
     # Same fork-PR limitation as the build job above: a fork PR's close
