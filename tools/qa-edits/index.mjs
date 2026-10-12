@@ -32,9 +32,21 @@ const STATUSES = [
 ];
 
 /** Page helpers handed to every case. */
+/** Monaco's rendered lines, in on-screen order: it reuses line nodes, so DOM order can differ. */
+function visibleText(editor) {
+  return editor.locator(".view-line").evaluateAll((lines) =>
+    lines
+      .map((l) => [parseFloat(l.style.top) || 0, l.textContent ?? ""])
+      .sort((a, b) => a[0] - b[0])
+      .map(([, t]) => t)
+      .join("\n"),
+  );
+}
+
 function helpers(page, base, result) {
   const h = {
     page,
+    base,
     async open(example, query = "") {
       await page.goto(`${base}/examples/${example}${query}`);
       await h.waitStatus("Ready", 120_000);
@@ -123,7 +135,18 @@ function helpers(page, base, result) {
     },
     async select(elementId) {
       const el = page.locator(`.model-editor-canvas [data-element-id="${elementId}"]`).first();
-      await el.click({ force: true });
+      // An element inside a collapsed sub-process lives on its own drill-down plane.
+      if (!(await el.count())) {
+        for (const drill of await page.locator(".model-editor-canvas .bjs-drilldown").all()) {
+          if (!(await drill.isVisible())) continue;
+          await drill.click({ force: true });
+          await page.waitForTimeout(300);
+          if (await el.count()) break;
+        }
+      }
+      // A real click can land on the palette or miss an off-screen shape; bpmn-js selects on a delegated click.
+      await el.evaluate((node) => (node.querySelector(".djs-hit") ?? node).dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await page.locator(`.model-editor-canvas .djs-element.selected[data-element-id="${elementId}"]`).waitFor({ timeout: 5_000 });
       await page.locator(".model-editor-properties .bio-properties-panel").waitFor();
     },
     /** Set a properties-panel text field by its input id suffix (name, id, …), opening `group` first. */
@@ -142,6 +165,10 @@ function helpers(page, base, result) {
     async openGroup(group) {
       const header = page.locator(".model-editor-properties .bio-properties-panel-group-header")
         .filter({ has: page.locator(".bio-properties-panel-group-header-title", { hasText: new RegExp(`^${group}$`) }) }).first();
+      if (!(await header.count())) {
+        const titles = await page.locator(".model-editor-properties .bio-properties-panel-group-header-title").allInnerTexts();
+        throw new Error(`no "${group}" group; have: ${titles.join(", ")}`);
+      }
       if (!(await header.evaluate((el) => el.classList.contains("open")))) await header.click();
       return header;
     },
@@ -158,8 +185,16 @@ function helpers(page, base, result) {
     async fillField(id, value) {
       const el = page.locator(`.model-editor-properties [id="${id}"]`);
       if ((await el.evaluate((e) => e.tagName)) === "SELECT") await el.selectOption(value);
-      else await el.fill(value);
-      await el.blur();
+      else if (await el.isEditable().catch(() => false)) await el.fill(value);
+      else {
+        // A FEEL-capable field renders a CodeMirror editor beside a hidden input.
+        const entry = page.locator(".model-editor-properties .bio-properties-panel-entry").filter({ has: el }).first();
+        await entry.locator("[contenteditable=true]").first().click();
+        await page.keyboard.press("ControlOrMeta+A");
+        await page.keyboard.insertText(value);
+      }
+      await el.blur().catch(() => {});
+      await page.locator(".model-editor-properties .bio-properties-panel-header").click().catch(() => {});
       await page.waitForTimeout(400);
     },
     /** Pick a palette tool and drop it on the canvas at (x, y) relative to the canvas box. */
@@ -187,15 +222,29 @@ function helpers(page, base, result) {
       await editor.locator("textarea").first().focus();
       await page.keyboard.press("ControlOrMeta+A");
       await page.keyboard.press("Delete");
-      await page.keyboard.insertText(text);
+      // One line at a time: a multi-line insertText lands twice in Firefox's Monaco.
+      const lines = text.split("\n");
+      for (const [i, line] of lines.entries()) {
+        if (i > 0) await page.keyboard.press("Enter");
+        if (line) await page.keyboard.insertText(line);
+      }
+      // Monaco auto-closes brackets/quotes as text goes in; the extras sit after the cursor.
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+ArrowDown" : "Control+Shift+End");
+      await page.keyboard.press("Delete");
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home");
       await page.waitForTimeout(300);
       // An edit that silently didn't land would make every later check meaningless.
-      const shown = (await editor.locator(".view-lines").innerText()).replace(/\s+/g, "");
-      if (shown !== text.replace(/\s+/g, "")) throw new Error(`editor edit didn't apply in "${tabName}": shows ${shown.slice(0, 80)}`);
+      const shown = (await visibleText(editor)).replace(/\s+/g, "");
+      const want = text.replace(/\s+/g, "");
+      if (shown !== want) {
+        let i = 0;
+        while (i < want.length && shown[i] === want[i]) i++;
+        throw new Error(`editor edit didn't apply in "${tabName}": at ${i} wanted …${want.slice(i, i + 30)} got …${shown.slice(i, i + 30)}`);
+      }
     },
     async editorText(tabName) {
       await h.tab(tabName);
-      return page.locator(".editors [role=tabpanel][data-state=active] .view-lines").first().innerText();
+      return visibleText(page.locator(".editors [role=tabpanel][data-state=active] .monaco-editor").first());
     },
     expect(cond, message) {
       if (!cond) result.fail.push(message);
@@ -203,6 +252,8 @@ function helpers(page, base, result) {
     note(message) {
       result.notes.push(message);
     },
+    consoleMessages: () => result.console,
+    pageErrors: () => result.pageErrors,
     async screenshot(name) {
       await page.screenshot({ path: join(OUT, `${result.slug}--${name}.png`), fullPage: true, timeout: 10_000 }).catch(() => {});
     },
@@ -212,11 +263,14 @@ function helpers(page, base, result) {
 
 async function runCase(browser, browserName, base, c) {
   const slug = `${browserName}--${c.id}`.replace(/[^a-z0-9]+/gi, "-");
-  const result = { id: c.id, title: c.title, browser: browserName, slug, pass: false, fail: [], notes: [], pageErrors: [], ms: 0 };
+  const result = { id: c.id, title: c.title, browser: browserName, slug, pass: false, fail: [], notes: [], pageErrors: [], console: [], ms: 0 };
   const started = Date.now();
   const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
   const page = await context.newPage();
   page.on("pageerror", (e) => result.pageErrors.push(e.message.slice(0, 200)));
+  page.on("console", (m) => {
+    if (m.type() === "warning" || m.type() === "error") result.console.push(`${m.type()}: ${m.text().slice(0, 300)}`);
+  });
   const h = helpers(page, base, result);
   try {
     await Promise.race([
