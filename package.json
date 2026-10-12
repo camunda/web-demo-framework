@@ -20,7 +20,8 @@
     "eval:vision": "node tools/eval-vision/index.mjs",
     "spike:urban": "node --experimental-strip-types tools/spike-urban-bojtos/demo.ts",
     "budget": "node tools/bundle-budget/check.mjs",
-    "eval:live": "node tools/eval-live/index.mjs"
+    "eval:live": "node tools/eval-live/index.mjs",
+    "qa:edits": "node tools/qa-edits/index.mjs"
   },
   "dependencies": {
     "@bpmn-io/form-js-viewer": "^1.24.1",
