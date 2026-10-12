@@ -242,8 +242,10 @@ export function buildDraftRunDefinition(
   // has (typically after a rename) is otherwise silently inert.
   const taskIds = new Set([...allTasks.map((t) => t.elementId), ...listeners.map((l) => l.key)]);
   const handlerIds = new Set([...defaultSourceOf.keys(), ...Object.keys(sources)]);
+  // An element already reported (e.g. it lost its job type) wasn't renamed away.
+  const reported = new Set(diagnostics.filter((d) => d.severity === "error").map((d) => d.elementId));
   for (const elementId of handlerIds) {
-    if (!taskIds.has(elementId)) {
+    if (!taskIds.has(elementId) && !reported.has(elementId)) {
       diagnostics.push({
         severity: "error",
         elementId,
