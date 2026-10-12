@@ -272,13 +272,19 @@ async function runCase(browser, browserName, base, c) {
     if (m.type() === "warning" || m.type() === "error") result.console.push(`${m.type()}: ${m.text().slice(0, 300)}`);
   });
   const h = helpers(page, base, result);
+  let budget;
   try {
     await Promise.race([
       c.run(h),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`case exceeded ${c.timeoutMs ?? 180_000} ms`)), c.timeoutMs ?? 180_000)),
+      new Promise((_, reject) => {
+        budget = setTimeout(() => reject(new Error(`case exceeded ${c.timeoutMs ?? 180_000} ms`)), c.timeoutMs ?? 180_000);
+      }),
     ]);
   } catch (e) {
     result.fail.push(`harness: ${String(e.message ?? e).split("\n")[0]}`);
+  } finally {
+    // A pending budget timer would keep the CLI alive long after the report is written.
+    clearTimeout(budget);
   }
   if (!c.allowPageErrors) for (const e of result.pageErrors) result.fail.push(`uncaught page error: ${e}`);
   result.ms = Date.now() - started;

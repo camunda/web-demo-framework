@@ -24,11 +24,18 @@ export const cases = [
     title: "a model edit is applied by the next Run, not before",
     async run(h) {
       await h.open("learn-user-task-form");
+      const parked = await h.run();
+      h.expect(parked === "Fill out the form below", `expected to park on the human task, got "${parked}"`);
+      // Observable either way: with the user task gone, a run completes instead of parking.
       await h.modelTab();
-      await h.select("Event_done");
-      await h.setProp("name", "Edited end");
-      const s = await h.run();
-      h.expect(s === "Fill out the form below", `expected to park on the human task, got "${s}"`);
+      await h.select("Activity_review");
+      await h.replaceSelected("replace-with-task");
+      await h.page.waitForTimeout(800);
+      const during = await h.status();
+      h.expect(during === "Fill out the form below", `the edit reached the parked run: "${during}"`);
+      await h.reset();
+      const next = await h.run();
+      h.expect(next === "Completed", `the next run didn't use the edited model: "${next}"`);
     },
   },
   {
@@ -247,13 +254,8 @@ function diagnosticCases() {
         await h.createFromPalette("create.task", 300, 330);
         await h.replaceSelected("replace-with-service-task");
         const diags = await h.diagnostics();
-        h.note(`diagnostics: ${JSON.stringify(diags)}`);
-        if (!(await h.runDisabled())) {
-          const s = await h.run();
-          const why = await h.explanation();
-          h.note(`Run ended "${s}"; incidents ${JSON.stringify(await h.incidents())}; alerts ${JSON.stringify(await h.alerts())}`);
-          h.expect(s === "Completed" || diags.length > 0, `an unreported model problem surfaced only at run time: "${s}" — ${why.slice(0, 160).replace(/\s+/g, " ")}`);
-        }
+        h.expect(diags.some((d) => /has no job type/.test(d)), `no missing-job-type error; got ${JSON.stringify(diags)}`);
+        h.expect(await h.runDisabled(), "Run enabled with an untyped service task");
       },
     },
     {
@@ -737,7 +739,8 @@ function handlerCases() {
     ["returns-array", "async () => [1, 2]", { incident: true, trace: /Handler returned an array/ }],
     ["returns-null", "async () => null", { completes: true }],
     ["returns-undefined", "async () => {}", { completes: true }],
-    ["returns-function", "async () => ({ f: () => 1 })", {}],
+    ["returns-function", "async () => () => 1", { incident: true, trace: /Handler returned a function/ }],
+    ["returns-nested-function", "async () => ({ f: () => 1 })", { incident: true }],
     ["returns-circular", "async () => { const o = {}; o.self = o; return o; }", {}],
     ["returns-big", "async () => ({ big: 'x'.repeat(5_000_000) })", {}],
   ];
