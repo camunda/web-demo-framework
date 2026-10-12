@@ -224,6 +224,25 @@ describe("ModelEditor component", () => {
     );
   });
 
+  it("takes the modeler's keyboard shortcuts on its canvas, and only there", async () => {
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Agent_1"]')).not.toBeNull(),
+    );
+    const idle = "Select an element to see its properties and connector templates.";
+    const canvas = container.querySelector<HTMLElement>('[aria-label="Diagram editor"]')!;
+    expect(canvas.tabIndex).toBe(0);
+
+    // Cmd/Ctrl+A is the modeler's select-all; a selection replaces the idle hint.
+    fireEvent.keyDown(document.body, { key: "a", ctrlKey: true, metaKey: true });
+    expect(container.textContent).toContain(idle);
+
+    fireEvent.keyDown(canvas, { key: "a", ctrlKey: true, metaKey: true });
+    await waitFor(() => expect(container.textContent).not.toContain(idle));
+  });
+
   it("reimports when `value` changes externally (e.g. Revert to original)", async () => {
     const onChange = () => {};
     const { container, rerender } = render(

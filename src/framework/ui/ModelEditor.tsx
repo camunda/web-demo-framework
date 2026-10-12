@@ -194,6 +194,8 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     if (!containerRef.current) return;
     const modeler = new Modeler({
       container: containerRef.current,
+      // Scoped to the canvas, so Cmd/Ctrl+Z elsewhere on the page never undoes a diagram edit.
+      keyboard: { bindTo: containerRef.current },
       propertiesPanel: {
         parent: propertiesRef.current,
       },
@@ -549,6 +551,9 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
         <div
           ref={containerRef}
           className="editor-wrap model-editor-canvas"
+          // Focusable, so a click on the diagram gives its shortcuts the keys.
+          tabIndex={0}
+          aria-label="Diagram editor"
         />
         <div
           ref={propertiesRef}
