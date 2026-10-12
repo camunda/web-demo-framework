@@ -316,10 +316,11 @@ export function ExampleRunner({
    */
   const displayAgent = model.agent ?? model.agents[0] ?? null;
 
-  // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
-  // not `example.bpmn` directly — so what runs and what's shown is exactly
-  // what the diagnostics above are about.
-  const run = useExampleRun({ bpmn: draft.resolvedBpmn, decisions: example.decisions });
+  // The session is created once, from the model as first resolved; every
+  // later edit reaches the engine through `run.redeploy` in `beginRun`, so
+  // editing can't tear down a run that is still in progress.
+  const [initialBpmn] = useState(draft.resolvedBpmn);
+  const run = useExampleRun({ bpmn: initialBpmn, decisions: example.decisions });
 
   // Tell an embedding host the runner is actually usable — the engine has
   // loaded and the model deployed (phase "ready"), not merely that the shell
