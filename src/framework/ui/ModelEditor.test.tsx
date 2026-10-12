@@ -1,6 +1,6 @@
 import { createRef } from "react";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { BpmnModdle as BpmnModdleType } from "bpmn-moddle";
 import * as BpmnModdleModule from "bpmn-moddle";
 import zeebeModdleDescriptor from "zeebe-bpmn-moddle/resources/zeebe.json";
@@ -64,6 +64,9 @@ vi.mock("bpmn-js-element-templates", () => {
 });
 
 const { ModelEditor } = await import("./ModelEditor");
+
+// RTL's auto-cleanup is off in this repo; without this each case leaves a live Modeler behind.
+afterEach(cleanup);
 
 // The published `@types/bpmn-moddle` declares a named `BpmnModdle` export,
 // but the package itself ships a plain CJS default export at runtime (no
