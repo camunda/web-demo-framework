@@ -61,7 +61,6 @@ interface ElementTemplateDescriptor {
 interface ElementTemplatesService {
   set(templates: unknown[]): void;
   getAll(element: unknown): ElementTemplateDescriptor[];
-  get(idOrElement: unknown, version?: number | null): unknown;
   applyTemplate(element: unknown, template: unknown): unknown;
 }
 interface SelectionService {
@@ -368,12 +367,12 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   const applyTemplate = (templateId: string) => {
     const modeler = modelerRef.current;
     if (!modeler || !selected) return;
-    const elementTemplates = modeler.get<ElementTemplatesService>(
-      "elementTemplates",
-    );
-    const template = elementTemplates.get(templateId);
+    // The offered template itself: `get(id)` alone only finds unversioned templates.
+    const template = availableTemplates.find((t) => t.id === templateId);
     if (!template) return;
-    elementTemplates.applyTemplate(selected, template);
+    modeler
+      .get<ElementTemplatesService>("elementTemplates")
+      .applyTemplate(selected, template);
     setApplyNonce((n) => n + 1);
   };
 
