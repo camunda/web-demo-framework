@@ -81,13 +81,14 @@ function helpers(page, base, result) {
     runButton: () => page.getByRole("button", { name: "▶ Run", exact: true }),
     stepButton: () => page.getByRole("button", { name: "⏭ Step", exact: true }),
     resetButton: () => page.getByRole("button", { name: "↺ Reset", exact: true }),
-    async run() {
+    /** Press Run and wait for it to settle; `timeout` bounds the wait, not the click. */
+    async run(timeout) {
       await page.waitForFunction(() => {
         const b = [...document.querySelectorAll("button")].find((x) => x.textContent?.trim() === "▶ Run");
         return b && !b.disabled;
       }, null, { timeout: 30_000 });
       await h.runButton().click();
-      return h.settle();
+      return h.settle(timeout);
     },
     async reset() {
       await h.resetButton().click();

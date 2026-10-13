@@ -54,7 +54,7 @@ export const cases = [
   },
   {
     id: "d3-sync-infinite-loop",
-    title: "a handler stuck in a synchronous loop is terminated, and the page stays responsive",
+    title: "a handler stuck in a synchronous loop: recovers where the browser isolates the sandbox, may freeze the tab otherwise (accepted)",
     timeoutMs: 120_000,
     async run(h) {
       await h.open("learn-service-task");
@@ -558,6 +558,7 @@ function securityCases() {
         await h.page.waitForTimeout(500);
         h.expect(!(await h.page.evaluate(() => window.__qaXss)), "an element name executed as HTML");
         h.expect((await h.page.locator(".runner img[src=x]").count()) === 0, "an element name became an <img>");
+        h.expect((await h.page.locator(".runner").innerText()).includes("<img src=x"), "the edited name isn't shown as text");
       },
     },
     {
@@ -574,6 +575,10 @@ function securityCases() {
         if ((await trigger.getAttribute("data-state")) !== "open") await trigger.click();
         await h.page.waitForTimeout(500);
         h.expect(!(await h.page.evaluate(() => window.__qaXss)), "tool documentation executed as HTML");
+        // A CSP could stop the handler running and still leave a real element behind.
+        h.expect((await h.page.locator(".runner img[src=x]").count()) === 0, "tool documentation became an <img>");
+        // Otherwise both checks pass vacuously when the panel shows no documentation at all.
+        h.expect((await h.page.locator(".runner").innerText()).includes("<img src=x"), "the edited documentation isn't shown as text");
         h.note(`tool ${tool}`);
       },
     },
@@ -678,7 +683,8 @@ function agentCases() {
         await h.setEditor("Agent (scripted)", "async (job) => }");
         h.expect(!(await h.runDisabled()), "a broken (unused) scripted agent disabled Run with a live brain connected");
         await h.setEditor("system-prompt", "You are a careful export-compliance agent. Always call every tool once before deciding.");
-        const s = await h.run();
+        // A cold local model can take minutes per turn; stay inside the case budget.
+        const s = await h.run(18 * 60_000);
         const trace = await h.traceText();
         h.note(`status "${s}"`);
         h.expect(/live brain/i.test(trace), "the run didn't use the live brain");
