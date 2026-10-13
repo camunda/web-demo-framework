@@ -159,6 +159,12 @@ export function buildWorkers(
       result: out,
       turn,
     });
+    // The engine rejects anything else mid-dispatch, which stalls the run with
+    // no reason shown; failing the job turns it into an incident that names it.
+    if (out != null && (typeof out !== "object" || Array.isArray(out)))
+      throw new Error(
+        `Handler returned ${Array.isArray(out) ? "an array" : `a ${typeof out}`} — return an object of variables to merge, or nothing.`,
+      );
     return out as Record<string, unknown> | undefined;
   };
 

@@ -61,7 +61,6 @@ interface ElementTemplateDescriptor {
 interface ElementTemplatesService {
   set(templates: unknown[]): void;
   getAll(element: unknown): ElementTemplateDescriptor[];
-  get(idOrElement: unknown, version?: number | null): unknown;
   applyTemplate(element: unknown, template: unknown): unknown;
 }
 interface SelectionService {
@@ -194,6 +193,8 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
     if (!containerRef.current) return;
     const modeler = new Modeler({
       container: containerRef.current,
+      // Scoped to the canvas, so Cmd/Ctrl+Z elsewhere on the page never undoes a diagram edit.
+      keyboard: { bindTo: containerRef.current },
       propertiesPanel: {
         parent: propertiesRef.current,
       },
@@ -366,12 +367,12 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
   const applyTemplate = (templateId: string) => {
     const modeler = modelerRef.current;
     if (!modeler || !selected) return;
-    const elementTemplates = modeler.get<ElementTemplatesService>(
-      "elementTemplates",
-    );
-    const template = elementTemplates.get(templateId);
+    // The offered template itself: `get(id)` alone only finds unversioned templates.
+    const template = availableTemplates.find((t) => t.id === templateId);
     if (!template) return;
-    elementTemplates.applyTemplate(selected, template);
+    modeler
+      .get<ElementTemplatesService>("elementTemplates")
+      .applyTemplate(selected, template);
     setApplyNonce((n) => n + 1);
   };
 
@@ -549,6 +550,11 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
         <div
           ref={containerRef}
           className="editor-wrap model-editor-canvas"
+          // Focusable, so a click on the diagram gives its shortcuts the keys.
+          tabIndex={0}
+          // A keyboard-driven custom widget: screen readers pass its shortcuts through.
+          role="application"
+          aria-label="Diagram editor"
         />
         <div
           ref={propertiesRef}

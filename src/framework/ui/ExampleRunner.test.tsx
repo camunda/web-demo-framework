@@ -54,6 +54,18 @@ vi.mock("../sandbox", () => ({
     Promise.resolve(new Function(`"use strict"; return (${source});`)()(job)),
 }));
 
+// Monaco and the bpmn-js Modeler don't run under jsdom; a textarea carries the
+// same value/onChange.
+const textareaEditor = vi.hoisted(
+  () =>
+    (label: string) =>
+    ({ value, onChange }: { value?: string; onChange?: (v: string) => void }) => (
+      <textarea aria-label={label} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} />
+    ),
+);
+vi.mock("./MonacoEditor", () => ({ default: textareaEditor("Code editor") }));
+vi.mock("./ModelEditor", () => ({ default: textareaEditor("Model XML") }));
+
 const ALERT = "The agent didn't finish its checks";
 
 // This repo doesn't enable RTL's automatic cleanup, and every query below is
@@ -733,6 +745,58 @@ describe("ExampleRunner — the code panel", () => {
     const code = screen.getByRole("button", { name: /^Code/ });
     expect(code).toHaveTextContent(/editing is experimental and can break the example/i);
     expect(code).toHaveTextContent(/reload the page to get the original back/i);
+  }, 40_000);
+});
+
+describe("ExampleRunner — editing while a run is parked", () => {
+  async function parkThenEdit(tab: string, editorName: string, edit: (v: string) => string) {
+    const app = await renderExample(seedExportCompliance);
+    fireEvent.click(screen.getByRole("button", { name: /likely flagged/i }));
+    await app.run();
+    expect(app.status()).toBe("Fill out the form below");
+
+    // Its open state persists in localStorage across tests.
+    const code = screen.getByRole("button", { name: /^Code/ });
+    if (code.getAttribute("aria-expanded") !== "true") fireEvent.click(code);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: tab }, { timeout: 10_000 }));
+    const editor = await screen.findByRole("textbox", { name: editorName });
+    fireEvent.change(editor, { target: { value: edit((editor as HTMLTextAreaElement).value) } });
+    await new Promise((r) => setTimeout(r, 300));
+    return app;
+  }
+
+  it("leaves the parked run in place after a prompt edit", async () => {
+    const app = await parkThenEdit("user-prompt", "Code editor", () => "An edited prompt.");
+    expect(app.status()).toBe("Fill out the form below");
+    expect(screen.getByRole("button", { name: "Complete task" })).toBeInTheDocument();
+  }, 40_000);
+
+  it("leaves the parked run in place after a model edit", async () => {
+    const app = await parkThenEdit("Model", "Model XML", (xml) => `${xml}<!-- edited -->`);
+    expect(app.status()).toBe("Fill out the form below");
+    expect(screen.getByRole("button", { name: "Complete task" })).toBeInTheDocument();
+  }, 40_000);
+});
+
+describe("ExampleRunner — a scripted agent that doesn't compile", () => {
+  it("disables Run as soon as it is typed, and re-enables it once fixed", async () => {
+    await renderExample(seedExportCompliance);
+    const run = () => screen.getByRole("button", { name: "▶ Run" });
+    await waitFor(() => expect(run()).toBeEnabled(), { timeout: 20_000 });
+
+    const code = screen.getByRole("button", { name: /^Code/ });
+    if (code.getAttribute("aria-expanded") !== "true") fireEvent.click(code);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Agent (scripted)" }, { timeout: 10_000 }));
+    const editor = await screen.findByRole("textbox", { name: "Code editor" });
+    const original = (editor as HTMLTextAreaElement).value;
+
+    fireEvent.change(editor, { target: { value: "async (job) => }" } });
+    expect(run()).toBeDisabled();
+    expect(screen.getByText("Agent code has a syntax error.")).toBeInTheDocument();
+
+    fireEvent.change(editor, { target: { value: original } });
+    expect(run()).toBeEnabled();
+    expect(screen.queryByText("Agent code has a syntax error.")).not.toBeInTheDocument();
   }, 40_000);
 });
 

@@ -316,10 +316,11 @@ export function ExampleRunner({
    */
   const displayAgent = model.agent ?? model.agents[0] ?? null;
 
-  // Deployed and diagrammed from the *resolved* BPMN (templates substituted),
-  // not `example.bpmn` directly — so what runs and what's shown is exactly
-  // what the diagnostics above are about.
-  const run = useExampleRun({ bpmn: draft.resolvedBpmn, decisions: example.decisions });
+  // The session is created once, from the model as first resolved; every
+  // later edit reaches the engine through `run.redeploy` in `beginRun`, so
+  // editing can't tear down a run that is still in progress.
+  const [initialBpmn] = useState(draft.resolvedBpmn);
+  const run = useExampleRun({ bpmn: initialBpmn, decisions: example.decisions });
 
   // Tell an embedding host the runner is actually usable — the engine has
   // loaded and the model deployed (phase "ready"), not merely that the shell
@@ -420,7 +421,18 @@ export function ExampleRunner({
   // `running` (a continuous `driveLoop`), so the status badge and button
   // disabling can tell "mid-round" apart from "mid-drive".
   const [stepping, setStepping] = useState(false);
-  const [compileError, setCompileError] = useState<string | null>(null);
+  // A live brain never calls the scripted source, so its errors can't block that run.
+  const scriptedAgentInUse =
+    model.agents.length > 0 && (brain.kind === "scripted" || !brain.chat);
+  const compileError = useMemo(() => {
+    if (!scriptedAgentInUse || !agentSource.trim()) return null;
+    try {
+      compileAgent(agentSource);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }, [scriptedAgentInUse, agentSource]);
   const [log, setLog] = useState<LogLine[]>([]);
   const [displayVars, setDisplayVars] = useState<Record<string, unknown>>({});
   // The payload the next instance will start with. Doubles as what the
@@ -961,10 +973,9 @@ export function ExampleRunner({
     // still compiled here, next to the editor, before the engine is touched.
     let scripted: AgentHandler | null = null;
     try {
-      if (model.agents.length > 0 && agentSource.trim())
+      if (scriptedAgentInUse && agentSource.trim())
         scripted = compileAgent(agentSource);
-    } catch (e) {
-      setCompileError(e instanceof Error ? e.message : String(e));
+    } catch {
       return null;
     }
 
@@ -1134,6 +1145,7 @@ export function ExampleRunner({
     example,
     draft,
     agentSource,
+    scriptedAgentInUse,
     startValues,
     imageSelection,
     pendingSeed,
@@ -1221,7 +1233,7 @@ export function ExampleRunner({
     // but re-check here too: `draft.hasErrors` is the single source of truth
     // for "safe to run", not just a button prop. Same for the start form's
     // validity — the button being disabled isn't the actual guarantee.
-    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors || openUserTask)
+    if (run.phase !== "ready" || runningRef.current || stepping || draft.hasErrors || compileError || openUserTask)
       return;
 
     // Set the in-flight lock *before* the first `await` (matching
@@ -1240,7 +1252,6 @@ export function ExampleRunner({
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
-        setCompileError(null);
         const prepared = await beginRun(seq);
         if (!prepared) return;
         workers = prepared.workers;
@@ -1260,7 +1271,7 @@ export function ExampleRunner({
         setRunning(false);
       }
     }
-  }, [run, stepping, draft.hasErrors, canResume, openUserTask, beginRun, driveLoop]);
+  }, [run, stepping, draft.hasErrors, compileError, canResume, openUserTask, beginRun, driveLoop]);
 
   // Same conditions as the Run button's `disabled`, deliberately duplicated
   // from one place rather than inverted by hand at each call site.
@@ -1277,6 +1288,7 @@ export function ExampleRunner({
     !running &&
     !stepping &&
     !draft.hasErrors &&
+    !compileError &&
     !needsStartForm &&
     !openUserTask;
 
@@ -1302,6 +1314,7 @@ export function ExampleRunner({
       runningRef.current ||
       stepping ||
       draft.hasErrors ||
+      compileError ||
       openUserTask
     )
       return;
@@ -1323,7 +1336,6 @@ export function ExampleRunner({
 
       if (!canResume) {
         if (startFormRef.current && !startFormRef.current.validate()) return;
-        setCompileError(null);
         const prepared = await beginRun(seq);
         if (!prepared) return;
         // A fresh Step stops once the instance exists, before any job runs, so
@@ -1379,6 +1391,7 @@ export function ExampleRunner({
     run,
     stepping,
     draft.hasErrors,
+    compileError,
     canResume,
     openUserTask,
     beginRun,

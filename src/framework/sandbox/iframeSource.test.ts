@@ -32,3 +32,48 @@ describe("buildSandboxDocument (contract B sandbox bridge)", () => {
     expect(doc).toContain("pendingCalls");
   });
 });
+
+/**
+ * Runs the generated script itself, with `parent`/`window` stood in: no
+ * isolation is being tested, only what the script posts back for a result.
+ */
+function runInStandInSandbox(source: string): Promise<Record<string, unknown>> {
+  const script = /<script>([\s\S]*)<\/script>/.exec(buildSandboxDocument())![1];
+  return new Promise((resolve) => {
+    let onMessage: (event: { data: unknown }) => void = () => {};
+    const parent = {
+      postMessage(message: Record<string, unknown>) {
+        if (message.kind === "result" || message.kind === "error") resolve(message);
+      },
+    };
+    const window = {
+      addEventListener: (_: string, fn: typeof onMessage) => (onMessage = fn),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+    new Function("parent", "window", script)(parent, window);
+    onMessage({ data: { kind: "run-handler", id: "1", source, job: { variables: {} } } });
+  });
+}
+
+/**
+ * A function or symbol result can't be structured-cloned, so posting it threw
+ * a DataCloneError before the host's own return-shape check ever saw it.
+ */
+describe("buildSandboxDocument (a handler's return value)", () => {
+  it.each([
+    ["() => () => 1", "a function"],
+    ["() => Symbol('x')", "a symbol"],
+    ["() => 42", "a number"],
+    ["() => [1, 2]", "an array"],
+  ])("fails `%s` with a message naming %s", async (source, what) => {
+    await expect(runInStandInSandbox(source)).resolves.toEqual({
+      kind: "error",
+      id: "1",
+      message: `Handler returned ${what} — return an object of variables to merge, or nothing.`,
+    });
+  });
+
+  it.each([["() => ({ packed: true })"], ["() => null"], ["() => {}"]])("posts `%s` as a result", async (source) => {
+    await expect(runInStandInSandbox(source)).resolves.toMatchObject({ kind: "result", id: "1" });
+  });
+});
