@@ -253,6 +253,10 @@ function helpers(page, base, result) {
     note(message) {
       result.notes.push(message);
     },
+    /** End the case without verifying anything; reported apart from passes. */
+    skip(reason) {
+      result.skipped = reason;
+    },
     consoleMessages: () => result.console,
     pageErrors: () => result.pageErrors,
     async screenshot(name) {
@@ -344,7 +348,9 @@ async function main() {
           const r = await runCase(browser, name, server.base, c);
           results.push(r);
           writeFileSync(join(OUT, "report.json"), JSON.stringify(results, null, 2));
-          console.log(`${r.pass ? "✔" : "✘"} [${name}] ${c.id} — ${c.title}  (${Math.round(r.ms / 1000)}s)`);
+          const mark = r.skipped && r.pass ? "○" : r.pass ? "✔" : "✘";
+          console.log(`${mark} [${name}] ${c.id} — ${c.title}  (${Math.round(r.ms / 1000)}s)`);
+          if (r.skipped) console.log(`    SKIPPED ${r.skipped}`);
           for (const f of r.fail) console.log(`    FAIL ${f}`);
           for (const n of r.notes) console.log(`    note ${n}`);
         }
@@ -356,7 +362,8 @@ async function main() {
     server.stop();
   }
   const failed = results.filter((r) => !r.pass).length;
-  console.log(`\n${results.length - failed}/${results.length} passed. Report: ${join(OUT, "report.json")}`);
+  const skipped = results.filter((r) => r.pass && r.skipped).length;
+  console.log(`\n${results.length - failed - skipped}/${results.length} passed, ${skipped} skipped. Report: ${join(OUT, "report.json")}`);
   process.exitCode = failed ? 1 : 0;
 }
 

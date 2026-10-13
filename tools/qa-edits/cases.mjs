@@ -107,6 +107,7 @@ export const cases = [
       await h.page.waitForTimeout(300);
       const after = (await h.alerts()).join(" | ");
       h.expect(!/syntax error|didn't compile/i.test(after), `the compile error is still shown after the fix: ${after}`);
+      h.expect(!(await h.runDisabled()), "Run still disabled after the agent was fixed");
       h.note(`original agent source starts: ${original.slice(0, 40)}`);
     },
   },
@@ -290,10 +291,9 @@ function diagnosticCases() {
         h.note(`errors ${JSON.stringify(diags)}; warnings ${JSON.stringify(warns)}`);
         h.expect(warns.some((w) => /<bpmn:process> elements/.test(w)), "no two-process warning");
         h.expect(!warns.some((w) => /parseModel/.test(w)), "the warning tells a reader to call an internal function");
-        if (!diags.length) {
-          const s = await h.run();
-          h.expect(s === "Completed", `the primary process didn't complete after adding a pool: "${s}"`);
-        }
+        h.expect(diags.length === 0, `a second pool produced errors: ${JSON.stringify(diags)}`);
+        const s = await h.run();
+        h.expect(s === "Completed", `the primary process didn't complete after adding a pool: "${s}"`);
       },
     },
     {
@@ -497,13 +497,14 @@ function modelerCases() {
       async run(h) {
         await h.open("learn-service-task");
         await h.modelTab();
-        await h.page.getByRole("button", { name: "Full screen" }).click();
+        await h.page.getByRole("button", { name: "Full screen", exact: true }).click();
         await h.select("Activity_prepare");
         await h.setProp("name", "Renamed step");
         await h.page.locator(".model-editor-canvas .djs-container").click({ position: { x: 600, y: 40 } });
         await h.page.keyboard.press("Escape");
         await h.page.waitForTimeout(400);
-        h.expect(await h.page.getByRole("button", { name: "Full screen" }).count() > 0, "still in full screen after Escape");
+        // Exact: the expanded button's "Exit full screen (Esc)" also contains "Full screen".
+        h.expect(await h.page.getByRole("button", { name: "Full screen", exact: true }).count() > 0, "still in full screen after Escape");
         const label = await nameOnCanvas(h, "Activity_prepare");
         h.expect(/Renamed step/.test(label), `edit lost leaving full screen: "${label}"`);
       },
@@ -608,6 +609,10 @@ function securityCases() {
         const s = await h.run();
         const trace = await h.traceText();
         h.note(`status "${s}"; ${trace.split("\n").filter((l) => /blocked|: /.test(l) && /parent|top|local|cookie|open|alert|fetch/.test(l)).join(" | ")}`);
+        // The negative checks below only mean something if every probe actually ran.
+        h.expect(s === "Completed", `the probe handler didn't complete: "${s}"`);
+        for (const probeName of ["parent.document", "top.location.set", "localStorage", "cookie", "window.open", "alert", "fetch"])
+          h.expect(new RegExp(`^\\s*${probeName.replace(".", "\\.")}( blocked)?:`, "m").test(trace), `the ${probeName} probe never reported`);
         h.expect(h.page.url() === url, "the handler navigated the page");
         const unexpected = h.pageErrors().filter((e) => !/sandboxed/i.test(e));
         h.expect(unexpected.length === 0, `page errors besides the sandbox's refusals: ${JSON.stringify(unexpected)}`);
@@ -676,7 +681,7 @@ function agentCases() {
       timeoutMs: 20 * 60_000,
       async run(h) {
         const up = await fetch(`${OLLAMA}/models`).then((r) => r.ok).catch(() => false);
-        if (!up) return h.note(`skipped: nothing at ${OLLAMA}`);
+        if (!up) return h.skip(`nothing at ${OLLAMA}`);
         const hash = encodeURIComponent(JSON.stringify({ brain: "endpoint" }));
         await h.open("seed-export-compliance", `#s=${hash}`);
         await connectEndpointBrain(h);
