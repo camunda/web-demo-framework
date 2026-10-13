@@ -12,6 +12,12 @@ export const cases = [
       await h.modelTab();
       await h.select("Event_done");
       await h.setProp("name", "Request reviewed (edited)");
+      // An event's name is drawn as a separate label element, wrapped differently per browser.
+      await h.page.waitForFunction(
+        () => (document.querySelector('.model-editor-canvas [data-element-id="Event_done_label"]')?.textContent ?? "").replace(/\s+/g, "").includes("Requestreviewed(edited)"),
+        null,
+        { timeout: 5_000 },
+      ).catch(() => h.expect(false, "the edit never landed on the diagram"));
       await h.page.waitForTimeout(1500);
       const after = await h.status();
       h.expect(after === "Fill out the form below", `status after the edit was "${after}" — the parked run was torn down`);
@@ -226,9 +232,11 @@ function diagnosticCases() {
         await h.modelTab();
         await h.select("Activity_prepare");
         await h.openGroup("Task definition");
+        const before = await h.page.locator(".model-editor-properties #bio-properties-panel-taskDefinitionType").inputValue();
+        h.expect(before === "prepare-package", `expected the shipped job type before clearing, got "${before}"`);
         await h.fillField("bio-properties-panel-taskDefinitionType", "");
         const diags = await h.diagnostics();
-        h.expect(diags.some((d) => /has no job type/.test(d)), `no missing-job-type error; got ${JSON.stringify(diags)}`);
+        h.expect(diags.some((d) => /\(Activity_prepare\) has no job type/.test(d)), `no missing-job-type error for Activity_prepare; got ${JSON.stringify(diags)}`);
         h.expect(!diags.some((d) => /orphaned by a rename/.test(d)), "a task that lost its job type is called an orphaned handler");
         h.expect(await h.runDisabled(), "Run enabled");
       },
@@ -349,7 +357,7 @@ function modelerCases() {
       async run(h) {
         await h.open("learn-service-task");
         await h.modelTab();
-        const revert = h.page.getByRole("button", { name: "Revert to original" });
+        const revert = h.page.getByRole("button", { name: "Revert to original", exact: true });
         h.expect(await revert.isDisabled(), "Revert enabled before any edit");
         await h.select("Activity_prepare");
         await h.setProp("name", "Renamed step");
@@ -407,7 +415,7 @@ function modelerCases() {
     },
     {
       id: "p3-select-template-button",
-      title: "the properties panel's 'Select a template' button doesn't break the page",
+      title: "the properties panel's 'Select a template' button leaves the editor usable",
       async run(h) {
         await h.open("order-process");
         await h.modelTab();
@@ -416,7 +424,11 @@ function modelerCases() {
         if (!(await button.count())) return h.skip("no Select a template button on this element");
         await button.click();
         await h.page.waitForTimeout(800);
+        // No template chooser is installed, so the click opens nothing; the editor must still respond.
         h.note(`after click: popups ${await h.page.locator(".djs-popup, [role=dialog]").count()}`);
+        await h.select("Activity_1ppsbgi");
+        await h.setProp("name", "Charge (edited)");
+        h.expect(/Charge \(edited\)/.test(await nameOnCanvas(h, "Activity_1ppsbgi")), "the editor stopped taking edits after the click");
       },
     },
     {
@@ -580,7 +592,7 @@ function securityCases() {
         await h.page.waitForTimeout(500);
         h.expect(!(await h.page.evaluate(() => window.__qaXss)), "an element name executed as HTML");
         h.expect((await h.page.locator(".runner img[src=x]").count()) === 0, "an element name became an <img>");
-        h.expect((await h.page.locator(".runner").innerText()).includes("<img src=x"), "the edited name isn't shown as text");
+        h.expect((await h.diagnostics()).some((d) => d.includes("<img src=x")), "the diagnostic naming the element doesn't show its name as text");
       },
     },
     {
@@ -596,11 +608,12 @@ function securityCases() {
         const trigger = h.page.locator(".panel-trigger").filter({ hasText: "Tools, as the model sees them" });
         if ((await trigger.getAttribute("data-state")) !== "open") await trigger.click();
         await h.page.waitForTimeout(500);
+        const toolsPanel = h.page.locator(".panel").filter({ has: trigger });
         h.expect(!(await h.page.evaluate(() => window.__qaXss)), "tool documentation executed as HTML");
         // A CSP could stop the handler running and still leave a real element behind.
-        h.expect((await h.page.locator(".runner img[src=x]").count()) === 0, "tool documentation became an <img>");
-        // Otherwise both checks pass vacuously when the panel shows no documentation at all.
-        h.expect((await h.page.locator(".runner").innerText()).includes("<img src=x"), "the edited documentation isn't shown as text");
+        h.expect((await toolsPanel.locator("img[src=x]").count()) === 0, "tool documentation became an <img>");
+        // Scoped to the panel: the properties field holding the same text would otherwise satisfy it.
+        h.expect((await toolsPanel.innerText()).includes("<img src=x"), "the Tools panel doesn't show the edited documentation as text");
         h.note(`tool ${tool}`);
       },
     },
@@ -611,7 +624,10 @@ function securityCases() {
       allowPageErrors: true,
       async run(h) {
         await h.open("learn-service-task");
-        await h.page.evaluate(() => localStorage.setItem("qa-secret", "s3cret"));
+        await h.page.evaluate(() => {
+          localStorage.setItem("qa-secret", "s3cret");
+          document.cookie = "qa-cookie=c00kie; path=/";
+        });
         const probe = `async (job, { trace }) => {
   const tryIt = (name, fn) => { try { trace(name + ": " + String(fn())); } catch (e) { trace(name + " blocked: " + e.name); } };
   tryIt("parent.document", () => parent.document.title);
@@ -639,6 +655,7 @@ function securityCases() {
         h.expect(unexpected.length === 0, `page errors besides the sandbox's refusals: ${JSON.stringify(unexpected)}`);
         h.expect(popups.length === 0, "the handler opened a window");
         h.expect(!/localStorage: s3cret/.test(trace), "the handler read the page's localStorage");
+        h.expect(!/c00kie/.test(trace), "the handler read the page's cookie");
         h.expect(!/parent\.document: /.test(trace.replace(/parent\.document blocked/g, "")), "the handler read the parent document");
         // The page's own server grants no CORS read access to the sandbox's opaque origin.
         h.expect(/^\s*fetch blocked:/m.test(trace), "the handler read a response from the page's own origin");

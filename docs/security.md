@@ -69,11 +69,11 @@ Implemented in `src/framework/sandbox/`:
   `postMessage`); only `trace(...)` calls are relayed back to the host's
   activity log.
 - **One iframe per call**, torn down immediately after it settles. This gives
-  two properties: a handler that never settles is survivable (the host
-  destroys the iframe on a timeout — default 5s — and the job fails), and runs
-  don't leak state into each other (no global left behind by a previous
-  call's source, no closure held across turns). The timeout only covers code that
-  *yields*, such as a promise that never resolves. A synchronous loop
+  two properties: a handler that yields but never settles — a promise that
+  never resolves — is survivable (the host destroys the iframe on a timeout,
+  default 5s, and the job fails), and runs don't leak state into each other
+  (no global left behind by a previous call's source, no closure held across
+  turns). The timeout cannot stop code that never yields. A synchronous loop
   (`while (true) {}`) never gives the host's timer a turn wherever the
   browser runs the sandboxed iframe on the page's own thread — Safari and
   Firefox among them — so it freezes the tab until reload. That is accepted:
