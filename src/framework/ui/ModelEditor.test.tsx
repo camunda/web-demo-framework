@@ -1,6 +1,6 @@
 import { createRef } from "react";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { BpmnModdle as BpmnModdleType } from "bpmn-moddle";
 import * as BpmnModdleModule from "bpmn-moddle";
 import zeebeModdleDescriptor from "zeebe-bpmn-moddle/resources/zeebe.json";
@@ -33,27 +33,25 @@ vi.mock("camunda-bpmn-js-behaviors/lib/camunda-cloud", () => ({
   default: {},
 }));
 
+const applied = vi.hoisted(() => [] as Array<{ id: string; version?: number }>);
+
 vi.mock("bpmn-js-element-templates", () => {
   class FakeElementTemplates {
     static $inject: string[] = [];
-    private templates: Array<{ id: string; appliesTo?: string[] }> = [];
-    set(templates: Array<{ id: string; appliesTo?: string[] }>) {
+    private templates: Array<{ id: string; version?: number }> = [];
+    set(templates: Array<{ id: string; version?: number }>) {
       this.templates = templates;
     }
-    getAll(element: { type?: string } | null) {
-      return this.templates.filter(
-        (template) =>
-          !template.appliesTo ||
-          !element?.type ||
-          template.appliesTo.includes(element.type),
-      );
+    // Every template applies to every element here; applicability is the real package's job.
+    getAll() {
+      return this.templates;
     }
-    get(id: string) {
-      return this.templates.find((template) => template.id === id) ?? null;
+    // As the real one: no version given means "the unversioned template", not "any".
+    get(id: string, version?: number) {
+      return this.templates.find((t) => t.id === id && t.version === version) ?? null;
     }
-    applyTemplate() {
-      // No-op: the real package's application logic is exercised by
-      // `npm run build`'s production bundle, not this jsdom unit test.
+    applyTemplate(_element: unknown, template: { id: string; version?: number }) {
+      applied.push(template);
     }
   }
   return {
@@ -66,6 +64,9 @@ vi.mock("bpmn-js-element-templates", () => {
 });
 
 const { ModelEditor } = await import("./ModelEditor");
+
+// RTL's auto-cleanup is off in this repo; without this each case leaves a live Modeler behind.
+afterEach(cleanup);
 
 // The published `@types/bpmn-moddle` declares a named `BpmnModdle` export,
 // but the package itself ships a plain CJS default export at runtime (no
@@ -222,6 +223,46 @@ describe("ModelEditor component", () => {
     expect(container.textContent).toContain(
       "Select an element to see its properties and connector templates.",
     );
+  });
+
+  it("applies the versioned template the reader picks", async () => {
+    applied.length = 0;
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Agent_1"]')).not.toBeNull(),
+    );
+    const hit = container.querySelector('[data-element-id="Agent_1"] .djs-hit')!;
+    fireEvent.click(hit);
+    const picker = await waitFor(() => {
+      const select = container.querySelector<HTMLSelectElement>(".model-editor-template-picker select");
+      expect(select).not.toBeNull();
+      return select!;
+    });
+    fireEvent.change(picker, { target: { value: "io.camunda.connectors.demo.inventory-check:1" } });
+    expect(applied).toEqual([
+      expect.objectContaining({ id: "io.camunda.connectors.demo.inventory-check:1", version: 1 }),
+    ]);
+  });
+
+  it("takes the modeler's keyboard shortcuts on its canvas, and only there", async () => {
+    const { container } = render(
+      <ModelEditor value={ZEEBE_AGENT_FIXTURE} onChange={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Agent_1"]')).not.toBeNull(),
+    );
+    const idle = "Select an element to see its properties and connector templates.";
+    const canvas = within(container).getByRole("application", { name: "Diagram editor" });
+    expect(canvas.tabIndex).toBe(0);
+
+    // Cmd/Ctrl+A is the modeler's select-all; a selection replaces the idle hint.
+    fireEvent.keyDown(document.body, { key: "a", ctrlKey: true, metaKey: true });
+    expect(container.textContent).toContain(idle);
+
+    fireEvent.keyDown(canvas, { key: "a", ctrlKey: true, metaKey: true });
+    await waitFor(() => expect(container.textContent).not.toContain(idle));
   });
 
   it("reimports when `value` changes externally (e.g. Revert to original)", async () => {
