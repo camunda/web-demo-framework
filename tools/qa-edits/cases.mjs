@@ -703,8 +703,12 @@ function agentCases() {
       title: "[ollama] with a live brain connected, a broken scripted agent doesn't block Run",
       timeoutMs: 20 * 60_000,
       async run(h) {
-        const up = await fetch(`${OLLAMA}/models`).then((r) => r.ok).catch(() => false);
-        if (!up) return h.skip(`nothing at ${OLLAMA}`);
+        // A running server with no models answers 200 too, and then Connect never enables.
+        const models = await fetch(`${OLLAMA}/models`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((body) => (Array.isArray(body?.data) ? body.data.length : 0))
+          .catch(() => 0);
+        if (!models) return h.skip(`no models served at ${OLLAMA}`);
         const hash = encodeURIComponent(JSON.stringify({ brain: "endpoint" }));
         await h.open("seed-export-compliance", `#s=${hash}`);
         await connectEndpointBrain(h);
