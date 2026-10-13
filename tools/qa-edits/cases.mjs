@@ -298,6 +298,7 @@ function diagnosticCases() {
         const warns = await h.warnings();
         h.note(`errors ${JSON.stringify(diags)}; warnings ${JSON.stringify(warns)}`);
         h.expect(warns.some((w) => /<bpmn:process> elements/.test(w)), "no two-process warning");
+        h.expect(warns.some((w) => w.includes('Run starts "learn_service_task"')), "the warning doesn't name the process Run starts");
         h.expect(!warns.some((w) => /parseModel/.test(w)), "the warning tells a reader to call an internal function");
         h.expect(diags.length === 0, `a second pool produced errors: ${JSON.stringify(diags)}`);
         const s = await h.run();
@@ -792,12 +793,15 @@ function handlerCases() {
     ["returns-number", "async () => 42", { incident: true, trace: /Handler returned a number/ }],
     ["returns-string", "async () => 'x'", { incident: true, trace: /Handler returned a string/ }],
     ["returns-array", "async () => [1, 2]", { incident: true, trace: /Handler returned an array/ }],
+    ["returns-boolean", "async () => true", { incident: true, trace: /Handler returned a boolean/ }],
+    ["returns-symbol", "async () => Symbol('x')", { incident: true, trace: /Handler returned a symbol/ }],
     ["returns-null", "async () => null", { completes: true }],
     ["returns-undefined", "async () => {}", { completes: true }],
     ["returns-function", "async () => () => 1", { incident: true, trace: /Handler returned a function/ }],
-    ["returns-nested-function", "async () => ({ f: () => 1 })", { incident: true }],
-    ["returns-circular", "async () => { const o = {}; o.self = o; return o; }", {}],
-    ["returns-big", "async () => ({ big: 'x'.repeat(5_000_000) })", {}],
+    // The browser's own wording differs per engine ("could not be cloned", "can not be cloned"; "circular", "cyclic").
+    ["returns-nested-function", "async () => ({ f: () => 1 })", { incident: true, trace: /(could|can) not be cloned/ }],
+    ["returns-circular", "async () => { const o = {}; o.self = o; return o; }", { incident: true, trace: /circular|cyclic/i }],
+    ["returns-big", "async () => ({ big: 'x'.repeat(5_000_000) })", { completes: true }],
   ];
   return shapes.map(([name, source, want]) => ({
     id: `h4-${name}`,
