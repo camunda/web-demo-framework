@@ -413,10 +413,31 @@ function modelerCases() {
         await h.modelTab();
         await h.select("Activity_0tw2fu0");
         const button = h.page.locator(".model-editor-properties").getByTitle("Select a template");
-        if (!(await button.count())) return h.note("no Select a template button");
+        if (!(await button.count())) return h.skip("no Select a template button on this element");
         await button.click();
         await h.page.waitForTimeout(800);
         h.note(`after click: popups ${await h.page.locator(".djs-popup, [role=dialog]").count()}`);
+      },
+    },
+    {
+      id: "p3-select-all-delete",
+      title: "Cmd/Ctrl+A then Delete on the canvas removes every element, and undo brings them back",
+      async run(h) {
+        await h.open("learn-service-task");
+        await h.modelTab();
+        const tasks = () => h.page.locator('.model-editor-canvas [data-element-id="Activity_prepare"], .model-editor-canvas [data-element-id="Activity_dispatch"]').count();
+        h.expect((await tasks()) > 0, "the tasks aren't on the canvas to begin with");
+        await h.page.locator(".model-editor-canvas .djs-container").click({ position: { x: 600, y: 40 } });
+        await h.page.keyboard.press("ControlOrMeta+A");
+        await h.page.keyboard.press("Delete");
+        await h.page.waitForTimeout(600);
+        h.expect((await tasks()) === 0, "select all + Delete left the tasks on the canvas");
+        const diags = await h.diagnostics();
+        h.expect(diags.some((d) => /Handler "Activity_prepare" doesn't match any element/.test(d)), `deleting reached the draft but not as expected: ${JSON.stringify(diags)}`);
+        await h.page.keyboard.press("ControlOrMeta+Z");
+        await h.page.waitForTimeout(600);
+        h.expect((await tasks()) > 0, "undo didn't bring the deleted tasks back");
+        h.expect((await h.diagnostics()).length === 0, "diagnostics left after undoing the delete");
       },
     },
     {
@@ -586,7 +607,7 @@ function securityCases() {
     {
       id: "p9-sandbox-reach",
       title: "handler code can't reach the page, its storage, or navigate it",
-      // WebKit reports the sandbox's own refusals (navigation, alert) as page errors.
+      // WebKit reports the sandbox's own refusals (navigation, alert, CORS) as page errors.
       allowPageErrors: true,
       async run(h) {
         await h.open("learn-service-task");
@@ -599,7 +620,7 @@ function securityCases() {
   tryIt("cookie", () => document.cookie);
   tryIt("window.open", () => window.open("about:blank"));
   tryIt("alert", () => alert("x"));
-  try { const r = await fetch(location.origin === "null" ? "${"http://127.0.0.1:5197/"}" : "/"); trace("fetch: " + r.status); } catch (e) { trace("fetch blocked: " + e.message); }
+  try { const r = await fetch(${JSON.stringify(h.base + "/")}); trace("fetch: " + r.status); } catch (e) { trace("fetch blocked: " + e.message); }
   return { probed: true };
 }`;
         await h.setEditor("Prepare package", probe);
@@ -614,11 +635,13 @@ function securityCases() {
         for (const probeName of ["parent.document", "top.location.set", "localStorage", "cookie", "window.open", "alert", "fetch"])
           h.expect(new RegExp(`^\\s*${probeName.replace(".", "\\.")}( blocked)?:`, "m").test(trace), `the ${probeName} probe never reported`);
         h.expect(h.page.url() === url, "the handler navigated the page");
-        const unexpected = h.pageErrors().filter((e) => !/sandboxed/i.test(e));
+        const unexpected = h.pageErrors().filter((e) => !/sandboxed|access control checks/i.test(e));
         h.expect(unexpected.length === 0, `page errors besides the sandbox's refusals: ${JSON.stringify(unexpected)}`);
         h.expect(popups.length === 0, "the handler opened a window");
         h.expect(!/localStorage: s3cret/.test(trace), "the handler read the page's localStorage");
         h.expect(!/parent\.document: /.test(trace.replace(/parent\.document blocked/g, "")), "the handler read the parent document");
+        // The page's own server grants no CORS read access to the sandbox's opaque origin.
+        h.expect(/^\s*fetch blocked:/m.test(trace), "the handler read a response from the page's own origin");
       },
     },
   ];
