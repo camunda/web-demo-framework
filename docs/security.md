@@ -69,11 +69,16 @@ Implemented in `src/framework/sandbox/`:
   `postMessage`); only `trace(...)` calls are relayed back to the host's
   activity log.
 - **One iframe per call**, torn down immediately after it settles. This gives
-  two properties for free: a handler that hangs is survivable (there is no
-  graceful way to stop code that never yields, so the host just destroys the
-  iframe on a timeout — default 5s — and the page never blocks), and runs
-  don't leak state into each other (no global a previous call's source
-  polluted, no closure held across turns).
+  two properties: a handler that yields but never settles — a promise that
+  never resolves — is survivable (the host destroys the iframe on a timeout,
+  default 5s, and the job fails), and runs don't leak state into each other
+  (no global left behind by a previous call's source, no closure held across
+  turns). The timeout cannot stop code that never yields. A synchronous loop
+  (`while (true) {}`) never gives the host's timer a turn wherever the
+  browser runs the sandboxed iframe on the page's own thread — Safari and
+  Firefox among them — so it freezes the tab until reload. That is accepted:
+  it can only freeze the reader's own tab, whether with code they typed or
+  with an example's own reviewed handler source.
 - A handler that **throws** still surfaces as a normal job failure —
   `dispatchRound`'s existing incident path is untouched, since the sandbox
   just turns a thrown error into a rejected `Promise`, exactly like the old
@@ -81,8 +86,8 @@ Implemented in `src/framework/sandbox/`:
 
 See `src/framework/sandbox/selfTest.ts` for a **live, in-browser**
 demonstration that a sandboxed handler cannot read `parent.document` or write
-this page's `localStorage`, that a thrown error surfaces, and that a hang
-times out instead of freezing the tab. It is deliberately not an automated
+this page's `localStorage`, that a thrown error surfaces, and that a promise
+that never settles times out. It is deliberately not an automated
 CI test: **jsdom does not implement `iframe sandbox` origin isolation at
 all**, so a test run under it would pass unconditionally, even if this
 boundary were completely broken, and would therefore be actively misleading.
@@ -197,15 +202,19 @@ origin.
 
 ## Editing inside an embed
 
-**Decision:** embed mode is **read-only**, with a visible "open full page" link
-out. A docs page embedding this demo already trusts *this framework's own
-example code* (author-supplied, reviewed, in the repo); it should not also
-have to reason about a visitor typing arbitrary JavaScript into a form
-embedded inside a Camunda property. The Monaco editor / code tabs simply
-don't render in `?embed=1` (routing and the exact embed contract are owned by
-issue #8, which is explicitly told to leave the "edited source in the URL"
-feature out until this task lands — so there is nothing to gate here yet
-beyond stating the decision the embed work should follow).
+**Decision:** an embed is only read-only when the host asks for it.
+`?embed=1` keeps the Code panel (handler, agent and prompt tabs, and the
+model editor) and the brain picker, so a docs page can offer the editable
+demo inline. `?embed=1&view=compact` drops all of them and leaves the
+diagram, the input, the human-task forms and Run/Step/Reset; its "open the
+editable version" link goes to the full page. A host that should not offer
+a visitor a place to type JavaScript inside a Camunda property must ask for
+`view=compact` — camunda.com's `RunnableDemoEmbed` does on every page that
+embeds the demo, but its own default is the full view.
+
+Edited source still never arrives through the URL (issue #8 deliberately
+leaves "edited source in the URL" out), so neither mode can be made to run
+code a visitor didn't type themselves.
 
 ## Prefer a separate origin, in addition to the sandbox
 
