@@ -340,7 +340,7 @@ function diagnosticCases() {
         const trace = await h.traceText();
         h.note(`status "${s}"`);
         h.expect(/listener \(no code supplied\)/.test(trace), "trace doesn't say the listener ran with no code");
-        h.expect(s === "Fill out the form below" || s === "Completed", `ended in "${s}"`);
+        h.expect(s === "Fill out the form below", `ended in "${s}"`);
       },
     },
   ];
@@ -712,7 +712,7 @@ function agentCases() {
         h.expect(diags.length === 0, `diagnostics: ${JSON.stringify(diags)}`);
         h.note(`warnings: ${JSON.stringify(await h.warnings())}`);
         const s = await h.run();
-        h.expect(["Completed", "Fill out the form below"].includes(s), `ended "${s}"`);
+        h.expect(s === "Completed", `ended "${s}"`);
       },
     },
     {
@@ -721,7 +721,7 @@ function agentCases() {
       timeoutMs: 20 * 60_000,
       async run(h) {
         // A running server with no models answers 200 too, and then Connect never enables.
-        const models = await fetch(`${OLLAMA}/models`)
+        const models = await fetch(`${OLLAMA}/models`, { signal: AbortSignal.timeout(5_000) })
           .then((r) => (r.ok ? r.json() : null))
           .then((body) => (Array.isArray(body?.data) ? body.data.length : 0))
           .catch(() => 0);
@@ -758,7 +758,7 @@ function modeCases() {
         h.expect((await link.count()) === 1, "no link to the editable version");
         if (await link.count()) h.expect(!/view=compact|embed=1/.test((await link.getAttribute("href")) ?? ""), "the editable link keeps embed flags");
         const s = await h.run();
-        h.expect(["Completed", "Fill out the form below"].includes(s), `compact run ended "${s}"`);
+        h.expect(s === "Completed", `compact run ended "${s}"`);
       },
     },
     {

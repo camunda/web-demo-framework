@@ -77,7 +77,8 @@ Implemented in `src/framework/sandbox/`:
   (`while (true) {}`) never gives the host's timer a turn wherever the
   browser runs the sandboxed iframe on the page's own thread — Safari and
   Firefox among them — so it freezes the tab until reload. That is accepted:
-  it can only freeze the reader's own tab, with code they typed themselves.
+  it can only freeze the reader's own tab, whether with code they typed or
+  with an example's own reviewed handler source.
 - A handler that **throws** still surfaces as a normal job failure —
   `dispatchRound`'s existing incident path is untouched, since the sandbox
   just turns a thrown error into a rejected `Promise`, exactly like the old
