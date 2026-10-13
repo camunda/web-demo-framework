@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { BpmnModdle as BpmnModdleType } from "bpmn-moddle";
 import * as BpmnModdleModule from "bpmn-moddle";
@@ -254,7 +254,7 @@ describe("ModelEditor component", () => {
       expect(container.querySelector('[data-element-id="Agent_1"]')).not.toBeNull(),
     );
     const idle = "Select an element to see its properties and connector templates.";
-    const canvas = container.querySelector<HTMLElement>('[aria-label="Diagram editor"]')!;
+    const canvas = within(container).getByRole("application", { name: "Diagram editor" });
     expect(canvas.tabIndex).toBe(0);
 
     // Cmd/Ctrl+A is the modeler's select-all; a selection replaces the idle hint.

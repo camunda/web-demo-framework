@@ -552,6 +552,8 @@ function ModelEditorComponent({ value, onChange }: ModelEditorProps) {
           className="editor-wrap model-editor-canvas"
           // Focusable, so a click on the diagram gives its shortcuts the keys.
           tabIndex={0}
+          // A keyboard-driven custom widget: screen readers pass its shortcuts through.
+          role="application"
           aria-label="Diagram editor"
         />
         <div
