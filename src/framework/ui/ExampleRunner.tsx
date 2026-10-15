@@ -40,6 +40,7 @@ import { ImageInputPanel } from "./ImageInputPanel";
 import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
+import { toolCallOutcomes, type CallOutcome } from "../toolCalls";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import { VariableList } from "./VariableList";
@@ -1218,6 +1219,11 @@ export function ExampleRunner({
     [model],
   );
   const takenFlows = useMemo(() => run.snapshot?.takenSequenceFlows ?? [], [run.snapshot]);
+  const callOutcomes = useMemo(
+    () => (run.snapshot ? toolCallOutcomes(run.events(), run.snapshot) : new Map<string, CallOutcome>()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
+    [run.snapshot],
+  );
   // A closed panel shows nothing, so what happens meanwhile is history once it
   // reopens — unlike what arrives while an open panel's diagram is still loading.
   useEffect(() => {
@@ -2080,6 +2086,7 @@ export function ExampleRunner({
             incidents={run.snapshot?.incidents}
             labelFor={elementLabels}
             hasAgent={!!displayAgent}
+            callOutcomes={callOutcomes}
             variables={
               <details
                 className="vars-block"

@@ -28,6 +28,8 @@ const CLEARLY_ESCALATED = fraudAlertTriage.scenarios!.find((s) =>
   s.label.startsWith("Clearly escalated"),
 )!.variables;
 
+const MUNDANE = fraudAlertTriage.scenarios!.find((s) => s.label.startsWith("Mundane"))!.variables;
+
 const notes = () => screen.getByLabelText(/Case closing notes/) as HTMLTextAreaElement;
 const completeButton = () => screen.getByRole("button", { name: "Complete task" });
 // form-js debounces a textarea and flushes on blur, which a real click on
@@ -65,5 +67,22 @@ describe("fraud-alert-triage in the runner", () => {
       typeNotes("second answer");
     });
     expect(app.trace().join("\n")).toContain('👤 {"caseClosedNotes":"second answer"}');
+  }, 60_000);
+
+  it("shows the analyst consult as cancelled when a second alert interrupts it, not still running", async () => {
+    const app = await renderExample({ ...fraudAlertTriage, seed: MUNDANE });
+    await app.run();
+    // The agent stopped to ask the analyst: its consult tool is running.
+    expect(app.status()).toBe("Fill out the form below");
+    const consultOutput = () =>
+      screen
+        .getByRole("article", { name: "Tool call: Ask fraud analyst" })
+        .querySelectorAll(".timeline-io-col")[1];
+    expect(consultOutput()).toHaveTextContent("running…");
+
+    // The second alert interrupts the agent, consult and all.
+    fireEvent.click(screen.getByRole("button", { name: /A second alert arrives/ }));
+    await app.settle();
+    await waitFor(() => expect(consultOutput()).toHaveTextContent("canceled"));
   }, 60_000);
 });

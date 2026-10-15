@@ -10,6 +10,7 @@ import { buildWorkers } from "./compile";
 import { claimTools, type TurnRef } from "./agent/liveAgent";
 import { tagActivations } from "./agent/activation";
 import { loadReadModelWasm } from "./testing/readModelWasm";
+import { toolCallOutcomes } from "./toolCalls";
 import type { ExampleHandler, TraceEntry } from "./types";
 import fixture from "../../tools/probe/fixtures/adhoc-inner-flow.bpmn?raw";
 
@@ -28,8 +29,12 @@ import fixture from "../../tools/probe/fixtures/adhoc-inner-flow.bpmn?raw";
 const BPMN: string = fixture;
 const AGENT_JOB = "io.camunda.agenticai:aiagent-job-worker:1";
 
-/** Run the agent through `plan` — one list of tools to activate per iteration. */
-async function run(plan: string[][]) {
+/**
+ * Run the agent through `plan` — one list of tools to activate per iteration.
+ * `stall` names job types whose worker serves `limit` jobs and then goes, so
+ * the next job of that type is left waiting: a call still running.
+ */
+async function run(plan: string[][], stall: string[] = [], limit = 1) {
   const model = parseModel(BPMN);
   const session = await createBojtosSession({ variant: "readmodel", wasm: loadReadModelWasm() });
   session.deploy(BPMN);
@@ -41,6 +46,16 @@ async function run(plan: string[][]) {
     { ChainedTool: noop, ChainedFollowUp: noop, CompoundInner: noop, CompoundFollowUp: noop },
     (e) => log.push(e),
   );
+  for (const jobType of stall) {
+    const serve = workers[jobType];
+    let left = limit;
+    if (left === 0) delete workers[jobType];
+    else
+      workers[jobType] = async (job) => {
+        if (--left === 0) delete workers[jobType];
+        return serve(job);
+      };
+  }
   const turnRef: TurnRef = { current: undefined };
   let turn = 0;
   const agent: AgentHandler = async (): Promise<AgentResult> => {
@@ -55,23 +70,40 @@ async function run(plan: string[][]) {
     if (round.handled === 0) break;
   }
   // One identity per job: what its started line was stamped with.
-  return log
+  const followUps = log
     .filter((e) => e.elementId === "ChainedFollowUp" && e.text.startsWith("▶"))
     .map(({ turn, call }) => ({ turn, call }));
+  return Object.assign(followUps, {
+    outcomes: Object.fromEntries(toolCallOutcomes(session.events(), session.snapshot())),
+  });
 }
 
 describe("a tool's job and the agent call that made it", () => {
   it("leaves a flow-started run uncounted, then numbers the agent's own call 1", async () => {
     // Iteration 1 runs ChainedTool, whose flow starts ChainedFollowUp; then
     // the agent calls ChainedFollowUp itself.
-    expect(await run([["ChainedTool"], ["ChainedFollowUp"]])).toEqual([
+    expect([...(await run([["ChainedTool"], ["ChainedFollowUp"]]))]).toEqual([
       { turn: undefined, call: undefined },
       { turn: 2, call: 1 },
     ]);
   });
 
+  it("does not call a still-running call completed because a flow-started run of it finished", async () => {
+    // The flow-started ChainedFollowUp completes; the agent's own call of it
+    // is then left waiting for a worker. The engine has one completion of the
+    // element on record — not this call's.
+    const { outcomes } = await run(
+      [["ChainedTool"], ["ChainedFollowUp"]],
+      ["probe-chained-follow-up"],
+    );
+    expect(outcomes).toEqual({
+      "Agent#1#ChainedTool#1": "completed",
+      "Agent#2#ChainedFollowUp#1": "running",
+    });
+  });
+
   it("does not hand an earlier call's identity to a later flow-started run", async () => {
-    expect(await run([["ChainedFollowUp"], ["ChainedTool"]])).toEqual([
+    expect([...(await run([["ChainedFollowUp"], ["ChainedTool"]]))]).toEqual([
       { turn: 1, call: 1 },
       { turn: undefined, call: undefined },
     ]);

@@ -4,6 +4,7 @@ import { Button } from "@camunda/design-system";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import type { TraceEntry } from "../types";
+import { callKey, type CallOutcome } from "../toolCalls";
 
 /**
  * The activity log, told as a story instead of a flat stack of lines — the
@@ -92,15 +93,15 @@ function ToolStep({
   activation,
   result,
   notes,
-  completed,
+  outcome,
   labelFor,
 }: {
   activation: TraceLogLine;
   result: TraceLogLine | undefined;
   /** The tool handler's own `trace()` lines. */
   notes: TraceLogLine[];
-  /** The engine has completed this call, whether or not a job reported back. */
-  completed: boolean;
+  /** What the engine says became of this call, when no job reported back. */
+  outcome: CallOutcome | undefined;
   labelFor: (elementId: string) => string;
 }) {
   const elementId = activation.elementId ?? "";
@@ -123,10 +124,11 @@ function ToolStep({
           <span className="timeline-io-label">Output</span>
           {result ? (
             <pre>{safeStringify(result.result, 2)}</pre>
-          ) : completed ? (
+          ) : outcome === "completed" || outcome === "canceled" ? (
             // A compound tool (a call activity or sub-process) completes in
-            // the engine without any one job handing back a result.
-            <pre className="timeline-io-muted">completed</pre>
+            // the engine without any one job handing back a result; a call the
+            // agent's end or an interrupt cut short never reports one at all.
+            <pre className="timeline-io-muted">{outcome}</pre>
           ) : (
             <pre className="timeline-io-pending">running…</pre>
           )}
@@ -147,13 +149,13 @@ function IterationCard({
   group,
   labelFor,
   showHost,
-  isCompleted,
+  callOutcomes,
 }: {
   group: TurnGroup;
   labelFor: (elementId: string) => string;
   /** More than one agent host ran, so say whose iteration this is. */
   showHost: boolean;
-  isCompleted: (activation: TraceLogLine) => boolean;
+  callOutcomes: ReadonlyMap<string, CallOutcome>;
 }) {
   const reply = group.entries.find((e) => e.kind === "llm");
   const activations = group.entries.filter(
@@ -235,7 +237,7 @@ function IterationCard({
           activation={activation}
           result={result}
           notes={notes}
-          completed={isCompleted(activation)}
+          outcome={callOutcomes.get(callKey(activation) ?? "")}
           labelFor={labelFor}
         />
       ))}
@@ -256,6 +258,8 @@ function IterationCard({
   );
 }
 
+const NO_OUTCOMES: ReadonlyMap<string, CallOutcome> = new Map();
+
 export function TraceTimeline({
   log,
   elementStats = [],
@@ -264,6 +268,7 @@ export function TraceTimeline({
   variables,
   decisions,
   hasAgent = false,
+  callOutcomes = NO_OUTCOMES,
 }: {
   log: TraceLogLine[];
   /** `snapshot.elementStats` — per-element completion counts, engine-side. */
@@ -278,33 +283,14 @@ export function TraceTimeline({
   decisions?: ReactNode;
   /** Whether the model has an AI Agent host — decides how this panel names itself. */
   hasAgent?: boolean;
+  /** What became of each agent tool call, by `callKey` — see `toolCalls.ts`. */
+  callOutcomes?: ReadonlyMap<string, CallOutcome>;
 }) {
   const rows = useMemo(() => buildRows(log).reverse(), [log]);
   const showHost = useMemo(
     () => new Set(log.filter((e) => e.turn !== undefined).map((e) => e.agentId)).size > 1,
     [log],
   );
-  // Only a call with no job of its own (a compound tool) needs this: a tool
-  // called again is complete only once the engine has completed it that many
-  // times — the first call finishing says nothing about the second. Calls are
-  // numbered as they are made (`TraceEntry.call`), so a capped log doesn't
-  // shift them; counting what is still in the log is only the fallback. The
-  // engine's count also includes any run of the tool a sequence flow started,
-  // which no call number accounts for — a compound tool reached that way can
-  // read as completed early.
-  const isCompleted = useMemo(() => {
-    const completed = new Map(elementStats.map((s) => [s.elementId, s.completed]));
-    const nth = new Map<number, number>();
-    const seen = new Map<string, number>();
-    for (const e of log) {
-      if (e.kind !== "agent" || !e.elementId) continue;
-      const n = (seen.get(e.elementId) ?? 0) + 1;
-      seen.set(e.elementId, n);
-      nth.set(e.id, n);
-    }
-    return (a: TraceLogLine) =>
-      (completed.get(a.elementId ?? "") ?? 0) >= (a.call ?? nth.get(a.id) ?? Infinity);
-  }, [log, elementStats]);
   const [copied, setCopied] = useState(false);
   const [engineViewOpen, setEngineViewOpen] = usePersistentDisclosure(
     "engine-view",
@@ -369,7 +355,7 @@ export function TraceTimeline({
                   group={row}
                   labelFor={labelFor}
                   showHost={showHost}
-                  isCompleted={isCompleted}
+                  callOutcomes={callOutcomes}
                 />
               ) : (
                 <div key={row.id} className={`log-line log-${row.kind}`}>

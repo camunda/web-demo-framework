@@ -69,37 +69,45 @@ describe("TraceTimeline", () => {
     expect(container.textContent).not.toContain("▶ Look up customer");
   });
 
-  it("says a tool is running until it returns, and completed when it returns no job output", () => {
+  // A call with no job output (a compound tool) says what the engine says
+  // became of that very call — see toolCalls.ts — never an element-wide count.
+  const outputs = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll(".timeline-tool")).map(
+      (el) => el.querySelectorAll(".timeline-io-col")[1].textContent,
+    );
+
+  it("says what became of a call with no job output: running, completed or cancelled", () => {
+    const call = (id: number, elementId: string) =>
+      ({ id, kind: "agent", text: `calling ${elementId}`, turn: 1, agentId: "Agent", elementId, args: {}, call: 1 }) as TraceLogLine;
+    const { container } = render(
+      <TraceTimeline
+        log={[call(1, "A"), call(2, "Sub"), call(3, "Consult")]}
+        hasAgent
+        callOutcomes={
+          new Map([
+            ["Agent#1#Sub#1", "completed"],
+            ["Agent#1#Consult#1", "canceled"],
+          ])
+        }
+      />,
+    );
+    expect(outputs(container)).toEqual(["Outputrunning…", "Outputcompleted", "Outputcanceled"]);
+  });
+
+  it("does not call a repeated compound tool completed just because an earlier call was", () => {
     const log: TraceLogLine[] = [
-      { id: 1, kind: "agent", text: "calling A", turn: 1, elementId: "A", args: {} },
-      { id: 2, kind: "agent", text: "calling Sub", turn: 1, elementId: "Sub", args: {} },
+      { id: 1, kind: "agent", text: "calling Sub", turn: 1, agentId: "Agent", elementId: "Sub", args: {}, call: 1 },
+      { id: 2, kind: "agent", text: "calling Sub", turn: 2, agentId: "Agent", elementId: "Sub", args: {}, call: 2 },
     ];
     const { container } = render(
       <TraceTimeline
         log={log}
         hasAgent
-        elementStats={[{ elementId: "Sub", completed: 1 }]}
+        callOutcomes={new Map([["Agent#1#Sub#1", "completed"], ["Agent#2#Sub#2", "running"]])}
       />,
     );
-    const outputs = Array.from(container.querySelectorAll(".timeline-tool")).map(
-      (el) => el.querySelectorAll(".timeline-io-col")[1].textContent,
-    );
-    expect(outputs).toEqual(["Outputrunning…", "Outputcompleted"]);
-  });
-
-  it("does not call a repeated compound tool completed just because its first call was", () => {
-    const log: TraceLogLine[] = [
-      { id: 1, kind: "agent", text: "calling Sub", turn: 1, elementId: "Sub", args: {} },
-      { id: 2, kind: "agent", text: "calling Sub", turn: 2, elementId: "Sub", args: {} },
-    ];
-    const { container } = render(
-      <TraceTimeline log={log} hasAgent elementStats={[{ elementId: "Sub", completed: 1 }]} />,
-    );
     // Newest first: the second call is still running, the first finished.
-    const outputs = Array.from(container.querySelectorAll(".timeline-tool")).map(
-      (el) => el.querySelectorAll(".timeline-io-col")[1].textContent,
-    );
-    expect(outputs).toEqual(["Outputrunning…", "Outputcompleted"]);
+    expect(outputs(container)).toEqual(["Outputrunning…", "Outputcompleted"]);
   });
 
   it("keeps two calls of one tool in the same iteration apart, output and notes", () => {
@@ -143,17 +151,6 @@ describe("TraceTimeline", () => {
     expect(cards[0]).toHaveTextContent("gbp note");
     expect(cards[0]).not.toHaveTextContent("1.1");
     expect(cards[0]).not.toHaveTextContent("eur note");
-  });
-
-  it("judges completion by the call's run-wide number, not its place in a capped log", () => {
-    // The first call of Sub has been dropped from the log; this is the second.
-    const log: TraceLogLine[] = [
-      { id: 50, kind: "agent", text: "calling Sub", turn: 2, elementId: "Sub", args: {}, call: 2 },
-    ];
-    const { container } = render(
-      <TraceTimeline log={log} hasAgent elementStats={[{ elementId: "Sub", completed: 1 }]} />,
-    );
-    expect(container.querySelector(".timeline-io-pending")).toHaveTextContent("running…");
   });
 
   it("names the host and keeps each host's iterations apart when several run at once", () => {
