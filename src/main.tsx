@@ -26,6 +26,13 @@ import "@fontsource/ibm-plex-sans/latin-600.css";
 import "@fontsource/ibm-plex-sans/latin-700.css";
 import "@fontsource/ibm-plex-mono/latin-400.css";
 import "@fontsource/ibm-plex-mono/latin-600.css";
+// The redesigned camunda.com's UI face, used by `?type=redesign`. The site
+// itself loads only 400; 500 and 600 are here so the runner's existing weight
+// hierarchy (buttons, labels, panel titles) renders as real cuts rather than
+// synthesised bold. A face only downloads where it is actually used.
+import "@fontsource/poppins/latin-400.css";
+import "@fontsource/poppins/latin-500.css";
+import "@fontsource/poppins/latin-600.css";
 // bpmn-js's own CSS moved to the lazy diagram boundary in ExampleRunner.tsx
 // (loaded alongside `@nanobpm/bojtos-react`) — the diagram is no longer on
 // the critical path for first paint, so its stylesheet shouldn't be either.

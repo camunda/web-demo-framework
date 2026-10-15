@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  embedType,
   embedView,
   examplePath,
   galleryPath,
@@ -60,6 +61,18 @@ describe("routing", () => {
     expect(embedView("?view=full")).toBe("full");
     expect(embedView("?view=COMPACT")).toBe("full");
     expect(embedView("")).toBe("full");
+  });
+
+  it("reads ?type=redesign", () => {
+    expect(embedType("?embed=1&view=compact&type=redesign")).toBe("redesign");
+    expect(embedType("?type=redesign")).toBe("redesign");
+  });
+
+  it("defaults to the current site's type for anything else", () => {
+    expect(embedType("?embed=1")).toBe("default");
+    expect(embedType("?type=REDESIGN")).toBe("default");
+    expect(embedType("?type=")).toBe("default");
+    expect(embedType("")).toBe("default");
   });
 
   it("reads ?autostart=1", () => {

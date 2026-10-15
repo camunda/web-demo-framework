@@ -302,6 +302,20 @@ body {
   padding: 0;
   gap: 16px;
 }
+
+/* `?type=redesign`: the Fall 2026 camunda.com redesign replaced IBM Plex Sans
+   with Poppins for body and UI copy (its Libertinus Serif is for large
+   headings, which the runner has none of). After `.app-compact` and on the
+   same element, so it wins at equal specificity. `font-family` is re-declared
+   for the same reason it is in `.app-compact`: children inherit the computed
+   face, not the token. Code stays in IBM Plex Mono — the site has no
+   monospace face of its own to match. */
+.app-type-redesign {
+  --ui-sans:
+    "Poppins", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  font-family: var(--ui-sans);
+}
 /* Present for screen readers and heading navigation, absent from layout. */
 .visually-hidden {
   position: absolute;

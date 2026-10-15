@@ -63,6 +63,24 @@ export function embedView(search: string = location.search): EmbedView {
 }
 
 /**
+ * Which host type system an embed matches.
+ *
+ * - `default` — camunda.com's current face, IBM Plex Sans (compact only; the
+ *   full view keeps the app's own Inter).
+ * - `redesign` — the Fall 2026 camunda.com redesign, which replaced IBM Plex
+ *   with Poppins. Opt-in, so a host on the current site is unaffected by a
+ *   bundle built for the redesign.
+ */
+export type EmbedType = "default" | "redesign";
+
+/** Reads `?type=redesign`. Only meaningful alongside `?embed=1`. */
+export function embedType(search: string = location.search): EmbedType {
+  return new URLSearchParams(search).get("type") === "redesign"
+    ? "redesign"
+    : "default";
+}
+
+/**
  * Reads `?autostart=1` — press Run on the reader's behalf once the example is
  * on screen and able to run.
  *

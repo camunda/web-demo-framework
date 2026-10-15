@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  embedType,
   embedView,
   isAutostart,
   isEmbed,
   parseRoute,
+  type EmbedType,
   type EmbedView,
   type Route,
 } from "./routing";
@@ -13,6 +15,8 @@ export interface RouteState {
   embed: boolean;
   /** Only meaningful when `embed` is true. */
   view: EmbedView;
+  /** `?type=redesign` — match the redesigned camunda.com's type. Only meaningful when `embed` is true. */
+  type: EmbedType;
   /** `?autostart=1` — run once, unprompted, when the example comes into view. */
   autostart: boolean;
 }
@@ -22,6 +26,7 @@ function readState(): RouteState {
     route: parseRoute(),
     embed: isEmbed(),
     view: embedView(),
+    type: embedType(),
     autostart: isAutostart(),
   };
 }
