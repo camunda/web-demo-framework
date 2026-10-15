@@ -49,8 +49,10 @@ export interface TraceEntry {
    *   handler's own notes and its result share one, so a tool called twice in
    *   the same iteration keeps each call's output and notes apart.
    * - `call` numbers a tool activation among every activation of that element
-   *   in the run (1 = first). Stamped by the runner before the log is capped,
-   *   so it stays right once early entries have been dropped.
+   *   in the run (1 = first) — and a job's entries with the call they belong
+   *   to, so the two pair by identity rather than by position in the log. The
+   *   runner stamps activations and `buildWorkers` stamps jobs, both before
+   *   the log is capped, so neither shifts once early entries are dropped.
    */
   turn?: number;
   agentId?: string;

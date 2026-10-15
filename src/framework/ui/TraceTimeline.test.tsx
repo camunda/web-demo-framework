@@ -124,6 +124,27 @@ describe("TraceTimeline", () => {
     expect(gbp).not.toHaveTextContent("eur note");
   });
 
+  it("pairs a call with its own job even when the capped log has dropped the call before it", () => {
+    // The duplicate-Fx run with EUR's activation dropped off the front of the
+    // log: GBP's activation is the only one left, but it is still call 2.
+    const log: TraceLogLine[] = [
+      { id: 2, kind: "agent", text: "calling Fx", turn: 1, elementId: "Fx", args: { pair: "GBP" }, call: 2 },
+      { id: 3, kind: "tool", text: "▶ Fx", turn: 1, elementId: "Fx", jobKey: "j1", call: 1 },
+      { id: 4, kind: "tool", text: "▶ Fx", turn: 1, elementId: "Fx", jobKey: "j2", call: 2 },
+      { id: 5, kind: "tool", text: "   gbp note", turn: 1, elementId: "Fx", jobKey: "j2", call: 2 },
+      { id: 6, kind: "tool", text: "   eur note", turn: 1, elementId: "Fx", jobKey: "j1", call: 1 },
+      { id: 7, kind: "vars", text: "↳", turn: 1, elementId: "Fx", jobKey: "j1", call: 1, result: { rate: 1.1 } },
+      { id: 8, kind: "vars", text: "↳", turn: 1, elementId: "Fx", jobKey: "j2", call: 2, result: { rate: 0.9 } },
+    ];
+    const { container } = render(<TraceTimeline log={log} hasAgent />);
+    const cards = container.querySelectorAll(".timeline-tool");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent('"rate": 0.9');
+    expect(cards[0]).toHaveTextContent("gbp note");
+    expect(cards[0]).not.toHaveTextContent("1.1");
+    expect(cards[0]).not.toHaveTextContent("eur note");
+  });
+
   it("judges completion by the call's run-wide number, not its place in a capped log", () => {
     // The first call of Sub has been dropped from the log; this is the second.
     const log: TraceLogLine[] = [

@@ -171,18 +171,25 @@ function IterationCard({
   const activatedElementIds = new Set(activations.map((a) => a.elementId));
   /**
    * The result and notes of one call. A tool can be activated more than once
-   * in one iteration, so the k-th activation pairs with the k-th job the
-   * engine ran for it — by job key, in the order each job first traced, since
-   * one job's entries can interleave with another's. Entries with no job key
-   * pair by order alone.
+   * in one iteration, so each activation pairs with the job entries carrying
+   * its own `call` number — an identity, so it holds when the capped log has
+   * dropped an earlier call. Without call numbers, the k-th activation pairs
+   * with the k-th job key in this iteration, and without job keys, by order.
    */
   const partsOf = (activation: TraceLogLine) => {
-    const k = activations
-      .filter((a) => a.elementId === activation.elementId)
-      .indexOf(activation);
     const own = group.entries.filter(
       (e) => e.elementId === activation.elementId && (e.kind === "tool" || e.kind === "vars"),
     );
+    if (activation.call !== undefined && own.some((e) => e.call !== undefined)) {
+      const mine = own.filter((e) => e.call === activation.call);
+      return {
+        result: mine.find((e) => e.kind === "vars"),
+        notes: mine.filter((e) => e.kind === "tool" && !e.text.startsWith("▶ ")),
+      };
+    }
+    const k = activations
+      .filter((a) => a.elementId === activation.elementId)
+      .indexOf(activation);
     const keys = [...new Set(own.flatMap((e) => (e.jobKey ? [e.jobKey] : [])))];
     const mine = keys.length
       ? own.filter((e) => e.jobKey === keys[k])

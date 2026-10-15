@@ -75,6 +75,21 @@ describe("a tool's trace entries", () => {
     expect(entries.every((e) => e.jobKey === job.key)).toBe(true);
   });
 
+  it("carry which call of the tool they are, kept across a retry of the same job", async () => {
+    const entries: TraceEntry[] = [];
+    const pack = buildWorkers(
+      parseModel(ONE_TASK),
+      { Pack: (() => ({})) as ExampleHandler },
+      (e) => entries.push(e),
+    ).pack;
+    await pack({ ...job, key: "a" });
+    await pack({ ...job, key: "b" });
+    await pack({ ...job, key: "a" }); // the engine handing job "a" back after a failure
+    const callOfKey = (key: string) => new Set(entries.filter((e) => e.jobKey === key).map((e) => e.call));
+    expect(callOfKey("a")).toEqual(new Set([1]));
+    expect(callOfKey("b")).toEqual(new Set([2]));
+  });
+
   it("belong to no iteration when no agent activated the job", async () => {
     const entries = await traced({ current: 3 });
     expect(entries.every((e) => e.turn === undefined && e.agentId === undefined)).toBe(true);

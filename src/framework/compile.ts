@@ -51,7 +51,7 @@ export function compileAgent(source: string): AgentHandler {
 function helpersFor(
   job: ActivatedJob,
   trace: Trace,
-  stamp: { turn?: number; agentId?: string; jobKey?: string },
+  stamp: { turn?: number; agentId?: string; jobKey?: string; call?: number },
   vision?: VisionSupport,
 ): HandlerHelpers {
   return {
@@ -149,8 +149,28 @@ export function buildWorkers(
     else listenersByType.set(listener.jobType, [listener]);
   }
 
-  const runHandler = async (job: ActivatedJob, handler: ExampleHandler) => {
-    const stamp = { ...turnFor(turnRef, job.elementId), jobKey: job.key };
+  // Which call of its element each job is, numbered as the agent's activations
+  // are (`TraceEntry.call`): the engine creates a tool's jobs in activation
+  // order and dispatches them in turn. Keyed by job, so a retried job keeps
+  // its number. A task listener's job is not a call of its task.
+  const callsSoFar = new Map<string, number>();
+  const callOfJob = new Map<string, number>();
+  const callOf = (job: ActivatedJob) => {
+    let call = callOfJob.get(job.key);
+    if (call === undefined) {
+      call = (callsSoFar.get(job.elementId) ?? 0) + 1;
+      callsSoFar.set(job.elementId, call);
+      callOfJob.set(job.key, call);
+    }
+    return call;
+  };
+
+  const runHandler = async (
+    job: ActivatedJob,
+    handler: ExampleHandler,
+    call?: number,
+  ) => {
+    const stamp = { ...turnFor(turnRef, job.elementId), jobKey: job.key, call };
     const out = await handler(job, helpersFor(job, trace, stamp, vision));
     trace({
       kind: "vars",
@@ -207,8 +227,9 @@ export function buildWorkers(
         throw new Error(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
-      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, ...stamp });
-      return runHandler(job, handler);
+      const call = callOf(job);
+      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, ...stamp, call });
+      return runHandler(job, handler, call);
     };
   }
   return workers;
