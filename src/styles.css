@@ -1,6 +1,10 @@
 /* Design tokens matched to camunda.com/orchestrate/agents: white page and
    surfaces, gray-200 hairlines, gray-900 ink over gray-500 muted, Camunda
-   orange (#FC5D0D) accent, green for positive, Inter type. Shared with the
+   orange (#FC5D0D) accent, green for positive, Inter type.
+
+   Run activity follows Operate rather than the brand accent: blue for what is
+   active (the token, a running tool), purple for the agent itself. Orange
+   stays on the primary action — on a live diagram it reads as a warning. Shared with the
    seed-export-compliance-agent demo so the two read as one product surface.
 
    Names here are deliberately distinct from the design system's own token
@@ -28,6 +32,10 @@
   --red-tint: rgba(220, 38, 38, 0.08);
   --blue: #2563eb;
   --blue-tint: rgba(37, 99, 235, 0.06);
+  --blue-fill: rgba(37, 99, 235, 0.12);
+  --purple: #8a3ffc;
+  --purple-ink: #6929c4;
+  --purple-tint: rgba(138, 63, 252, 0.07);
   --amber: #d97706;
   --amber-ink: #b45309;
   --amber-tint: rgba(217, 119, 6, 0.07);
@@ -496,18 +504,18 @@ body {
   border-radius: 8px;
 }
 
-/* Token + incident markers for BpmnRuntimeView. bpmn-js renders its native
+/* Token + incident markers for RuntimeDiagram. bpmn-js renders its native
    light palette (dark strokes on white), which suits the white card — so we
    keep it and only layer the highlights on top. Its inline styles mean every
-   override needs !important. */
+   override needs !important. Active is blue, as in Operate. */
 .diagram .nano-active .djs-visual > :nth-child(1) {
-  stroke: var(--orange) !important;
+  stroke: var(--blue) !important;
   stroke-width: 3px !important;
 }
 .diagram .nano-active .djs-visual > rect,
 .diagram .nano-active .djs-visual > circle,
 .diagram .nano-active .djs-visual > polygon {
-  fill: rgba(252, 93, 13, 0.12) !important;
+  fill: var(--blue-fill) !important;
 }
 .diagram .nano-active {
   animation: tokenPulse 1.3s ease-in-out infinite;
@@ -515,10 +523,10 @@ body {
 @keyframes tokenPulse {
   0%,
   100% {
-    filter: drop-shadow(0 0 2px rgba(252, 93, 13, 0.4));
+    filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.4));
   }
   50% {
-    filter: drop-shadow(0 0 10px rgba(252, 93, 13, 0.85));
+    filter: drop-shadow(0 0 10px rgba(37, 99, 235, 0.8));
   }
 }
 .diagram .nano-incident .djs-visual > :nth-child(1) {
@@ -534,11 +542,11 @@ body {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ff8a50, var(--orange));
+  background: radial-gradient(circle at 35% 30%, #6e9bff, var(--blue));
   border: 2px solid #fff;
   box-shadow:
-    0 0 0 2px rgba(252, 93, 13, 0.35),
-    0 0 12px 2px rgba(252, 93, 13, 0.6);
+    0 0 0 2px rgba(37, 99, 235, 0.35),
+    0 0 12px 2px rgba(37, 99, 235, 0.55);
   pointer-events: none;
 }
 
@@ -555,6 +563,48 @@ body {
   .diagram .nano-active {
     animation: none;
   }
+}
+
+/* Agent activity on the diagram, after Operate (see RuntimeDiagram's
+   `agentStateOf`): a state pill above each AI Agent host and a call count on
+   each tool. Purple is the agent's own colour there; blue is activity. */
+.diagram .nano-agent-state {
+  padding: 1px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12);
+  font-family: var(--ui-sans);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.diagram .nano-agent-state--thinking {
+  color: var(--purple-ink);
+  border-color: rgba(138, 63, 252, 0.35);
+}
+.diagram .nano-agent-state--tool-calling {
+  color: var(--blue);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+.diagram .nano-agent-state--completed {
+  color: var(--ink-muted-2);
+}
+.diagram .nano-call-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--ink-muted);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--ui-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
 }
 
 .vars {
@@ -700,11 +750,11 @@ body {
   color: var(--ink-muted-2);
 }
 .log-agent {
-  color: var(--orange);
+  color: var(--purple-ink);
   font-weight: 600;
 }
 .log-llm {
-  color: var(--orange);
+  color: var(--purple-ink);
 }
 .log-tool {
   color: var(--blue);
@@ -764,8 +814,8 @@ body {
 }
 .timeline > .log-agent,
 .timeline > .log-llm {
-  border-left-color: var(--orange);
-  background: var(--orange-tint-bg);
+  border-left-color: var(--purple);
+  background: var(--purple-tint);
 }
 .timeline > .log-human,
 .timeline > .log-step {
@@ -792,58 +842,141 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .timeline > .log-line {
+  .timeline > .log-line,
+  .timeline-iteration {
     animation: none;
   }
 }
-.timeline-turn {
+.timeline-iteration {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 6px 8px 8px;
   border: 1px solid var(--line);
-  border-left: 2px solid var(--orange);
-  border-radius: 8px;
-  background: var(--orange-tint-bg);
+  border-radius: 10px;
+  background: var(--surface);
+  animation: logIn 0.25s ease;
 }
-.timeline-turn-head {
+/* Operate's divider: "1. iteration", centred between two hairlines. */
+.timeline-iteration-head {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.timeline-pending {
+  font-family: var(--ui-sans);
+  font-size: 12px;
   color: var(--ink-muted-2);
-  font-style: italic;
+}
+.timeline-iteration-head::before,
+.timeline-iteration-head::after {
+  content: "";
+  flex: 1 1 12px;
+  height: 1px;
+  background: var(--line);
+}
+.timeline-iteration-host {
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.timeline-thinking {
+  padding: 0 8px;
+  border: 1px solid rgba(138, 63, 252, 0.3);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--purple-ink);
+  font-weight: 600;
+}
+.timeline-assistant {
+  padding: 8px 10px;
+  border-left: 2px solid var(--purple);
+  border-radius: 8px;
+  background: var(--purple-tint);
+}
+.timeline-role {
+  font-family: var(--ui-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-muted-2);
 }
 .timeline-reply {
-  margin: 0;
-  padding-left: 10px;
-  border-left: 3px solid var(--orange);
+  margin: 2px 0 0;
   color: var(--ink-muted);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .timeline-note {
-  color: var(--orange-hover);
+  color: var(--purple-ink);
 }
 .timeline-tool {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border-left: 3px solid var(--blue);
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--blue);
+  border-radius: 8px;
   background: var(--surface);
-  border-radius: 4px;
 }
 .timeline-tool-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--ui-sans);
+}
+.timeline-tool-head code {
+  color: var(--ink-muted-2);
+  font-size: 11px;
+}
+.timeline-tool-icon {
+  color: var(--blue);
+}
+.timeline-tool-notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-muted);
+}
+/* Input beside output, as in Operate's tool call view — stacked only when the
+   panel is too narrow for two readable columns. */
+.timeline-io {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
 }
-.timeline-kv {
+.timeline-io-col {
   display: flex;
-  gap: 6px;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.timeline-io-label {
+  font-family: var(--ui-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.timeline-io-col pre {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-3);
+  font-family: var(--ui-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.timeline-io-col .timeline-io-pending {
+  color: var(--blue);
+  font-style: italic;
+}
+.timeline-io-col .timeline-io-muted {
+  color: var(--ink-muted-2);
+  font-style: italic;
 }
 .timeline-kv-label {
   color: var(--ink-muted-2);
@@ -1284,7 +1417,7 @@ body {
 .brain-progress-bar {
   height: 100%;
   border-radius: 999px;
-  background: var(--orange);
+  background: var(--blue);
   transition: width 0.2s ease;
 }
 .brain-config {

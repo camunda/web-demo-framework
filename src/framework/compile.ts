@@ -1,7 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo, TaskListenerSpec } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
-import type { TurnRef } from "./agent/liveAgent";
+import { turnFor, type TurnRef } from "./agent/liveAgent";
 import {
   makeImageAccessor,
   makeVisionAccessor,
@@ -51,7 +51,7 @@ export function compileAgent(source: string): AgentHandler {
 function helpersFor(
   job: ActivatedJob,
   trace: Trace,
-  turn?: number,
+  stamp: { turn?: number; agentId?: string },
   vision?: VisionSupport,
 ): HandlerHelpers {
   return {
@@ -64,7 +64,7 @@ function helpersFor(
         kind: "tool",
         text: `   ${text}`,
         elementId: job.elementId,
-        turn,
+        ...stamp,
       }),
     text: (key, fallback = "") => {
       const v = job.variables[key];
@@ -108,9 +108,9 @@ function safeStringify(value: unknown): string {
  * rather than a silent stall.
  *
  * `turnRef`, when supplied, stamps each "started"/"result" trace entry with
- * the agent turn in progress when the job ran (see `liveAgent.ts`'s
- * `TurnRef`), so a tool activated by an agent groups with its own result in
- * the trace timeline. Omit it for a non-agentic example — the entries just
+ * the agent turn that activated the tool (see `liveAgent.ts`'s `TurnRef`), so
+ * a tool activated by an agent groups with its own result in the trace
+ * timeline. Omit it for a non-agentic example — the entries just
  * render ungrouped, exactly as before.
  *
  * `vision`, when supplied (only for an example with `imageInput`), gives every
@@ -150,14 +150,14 @@ export function buildWorkers(
   }
 
   const runHandler = async (job: ActivatedJob, handler: ExampleHandler) => {
-    const turn = turnRef?.current;
-    const out = await handler(job, helpersFor(job, trace, turn, vision));
+    const stamp = turnFor(turnRef, job.elementId);
+    const out = await handler(job, helpersFor(job, trace, stamp, vision));
     trace({
       kind: "vars",
       text: `  ↳ ${safeStringify(out)}`,
       elementId: job.elementId,
       result: out,
-      turn,
+      ...stamp,
     });
     // The engine rejects anything else mid-dispatch, which stalls the run with
     // no reason shown; failing the job turns it into an incident that names it.
@@ -178,7 +178,7 @@ export function buildWorkers(
   for (const jobType of new Set([...taskJobTypes, ...listenersByType.keys()])) {
     const listeners = listenersByType.get(jobType) ?? [];
     workers[jobType] = async (job) => {
-      const turn = turnRef?.current;
+      const stamp = turnFor(turnRef, job.elementId);
       const label = labels.get(job.elementId) ?? job.elementId;
       const onThisElement = listeners.filter((l) => l.elementId === job.elementId);
 
@@ -193,7 +193,7 @@ export function buildWorkers(
           kind: "step",
           text: `🎧 ${label} — ${listener.eventType} listener${handler ? "" : " (no code supplied)"}`,
           elementId: job.elementId,
-          turn,
+          ...stamp,
         });
         // An unclaimed listener runs as a no-op rather than failing: a model
         // that carries one should still run, and "this fired and did nothing"
@@ -207,7 +207,7 @@ export function buildWorkers(
         throw new Error(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
-      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
+      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, ...stamp });
       return runHandler(job, handler);
     };
   }

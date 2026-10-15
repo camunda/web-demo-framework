@@ -111,7 +111,7 @@ export function describeRound(
       return {
         kind: "done",
         text:
-          `⏭ round handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
+          `⏭ step handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
           `${flowText} — ✅ process instance completed`,
       };
     }
@@ -122,14 +122,14 @@ export function describeRound(
       return {
         kind: "human",
         text:
-          `⏭ round handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
+          `⏭ step handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
           `${flowText} — ${humanWaitingText}`,
       };
     }
     return {
       kind: "step",
       text:
-        `⏭ round handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
+        `⏭ step handled ${round.handled} job${round.handled === 1 ? "" : "s"}` +
         `${flowText} — now at ${activeLabels.length ? activeLabels.join(", ") : "—"}`,
     };
   }

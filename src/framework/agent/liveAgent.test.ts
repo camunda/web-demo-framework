@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coerceToolArg, makeLiveAgent } from "./liveAgent";
+import { coerceToolArg, makeLiveAgent, turnFor, type TurnRef } from "./liveAgent";
 import type { AgentSpec } from "../model";
 import type { ChatFn } from "../brains/types";
 
@@ -233,7 +233,7 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
     expect(result.completionConditionFulfilled).toBe(true);
     expect(result.activateElements).toBeUndefined();
     expect(trace.some((e) => e.text.includes("activated nothing"))).toBe(true);
-    expect(trace.some((e) => e.text.includes("Turn budget spent"))).toBe(false);
+    expect(trace.some((e) => e.text.includes("Iteration budget spent"))).toBe(false);
   });
 
   it("counts the streak consecutively, not cumulatively", async () => {
@@ -297,7 +297,7 @@ describe("makeLiveAgent — recovers from a bad turn instead of ending the run",
     } as never);
 
     expect(result.completionConditionFulfilled).toBe(true);
-    expect(trace.some((e) => e.text.includes("Turn budget spent"))).toBe(true);
+    expect(trace.some((e) => e.text.includes("Iteration budget spent"))).toBe(true);
   });
 });
 
@@ -516,6 +516,37 @@ describe("makeLiveAgent — trace timeline correlation (turn/elementId/args)", (
     // The shared TurnRef lets a tool's own trace entries (built in
     // compile.ts) adopt the same turn number.
     expect(turnRef.current).toBe(1);
+  });
+
+  it("names its host on every turn entry, and records which turn activated each tool", async () => {
+    const trace: import("../types").TraceEntry[] = [];
+    const chat = fakeChat([
+      '{"tool": "ToolA", "arguments": {"code": "A1"}, "done": false}',
+    ]);
+    const turnRef: TurnRef = { current: undefined };
+    const spec = makeSpec();
+    const agent = makeLiveAgent(spec, chat, (e) => trace.push(e), { turnRef });
+
+    await agent({ elementId: spec.elementId, variables: {}, type: "x" } as never);
+
+    // Two hosts both count from turn 1; the host is what keeps them apart.
+    expect(trace.every((e) => e.agentId === spec.elementId)).toBe(true);
+    expect(turnFor(turnRef, "ToolA")).toEqual({ turn: 1, agentId: spec.elementId });
+    // A job no agent activated belongs to no turn.
+    expect(turnFor(turnRef, "SomethingElse")).toEqual({});
+  });
+
+  it("keys its streamed reply by host, so a second host's turn 1 doesn't overwrite the first's", async () => {
+    const trace: import("../types").TraceEntry[] = [];
+    const reply = '{"tool": "ToolA", "arguments": {"code": "A1"}, "done": false}';
+    const a = makeLiveAgent({ ...makeSpec(), elementId: "HostA" }, fakeChat([reply]), (e) => trace.push(e));
+    const b = makeLiveAgent({ ...makeSpec(), elementId: "HostB" }, fakeChat([reply]), (e) => trace.push(e));
+
+    await a({ elementId: "HostA", variables: {}, type: "x" } as never);
+    await b({ elementId: "HostB", variables: {}, type: "x" } as never);
+
+    const keys = new Set(trace.filter((e) => e.kind === "llm").map((e) => e.key));
+    expect(keys.size).toBe(2);
   });
 
   it("still stamps its own entries with turn even when no TurnRef is supplied (compile.ts's tool entries just won't correlate)", async () => {

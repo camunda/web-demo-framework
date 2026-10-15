@@ -25,7 +25,67 @@ import type { WalkTracker } from "./walkTracker";
  * once and update markers in place, so nothing re-imports while a run steps
  * through. The consumer loads bpmn-js's CSS and provides the `.nano-active` /
  * `.nano-incident` / `.nano-token` styles (see `styles.css`).
+ *
+ * AI Agent hosts also show what the agent is doing, the way Operate does: a
+ * state pill above the host ("Thinking…", "Tool calling", "Completed") and a
+ * call count on each tool it has run. Both follow the walking token rather
+ * than the engine's frontier, so they never get ahead of what the reader has
+ * seen happen (see `.nano-agent-state` / `.nano-call-count` in `styles.css`).
  */
+
+/** An AI Agent host on the diagram and the tools inside it. */
+export interface AgentOnDiagram {
+  elementId: string;
+  toolIds: string[];
+}
+
+export type AgentState = "thinking" | "tool-calling" | "completed";
+
+/** Operate's words for each state. */
+export const AGENT_STATE_LABEL: Record<AgentState, string> = {
+  thinking: "Thinking…",
+  "tool-calling": "Tool calling",
+  completed: "Completed",
+};
+
+/**
+ * What `agent` is doing, given where the token stands (`tokenIds`) and the
+ * engine's frontier. A running tool wins over the host, since the host stays
+ * active around its tools; with no tool running, an active host is waiting on
+ * its next decision — the model's turn.
+ */
+export function agentStateOf(
+  agent: AgentOnDiagram,
+  tokenIds: readonly string[],
+  activeIds: readonly string[],
+  completedIds: ReadonlySet<string>,
+): AgentState | null {
+  if (agent.toolIds.some((id) => tokenIds.includes(id))) return "tool-calling";
+  if (tokenIds.includes(agent.elementId)) return "thinking";
+  if (!activeIds.includes(agent.elementId) && completedIds.has(agent.elementId))
+    return "completed";
+  return null;
+}
+
+/**
+ * How many times each tool has been called *as far as the walk has shown*:
+ * every activation in `path`, less the ones still queued to walk.
+ */
+export function callCounts(
+  agents: readonly AgentOnDiagram[],
+  path: readonly string[],
+  queued: readonly string[],
+): Map<string, number> {
+  const tools = new Set(agents.flatMap((a) => a.toolIds));
+  const counts = new Map<string, number>();
+  for (const id of path) if (tools.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
+  for (const id of queued) {
+    const n = counts.get(id);
+    if (n !== undefined) counts.set(id, n - 1);
+  }
+  for (const [id, n] of counts) if (n <= 0) counts.delete(id);
+  return counts;
+}
 export interface RuntimeDiagramProps {
   /** The diagram XML to render. */
   xml: string;
@@ -54,6 +114,10 @@ export interface RuntimeDiagramProps {
   tracker?: WalkTracker;
   /** How long the walking token rests on each element, in ms. */
   hopMs?: number;
+  /** AI Agent hosts to show agent state on — see {@link agentStateOf}. */
+  agents?: AgentOnDiagram[];
+  /** Elements the engine has completed at least once (`elementStats`). */
+  completedIds?: string[];
   /** Extra class for the container, added alongside `runtime-diagram`. */
   className?: string;
 }
@@ -79,6 +143,13 @@ interface OverlaysLike {
 }
 
 /**
+ * Room above an agent host for its state pill, in diagram units — added to the
+ * top of the fit only when the model has a host, so other diagrams keep their
+ * size.
+ */
+const AGENT_STATE_ROOM = 22;
+
+/**
  * Room left around the model when fitting, in diagram units.
  *
  * `fit-viewport` fits the element bounding box exactly, but the live token is
@@ -91,8 +162,11 @@ interface OverlaysLike {
  */
 const FIT_PADDING = 16;
 
-/** `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides. */
-export function fitWithPadding(canvas: CanvasLike) {
+/**
+ * `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides, plus
+ * `extraTop` above.
+ */
+export function fitWithPadding(canvas: CanvasLike, extraTop = 0) {
   canvas.zoom("fit-viewport");
   const { inner, outer } = canvas.viewbox();
   // An empty diagram has nothing to pad, and its zero-sized box would make the
@@ -101,9 +175,9 @@ export function fitWithPadding(canvas: CanvasLike) {
 
   const padded = {
     x: inner.x - FIT_PADDING,
-    y: inner.y - FIT_PADDING,
+    y: inner.y - FIT_PADDING - extraTop,
     width: inner.width + FIT_PADDING * 2,
-    height: inner.height + FIT_PADDING * 2,
+    height: inner.height + FIT_PADDING * 2 + extraTop,
   };
   // `fit-viewport` caps its scale at 1 (`Math.min(1, …)` in diagram-js's
   // `_fitViewport`) so a small model is never blown up to fill the container.
@@ -128,6 +202,8 @@ export function RuntimeDiagram({
   runId,
   tracker,
   hopMs = 450,
+  agents,
+  completedIds,
   className,
 }: RuntimeDiagramProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -138,8 +214,11 @@ export function RuntimeDiagram({
   // The latest ids, so the post-import marker pass uses current values rather
   // than the ones that were current when the import started — ids changing
   // mid-import would otherwise leave the diagram unmarked until the next change.
-  const idsRef = useRef({ activeIds, incidentIds });
-  idsRef.current = { activeIds, incidentIds };
+  const idsRef = useRef({ activeIds, incidentIds, agents, completedIds });
+  idsRef.current = { activeIds, incidentIds, agents, completedIds };
+  const agentOverlaysRef = useRef<string[]>([]);
+  const fit = (canvas: CanvasLike) =>
+    fitWithPadding(canvas, idsRef.current.agents?.length ? AGENT_STATE_ROOM : 0);
   // The walk: elements still to show, the one shown now, and its timer.
   const walkRef = useRef<{ queue: string[]; at: string | null; timer: number }>({
     queue: [],
@@ -215,6 +294,45 @@ export function RuntimeDiagram({
       }
     }
     tokenOverlaysRef.current = nextOverlays;
+
+    for (const id of agentOverlaysRef.current) {
+      try {
+        overlays.remove(id);
+      } catch {
+        /* already gone */
+      }
+    }
+    const agentOverlays: string[] = [];
+    const hosts = idsRef.current.agents ?? [];
+    const completed = new Set(idsRef.current.completedIds ?? []);
+    for (const agent of hosts) {
+      const state = agentStateOf(agent, tokenIds, idsRef.current.activeIds, completed);
+      if (!state) continue;
+      try {
+        agentOverlays.push(
+          overlays.add(agent.elementId, {
+            position: { top: -AGENT_STATE_ROOM - 4, left: 14 },
+            html: `<div class="nano-agent-state nano-agent-state--${state}" aria-hidden="true">${AGENT_STATE_LABEL[state]}</div>`,
+          }),
+        );
+      } catch {
+        /* host not in this diagram */
+      }
+    }
+    const counts = callCounts(hosts, pathRef.current.path ?? [], walkRef.current.queue);
+    for (const [id, n] of counts) {
+      try {
+        agentOverlays.push(
+          overlays.add(id, {
+            position: { top: -10, right: 10 },
+            html: `<div class="nano-call-count" aria-hidden="true" title="Called ${n} time${n === 1 ? "" : "s"}">${n}</div>`,
+          }),
+        );
+      } catch {
+        /* tool not in this diagram */
+      }
+    }
+    agentOverlaysRef.current = agentOverlays;
   };
 
   const reportHops = () => {
@@ -276,7 +394,7 @@ export function RuntimeDiagram({
       .importXML(xml)
       .then(() => {
         if (!current) return;
-        fitWithPadding(viewer.get<CanvasLike>("canvas"));
+        fit(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
         if (tracker) tracker.ready = true;
         applyMarkers();
@@ -310,7 +428,7 @@ export function RuntimeDiagram({
       const canvas = viewer.get<CanvasLike>("canvas");
       try {
         canvas.resized();
-        fitWithPadding(canvas);
+        fit(canvas);
       } catch {
         /* nothing imported yet — the import fits the viewport itself */
       }
@@ -323,7 +441,7 @@ export function RuntimeDiagram({
   useEffect(() => {
     applyMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
-  }, [activeIds, incidentIds]);
+  }, [activeIds, incidentIds, agents, completedIds]);
 
   useEffect(() => {
     consumePath();

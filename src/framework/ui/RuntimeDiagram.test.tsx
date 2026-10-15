@@ -1,6 +1,12 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { fitWithPadding, RuntimeDiagram, type CanvasLike } from "./RuntimeDiagram";
+import {
+  agentStateOf,
+  callCounts,
+  fitWithPadding,
+  RuntimeDiagram,
+  type CanvasLike,
+} from "./RuntimeDiagram";
 import { WalkTracker } from "./walkTracker";
 
 afterEach(cleanup);
@@ -117,6 +123,45 @@ describe("RuntimeDiagram", () => {
     await waitFor(() =>
       expect(container.querySelector(".nano-token")).toBeInTheDocument(),
     );
+  });
+
+  it("shows the agent's state above its host, and a call count on each tool it ran", async () => {
+    // Task_1 stands in for the agent host and StartEvent_1 for its tool; only
+    // the ids matter to the overlay. One overlay at a time, for the same
+    // jsdom-geometry reason as the token test above.
+    const agents = [{ elementId: "Task_1", toolIds: ["StartEvent_1"] }];
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={XML} activeIds={["Task_1"]} incidentIds={[]} agents={agents} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".nano-agent-state")).toHaveTextContent("Thinking…"),
+    );
+
+    rerender(
+      <RuntimeDiagram
+        xml={XML}
+        activeIds={[]}
+        incidentIds={[]}
+        agents={agents}
+        completedIds={["Task_1"]}
+        path={["StartEvent_1"]}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".nano-agent-state")).toHaveTextContent("Completed"),
+    );
+    expect(container.querySelector(".nano-call-count")).toHaveTextContent("1");
+  });
+
+  it("shows no agent state on a model without one", async () => {
+    const { container } = render(
+      <RuntimeDiagram xml={XML} activeIds={["Task_1"]} incidentIds={[]} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".nano-token")).toBeInTheDocument(),
+    );
+    expect(container.querySelector(".nano-agent-state")).toBeNull();
+    expect(container.querySelector(".nano-call-count")).toBeNull();
   });
 
   it("survives unmounting while the import is still in flight", async () => {
@@ -425,6 +470,14 @@ describe("fitWithPadding", () => {
     expect(box.y + box.height / 2).toBe(25);
   });
 
+  it("leaves extra room above when asked, for an agent's state pill", () => {
+    const { canvas, set } = fakeCanvas({ x: 100, y: 50, width: 400, height: 200 });
+
+    fitWithPadding(canvas, 22);
+
+    expect(set).toEqual([{ x: 84, y: 12, width: 432, height: 254 }]);
+  });
+
   it("leaves an empty diagram to plain fit-viewport", () => {
     // A zero-sized content box has nothing to pad, and padding it would invert
     // the box rather than inset it.
@@ -434,5 +487,46 @@ describe("fitWithPadding", () => {
 
     expect(zoomed).toEqual(["fit-viewport"]);
     expect(set).toEqual([]);
+  });
+});
+
+describe("agentStateOf", () => {
+  const agent = { elementId: "Agent", toolIds: ["ToolA", "ToolB"] };
+  const none = new Set<string>();
+
+  it("is tool calling while the token is on one of its tools", () => {
+    // The host stays active around a running tool; the tool is what to say.
+    expect(agentStateOf(agent, ["ToolA"], ["Agent", "ToolA"], none)).toBe("tool-calling");
+  });
+
+  it("is thinking while the token rests on the host itself", () => {
+    expect(agentStateOf(agent, ["Agent"], ["Agent"], none)).toBe("thinking");
+  });
+
+  it("is completed once the host has finished and left the frontier", () => {
+    expect(agentStateOf(agent, ["Next"], ["Next"], new Set(["Agent"]))).toBe("completed");
+  });
+
+  it("says nothing before the token has reached the host", () => {
+    // The engine may already be past the start while the walk is still on it.
+    expect(agentStateOf(agent, ["Start"], ["Agent"], none)).toBeNull();
+  });
+
+  it("does not call a host completed while it is active again", () => {
+    expect(agentStateOf(agent, ["Gateway"], ["Agent"], new Set(["Agent"]))).toBeNull();
+  });
+});
+
+describe("callCounts", () => {
+  const agents = [{ elementId: "Agent", toolIds: ["ToolA", "ToolB"] }];
+
+  it("counts each tool's activations on the path, ignoring other elements", () => {
+    const counts = callCounts(agents, ["Start", "Agent", "ToolA", "ToolB", "ToolA"], []);
+    expect(Object.fromEntries(counts)).toEqual({ ToolA: 2, ToolB: 1 });
+  });
+
+  it("does not count an activation the walk has not reached yet", () => {
+    const counts = callCounts(agents, ["Agent", "ToolA", "ToolB"], ["ToolB"]);
+    expect(Object.fromEntries(counts)).toEqual({ ToolA: 1 });
   });
 });

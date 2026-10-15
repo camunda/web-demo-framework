@@ -276,7 +276,7 @@ export const scenarios = [
       if (!result.completed) reasons.push("run did not complete");
       if (result.activatedOrder.length !== 4)
         reasons.push(`expected exactly the four tools to run, got ${result.activatedOrder}`);
-      if (includesTrace(result.trace, "Turn budget spent"))
+      if (includesTrace(result.trace, "Iteration budget spent"))
         reasons.push("the budget ended the run — the junk turns were spent, not skipped");
       if (!includesTrace(result.trace, "every tool has run"))
         reasons.push("expected the run to end on 'every tool has run' without asking again");

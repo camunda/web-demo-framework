@@ -357,17 +357,39 @@ function resolveArguments(
  * a return value: the agent and the job-dispatch loop run on two different
  * call paths (`stepWorkers`) that don't otherwise share state.
  *
- * A shared `TurnRef` across multiple agent hosts means their turn numbers
- * interleave rather than each host counting independently — an acceptable
- * simplification for what's a display grouping, not a run guarantee.
+ * Tool entries are stamped from `owners` — which host's turn activated each
+ * tool — so a tool still groups with its own host's turn while two hosts run
+ * at once. A job no agent activated (a task after the agent, or inside a
+ * compound tool) belongs to no turn and renders ungrouped.
  */
 export interface TurnRef {
   /**
-   * `undefined` until a live agent turn actually runs — so a scripted-brain
-   * or non-agentic run's tool entries stay ungrouped (their `turn` field is
-   * left off entirely) instead of all landing under a spurious "Turn 0".
+   * The turn most recently started, by whichever host — `undefined` until an
+   * agent turn actually runs.
    */
   current: number | undefined;
+  /** Tool element id → the host turn that most recently activated it. */
+  owners?: Map<string, { turn: number; agentId: string }>;
+}
+
+/** Record that `agentId`'s `turn` activated each of `toolIds`. */
+export function claimTools(
+  ref: TurnRef | undefined,
+  turn: number,
+  agentId: string,
+  toolIds: string[],
+) {
+  if (!ref) return;
+  ref.owners ??= new Map();
+  for (const id of toolIds) ref.owners.set(id, { turn, agentId });
+}
+
+/** The turn a job for `elementId` belongs to, as `TraceEntry` fields. */
+export function turnFor(
+  ref: TurnRef | undefined,
+  elementId: string,
+): { turn?: number; agentId?: string } {
+  return ref?.owners?.get(elementId) ?? {};
 }
 
 export interface LiveAgentOptions {
@@ -439,7 +461,7 @@ export interface LiveAgentOptions {
 export function makeLiveAgent(
   spec: AgentSpec,
   chat: ChatFn,
-  trace: Trace,
+  hostTrace: Trace,
   opts: LiveAgentOptions = {},
 ): AgentHandler {
   const {
@@ -451,6 +473,11 @@ export function makeLiveAgent(
     maxRequiredToolNudges = 1,
     maxUnproductiveTurns = 3,
   } = opts;
+
+  // Every turn-stamped entry names its host, so two hosts' same-numbered turns
+  // stay two iterations rather than merging into one.
+  const trace: Trace = (entry) =>
+    hostTrace(entry.turn === undefined ? entry : { agentId: spec.elementId, ...entry });
 
   // Per-run state. The engine re-emits the agent job after each activated tool
   // drains, so this closure is the agent's memory across turns.
@@ -509,7 +536,7 @@ export function makeLiveAgent(
         // `turn` is the last one taken, and `runTurn` refuses `turn + 1` once
         // it passes `maxModelCalls` — so without this the nudge announces a
         // retry that the budget check kills on entry, and the run ends on
-        // "Turn budget spent" with nothing said about what never ran.
+        // "Iteration budget spent" with nothing said about what never ran.
         if (
           missing.length &&
           requiredToolNudges < maxRequiredToolNudges &&
@@ -521,7 +548,7 @@ export function makeLiveAgent(
           unproductive = 0;
           trace({
             kind: "agent",
-            text: `🤖 ${maxUnproductiveTurns} turns activated nothing and ${missing.join(", ")} ${missing.length === 1 ? "hasn't" : "haven't"} run — asking once more`,
+            text: `🤖 ${maxUnproductiveTurns} iterations activated nothing and ${missing.join(", ")} ${missing.length === 1 ? "hasn't" : "haven't"} run — asking once more`,
             turn,
           });
           continue;
@@ -529,7 +556,7 @@ export function makeLiveAgent(
         trace({
           kind: "error",
           text:
-            `🤖 ${unproductive} turns in a row activated nothing — completing the agent. ` +
+            `🤖 ${unproductive} iterations in a row activated nothing — completing the agent. ` +
             "The model has lost the reply format; whatever it has already run stands." +
             (missing.length ? ` ${missing.join(", ")} never ran.` : ""),
           turn,
@@ -548,7 +575,7 @@ export function makeLiveAgent(
       trace({
         kind: "error",
         text:
-          `Turn budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.` +
+          `Iteration budget spent (maxModelCalls=${spec.maxModelCalls}) — completing the agent.` +
           (missing.length ? ` ${missing.join(", ")} never ran.` : ""),
         turn,
       });
@@ -602,7 +629,9 @@ export function makeLiveAgent(
       raw = await streamChat(
         chat,
         trace,
-        `llm-turn-${turn}`,
+        // The host is in the key: every host has a turn 1, and a shared key
+        // would overwrite another host's reply in place.
+        `llm-${spec.elementId}-turn-${turn}`,
         messages,
         maxNewTokens,
         turn,
@@ -729,6 +758,12 @@ export function makeLiveAgent(
         args: forHistory.get(tool.elementId) ?? {},
       });
     }
+    claimTools(
+      turnRef,
+      turn,
+      spec.elementId,
+      resolved.map((r) => r.tool.elementId),
+    );
 
     return {
       activateElements: resolved.map((r) => ({ elementId: r.tool.elementId })),

@@ -205,7 +205,10 @@ class Trace {
   async capture(page) {
     // The panel renders newest row first; read rows oldest-first so the saved trace reads in run order.
     const rows = await page.locator(".timeline").first().locator(":scope > *").allInnerTexts().catch(() => []);
-    const text = rows.reverse().join("\n");
+    // An agent's tool call is a card in its iteration, not a "▶ label" line —
+    // name it the same way so scripted and live runs still compare step for step.
+    const tools = await page.locator(".timeline .timeline-tool-head strong").allInnerTexts().catch(() => []);
+    const text = [...rows.reverse(), ...tools.reverse().map((t) => `▶ ${t}`)].join("\n");
     for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
       if (this.seen.has(line)) continue;
       this.seen.add(line);
@@ -507,7 +510,7 @@ async function runScenario(browser, base, example, scenario, brain = "endpoint")
       }
     }
     for (const l of trace.matching(/doesn't exist/)) result.warn.push(l);
-    for (const l of trace.matching(/Turn budget spent|activated nothing — completing|model named no tool/)) result.warn.push(l);
+    for (const l of trace.matching(/Iteration budget spent|activated nothing — completing|model named no tool/)) result.warn.push(l);
   } catch (e) {
     if (!overBudget) result.fail.push(`harness: ${String(e.message ?? e).split("\n")[0]}`);
   }

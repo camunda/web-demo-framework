@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseModel } from "./model";
 import { buildWorkers } from "./compile";
-import type { ExampleHandler } from "./types";
+import type { ExampleHandler, TraceEntry } from "./types";
+import type { TurnRef } from "./agent/liveAgent";
 
 const ONE_TASK = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="D" targetNamespace="http://bpmn.io/schema/bpmn">
@@ -50,5 +51,30 @@ describe("a handler's return value", () => {
 
   it.each([[{ packed: true }], [null], [undefined]])("is passed through when it is %j", async (value) => {
     await expect(workerReturning(value)(job)).resolves.toEqual(value);
+  });
+});
+
+describe("a tool's trace entries", () => {
+  const traced = async (turnRef?: TurnRef) => {
+    const entries: TraceEntry[] = [];
+    const handler = ((_job, helpers) => {
+      helpers.trace("packing");
+      return { packed: true };
+    }) as ExampleHandler;
+    await buildWorkers(parseModel(ONE_TASK), { Pack: handler }, (e) => entries.push(e), turnRef).pack(job);
+    return entries;
+  };
+
+  it("join the iteration of the agent host that activated the tool", async () => {
+    const turnRef: TurnRef = { current: 3, owners: new Map([["Pack", { turn: 2, agentId: "Packer" }]]) };
+    const entries = await traced(turnRef);
+    expect(entries.length).toBeGreaterThan(0);
+    // Owned by turn 2 of its own host — not whichever host started a turn last.
+    expect(entries.every((e) => e.turn === 2 && e.agentId === "Packer")).toBe(true);
+  });
+
+  it("belong to no iteration when no agent activated the job", async () => {
+    const entries = await traced({ current: 3 });
+    expect(entries.every((e) => e.turn === undefined && e.agentId === undefined)).toBe(true);
   });
 });

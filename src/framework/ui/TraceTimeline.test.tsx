@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { TraceTimeline, type TraceLogLine } from "./TraceTimeline";
 
@@ -14,6 +14,9 @@ const LOG: TraceLogLine[] = [
 
 const rows = (container: HTMLElement) =>
   Array.from(container.querySelector(".timeline")!.children).map((el) => el.textContent ?? "");
+
+const iterations = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<HTMLElement>(".timeline-iteration"));
 
 describe("TraceTimeline", () => {
   it("puts the newest row at the top", () => {
@@ -32,5 +35,100 @@ describe("TraceTimeline", () => {
     expect(turn.indexOf("I'll check the customer first.")).toBeLessThan(
       turn.indexOf("LookupCustomer"),
     );
+  });
+
+  // Operate's word for one pass of the agent loop, in Operate's format.
+  it("labels each turn as a numbered iteration", () => {
+    const { container } = render(<TraceTimeline log={LOG} hasAgent />);
+    const heads = iterations(container).map(
+      (el) => el.querySelector(".timeline-iteration-label")?.textContent,
+    );
+    expect(heads).toEqual(["2. iteration", "1. iteration"]);
+    expect(container.textContent).not.toMatch(/\bturn\b|\bround\b/i);
+  });
+
+  it("shows a tool call's input beside its output", () => {
+    const log: TraceLogLine[] = [
+      { id: 1, kind: "agent", text: "🤖 calling Lookup", turn: 1, elementId: "Lookup", args: { id: "c-1" } },
+      { id: 2, kind: "tool", text: "▶ Look up customer", turn: 1, elementId: "Lookup" },
+      { id: 3, kind: "tool", text: "   found c-1", turn: 1, elementId: "Lookup" },
+      { id: 4, kind: "vars", text: "↳ …", turn: 1, elementId: "Lookup", result: { tier: "gold" } },
+    ];
+    const { container } = render(
+      <TraceTimeline log={log} hasAgent labelFor={() => "Look up customer"} />,
+    );
+    const call = within(container).getByRole("article", { name: "Tool call: Look up customer" });
+    const [input, output] = Array.from(call.querySelectorAll(".timeline-io-col"));
+    expect(input).toHaveTextContent(/^Input/);
+    expect(JSON.parse(input.querySelector("pre")!.textContent!)).toEqual({ id: "c-1" });
+    expect(output).toHaveTextContent(/^Output/);
+    expect(JSON.parse(output.querySelector("pre")!.textContent!)).toEqual({ tier: "gold" });
+    // The handler's own note lives with its call; the started line would only
+    // repeat the card's own header.
+    expect(call).toHaveTextContent("found c-1");
+    expect(container.textContent).not.toContain("▶ Look up customer");
+  });
+
+  it("says a tool is running until it returns, and completed when it returns no job output", () => {
+    const log: TraceLogLine[] = [
+      { id: 1, kind: "agent", text: "calling A", turn: 1, elementId: "A", args: {} },
+      { id: 2, kind: "agent", text: "calling Sub", turn: 1, elementId: "Sub", args: {} },
+    ];
+    const { container } = render(
+      <TraceTimeline
+        log={log}
+        hasAgent
+        elementStats={[{ elementId: "Sub", completed: 1 }]}
+      />,
+    );
+    const outputs = Array.from(container.querySelectorAll(".timeline-tool")).map(
+      (el) => el.querySelectorAll(".timeline-io-col")[1].textContent,
+    );
+    expect(outputs).toEqual(["Outputrunning…", "Outputcompleted"]);
+  });
+
+  it("does not call a repeated compound tool completed just because its first call was", () => {
+    const log: TraceLogLine[] = [
+      { id: 1, kind: "agent", text: "calling Sub", turn: 1, elementId: "Sub", args: {} },
+      { id: 2, kind: "agent", text: "calling Sub", turn: 2, elementId: "Sub", args: {} },
+    ];
+    const { container } = render(
+      <TraceTimeline log={log} hasAgent elementStats={[{ elementId: "Sub", completed: 1 }]} />,
+    );
+    // Newest first: the second call is still running, the first finished.
+    const outputs = Array.from(container.querySelectorAll(".timeline-tool")).map(
+      (el) => el.querySelectorAll(".timeline-io-col")[1].textContent,
+    );
+    expect(outputs).toEqual(["Outputrunning…", "Outputcompleted"]);
+  });
+
+  it("names the host and keeps each host's iterations apart when several run at once", () => {
+    // Two hosts both on their first turn, interleaved as parallel hosts are.
+    const log: TraceLogLine[] = [
+      { id: 1, kind: "agent", text: "calling A", turn: 1, agentId: "LoanAgent", elementId: "A", args: {} },
+      { id: 2, kind: "agent", text: "calling B", turn: 1, agentId: "AccountAgent", elementId: "B", args: {} },
+      { id: 3, kind: "vars", text: "↳", turn: 1, agentId: "LoanAgent", elementId: "A", result: { a: 1 } },
+      { id: 4, kind: "vars", text: "↳", turn: 1, agentId: "AccountAgent", elementId: "B", result: { b: 2 } },
+    ];
+    const labels: Record<string, string> = { LoanAgent: "Loan agent", AccountAgent: "Account agent" };
+    const { container } = render(
+      <TraceTimeline log={log} hasAgent labelFor={(id) => labels[id] ?? id} />,
+    );
+    const cards = iterations(container);
+    expect(cards.map((c) => c.querySelector(".timeline-iteration-label")?.textContent)).toEqual([
+      "Account agent · 1. iteration",
+      "Loan agent · 1. iteration",
+    ]);
+    // Each result reached its own host's card despite the interleaving.
+    expect(cards[0]).toHaveTextContent('"b": 2');
+    expect(cards[1]).toHaveTextContent('"a": 1');
+  });
+
+  it("marks a turn whose reply is still streaming as thinking", () => {
+    const log: TraceLogLine[] = [
+      { id: 1, kind: "llm", text: "LLM thinking…", turn: 1, pending: true },
+    ];
+    const { container } = render(<TraceTimeline log={log} hasAgent />);
+    expect(container.querySelector(".timeline-thinking")).toHaveTextContent("Thinking…");
   });
 });

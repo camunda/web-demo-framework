@@ -23,8 +23,8 @@ import type { AgentSpec } from "../model";
 import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
-import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
-import { withToolCallArgs } from "../agent/activation";
+import { claimTools, makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
+import { seedToolCallArgs, withToolCallArgs } from "../agent/activation";
 import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { userTaskVariables } from "../userTaskVariables";
@@ -477,10 +477,11 @@ export function ExampleRunner({
   // flips back to `true` for a new run.
   const runSeqRef = useRef(0);
   const logIdRef = useRef(0);
-  // Shared with `buildWorkers` (compile.ts) and `makeLiveAgentRouter`
-  // (agent/liveAgent.ts) for one run, so a tool's own trace entries land in
-  // the same turn group as the agent entry that activated it — see
-  // `TraceTimeline.tsx`. Recreated fresh in `start` below, per run.
+  // Shared with `buildWorkers` (compile.ts), `makeLiveAgentRouter`
+  // (agent/liveAgent.ts) and the scripted agent in `beginRun`, for one run, so
+  // a tool's own trace entries land in the same iteration group as the agent
+  // entry that activated it — see `TraceTimeline.tsx`. Recreated fresh in
+  // `beginRun` below, per run.
   const turnRef = useRef<TurnRef>({ current: undefined });
   // The workers/agents maps from the run currently in progress, kept around
   // so a manual-control resolution (below) can resume the same drive loop
@@ -1039,19 +1040,40 @@ export function ExampleRunner({
         // primary one: a host can live in a called process (the orchestrator
         // shape), where `model.agent` — the primary process's first host — is
         // null and nothing would be registered at all.
+        //
+        // Each call is one iteration of that host's loop, stamped like a live
+        // brain's turn so the activity panel tells both the same way.
+        const allTools = model.agents.flatMap((a) => a.tools);
+        const iterations = new Map<string, number>();
+        const turns = turnRef.current;
         for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
           agents[jobType] = async (job) => {
-            const result = await scripted!(job);
-            const tools = (result.activateElements ?? [])
-              .map((a) => a.elementId)
-              .join(", ");
+            const turn = (iterations.get(job.elementId) ?? 0) + 1;
+            iterations.set(job.elementId, turn);
+            turns.current = turn;
+            const stamp = { turn, agentId: job.elementId };
+            // Seeded here rather than only below, so the trace can show each
+            // tool the input it is actually activated with.
+            const result = seedToolCallArgs(await scripted!(job), allTools);
+            const activations = result.activateElements ?? [];
             const host = model.agents.length > 1 ? ` (${job.elementId})` : "";
-            trace({
-              kind: "agent",
-              text: result.completionConditionFulfilled
-                ? `🤖 scripted agent${host}: done`
-                : `🤖 scripted agent${host}: calling ${tools || "(nothing)"}`,
-            });
+            if (result.completionConditionFulfilled || activations.length === 0)
+              trace({
+                kind: "agent",
+                text: result.completionConditionFulfilled
+                  ? `🤖 scripted agent${host}: done`
+                  : `🤖 scripted agent${host}: calling (nothing)`,
+                ...stamp,
+              });
+            for (const a of activations)
+              trace({
+                kind: "agent",
+                text: `🤖 calling ${a.elementId}`,
+                elementId: a.elementId,
+                args: (a.variables?.toolCall as Record<string, unknown> | undefined) ?? {},
+                ...stamp,
+              });
+            claimTools(turns, turn, job.elementId, activations.map((a) => a.elementId));
             return result;
           };
         }
@@ -1178,6 +1200,22 @@ export function ExampleRunner({
   const activationPath = useMemo(
     () => (run.snapshot ? elementActivations(run.events(), rootInstanceKeyRef.current) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
+    [run.snapshot],
+  );
+  // AI Agent hosts and their tools, for the diagram's agent-state overlays.
+  const diagramAgents = useMemo(
+    () =>
+      model.agents.map((a) => ({
+        elementId: a.elementId,
+        toolIds: a.tools.map((t) => t.elementId),
+      })),
+    [model],
+  );
+  const completedIds = useMemo(
+    () =>
+      (run.snapshot?.elementStats ?? [])
+        .filter((s) => s.completed > 0)
+        .map((s) => s.elementId),
     [run.snapshot],
   );
   // A closed panel shows nothing, so what happens meanwhile is history once it
@@ -1900,7 +1938,7 @@ export function ExampleRunner({
             sectionId="process"
             data-tour={TOUR_ANCHOR.diagram}
             title="Process"
-            description={`${model.processName} — live token (green), incidents (red).`}
+            description={`${model.processName} — live token (blue), incidents (red).`}
           >
             <WalkPanelPresence tracker={tracker} />
             {/* Render the Suspense boundary unconditionally so the lazy
@@ -1924,6 +1962,8 @@ export function ExampleRunner({
                 runId={runId}
                 tracker={tracker}
                 hopMs={HOP}
+                agents={diagramAgents}
+                completedIds={completedIds}
                 className="diagram"
               />
             </Suspense>
