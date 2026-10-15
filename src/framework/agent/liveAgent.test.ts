@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { coerceToolArg, makeLiveAgent, turnFor, type TurnRef } from "./liveAgent";
+import { coerceToolArg, makeLiveAgent, type TurnRef } from "./liveAgent";
+import { TRACE_IDENTITY_VAR, traceIdentityOf } from "./activation";
 import type { AgentSpec } from "../model";
 import type { ChatFn } from "../brains/types";
 
@@ -518,7 +519,7 @@ describe("makeLiveAgent — trace timeline correlation (turn/elementId/args)", (
     expect(turnRef.current).toBe(1);
   });
 
-  it("names its host on every turn entry, and records which turn activated each tool", async () => {
+  it("names its host on every turn entry, and hands each activation its identity", async () => {
     const trace: import("../types").TraceEntry[] = [];
     const chat = fakeChat([
       '{"tool": "ToolA", "arguments": {"code": "A1"}, "done": false}',
@@ -527,13 +528,17 @@ describe("makeLiveAgent — trace timeline correlation (turn/elementId/args)", (
     const spec = makeSpec();
     const agent = makeLiveAgent(spec, chat, (e) => trace.push(e), { turnRef });
 
-    await agent({ elementId: spec.elementId, variables: {}, type: "x" } as never);
+    const result = await agent({ elementId: spec.elementId, variables: {}, type: "x" } as never);
 
     // Two hosts both count from turn 1; the host is what keeps them apart.
     expect(trace.every((e) => e.agentId === spec.elementId)).toBe(true);
-    expect(turnFor(turnRef, "ToolA")).toEqual({ turn: 1, agentId: spec.elementId });
-    // A job no agent activated belongs to no turn.
-    expect(turnFor(turnRef, "SomethingElse")).toEqual({});
+    // The activation carries who made it, so the job it creates can say so.
+    const activation = result.activateElements![0];
+    const identity = { turn: 1, agentId: spec.elementId, call: 1 };
+    expect(traceIdentityOf(activation.variables ?? {})).toEqual(identity);
+    expect(trace.find((e) => e.kind === "agent" && e.elementId === "ToolA")?.call).toBe(1);
+    // Only under its own name: nothing else in the activation's variables changes.
+    expect(Object.keys(activation.variables ?? {})).toEqual([TRACE_IDENTITY_VAR]);
   });
 
   it("keys its streamed reply by host, so a second host's turn 1 doesn't overwrite the first's", async () => {

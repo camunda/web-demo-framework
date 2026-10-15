@@ -1,7 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo, TaskListenerSpec } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
-import { turnFor, type TurnRef } from "./agent/liveAgent";
+import { traceIdentityOf } from "./agent/activation";
 import {
   makeImageAccessor,
   makeVisionAccessor,
@@ -107,11 +107,11 @@ function safeStringify(value: unknown): string {
  * handler throws when activated, which surfaces as an incident on the diagram
  * rather than a silent stall.
  *
- * `turnRef`, when supplied, stamps each "started"/"result" trace entry with
- * the agent turn that activated the tool (see `liveAgent.ts`'s `TurnRef`), so
- * a tool activated by an agent groups with its own result in the trace
- * timeline. Omit it for a non-agentic example — the entries just
- * render ungrouped, exactly as before.
+ * A job an agent activation created carries that activation's identity in
+ * its variables (`agent/activation.ts`'s `tagActivations`), and every trace
+ * entry it produces is stamped with it, so a tool groups with — and pairs
+ * with — the very call that started it. Any other job (a non-agentic example,
+ * or a tool reached by a sequence flow) renders ungrouped.
  *
  * `vision`, when supplied (only for an example with `imageInput`), gives every
  * handler a `helpers.vision`/`helpers.image` bound to this run's image and the
@@ -121,7 +121,6 @@ export function buildWorkers(
   model: ModelInfo,
   byElement: Record<string, ExampleHandler>,
   trace: Trace,
-  turnRef?: TurnRef,
   vision?: VisionSupport,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
@@ -149,28 +148,11 @@ export function buildWorkers(
     else listenersByType.set(listener.jobType, [listener]);
   }
 
-  // Which call of its element each job is, numbered as the agent's activations
-  // are (`TraceEntry.call`): the engine creates a tool's jobs in activation
-  // order and dispatches them in turn. Keyed by job, so a retried job keeps
-  // its number. A task listener's job is not a call of its task.
-  const callsSoFar = new Map<string, number>();
-  const callOfJob = new Map<string, number>();
-  const callOf = (job: ActivatedJob) => {
-    let call = callOfJob.get(job.key);
-    if (call === undefined) {
-      call = (callsSoFar.get(job.elementId) ?? 0) + 1;
-      callsSoFar.set(job.elementId, call);
-      callOfJob.set(job.key, call);
-    }
-    return call;
-  };
-
   const runHandler = async (
     job: ActivatedJob,
     handler: ExampleHandler,
-    call?: number,
+    stamp: { turn?: number; agentId?: string; jobKey?: string; call?: number },
   ) => {
-    const stamp = { ...turnFor(turnRef, job.elementId), jobKey: job.key, call };
     const out = await handler(job, helpersFor(job, trace, stamp, vision));
     trace({
       kind: "vars",
@@ -198,7 +180,7 @@ export function buildWorkers(
   for (const jobType of new Set([...taskJobTypes, ...listenersByType.keys()])) {
     const listeners = listenersByType.get(jobType) ?? [];
     workers[jobType] = async (job) => {
-      const stamp = { ...turnFor(turnRef, job.elementId), jobKey: job.key };
+      const stamp = { ...traceIdentityOf(job.variables), jobKey: job.key };
       const label = labels.get(job.elementId) ?? job.elementId;
       const onThisElement = listeners.filter((l) => l.elementId === job.elementId);
 
@@ -214,12 +196,15 @@ export function buildWorkers(
           text: `🎧 ${label} — ${listener.eventType} listener${handler ? "" : " (no code supplied)"}`,
           elementId: job.elementId,
           ...stamp,
+          call: undefined,
         });
         // An unclaimed listener runs as a no-op rather than failing: a model
         // that carries one should still run, and "this fired and did nothing"
         // is a truthful thing to show. Supplying code for it is then opt-in.
         if (!handler) return undefined;
-        return runHandler(job, handler);
+        // A listener on a tool sits in that tool's iteration, but it is not the
+        // call itself, so its result must not stand in as the call's output.
+        return runHandler(job, handler, { ...stamp, call: undefined });
       }
 
       const handler = byElement[job.elementId];
@@ -227,9 +212,8 @@ export function buildWorkers(
         throw new Error(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
-      const call = callOf(job);
-      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, ...stamp, call });
-      return runHandler(job, handler, call);
+      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, ...stamp });
+      return runHandler(job, handler, stamp);
     };
   }
   return workers;

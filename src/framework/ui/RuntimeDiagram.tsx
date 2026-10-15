@@ -368,7 +368,14 @@ export function RuntimeDiagram({
     }
     tokenOverlaysRef.current = nextOverlays;
 
-    const walked = walkedCounts(pathRef.current.path ?? [], walkRef.current.queue);
+    // Only what the walk has taken in: activations that arrived since are not
+    // queued yet, so subtracting the queue alone would count them as walked.
+    const done = progress();
+    const takenIn =
+      done.run === pathRef.current.runId
+        ? (pathRef.current.path ?? []).slice(0, done.consumed)
+        : [];
+    const walked = walkedCounts(takenIn, walkRef.current.queue);
     const registry = viewer.get<RegistryLike>("elementRegistry");
     const executed = [...walked.keys()].filter((id) => registry.get(id));
     for (const id of executed) {
@@ -382,7 +389,7 @@ export function RuntimeDiagram({
     markedRef.current = next;
     paintTakenFlows(
       registry,
-      walkedPrefix(pathRef.current.path ?? [], walkRef.current.queue, (id) => !!registry.get(id)),
+      walkedPrefix(takenIn, walkRef.current.queue, (id) => !!registry.get(id)),
     );
 
     for (const id of agentOverlaysRef.current) {
@@ -503,6 +510,8 @@ export function RuntimeDiagram({
     // A called process's elements are in the log too, but not on this diagram.
     const onDiagram = fresh.filter((id) => registry?.get(id));
     if (onDiagram.length === 0 || reduced) {
+      // Nothing to walk, but what was just taken in still marks the path.
+      if (fresh.length) applyMarkers();
       reportHops();
       return;
     }

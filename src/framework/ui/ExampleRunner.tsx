@@ -24,7 +24,7 @@ import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
 import { claimTools, makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
-import { seedToolCallArgs, withToolCallArgs } from "../agent/activation";
+import { seedToolCallArgs, tagActivations, withToolCallArgs } from "../agent/activation";
 import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { userTaskVariables } from "../userTaskVariables";
@@ -520,17 +520,8 @@ export function ExampleRunner({
     return (elementId: string) => map.get(elementId) ?? elementLabels(elementId);
   }, [draft.resolvedBpmn, elementLabels]);
 
-  // Run-lifetime count of each tool's activations, for `TraceEntry.call`.
-  // Reset wherever the log is.
-  const callCountRef = useRef(new Map<string, number>());
   /** Append a trace line — or update in place when it carries a `key`. */
-  const trace = useCallback((raw: TraceEntry) => {
-    let entry = raw;
-    if (entry.kind === "agent" && entry.elementId && entry.call === undefined) {
-      const call = (callCountRef.current.get(entry.elementId) ?? 0) + 1;
-      callCountRef.current.set(entry.elementId, call);
-      entry = { ...entry, call };
-    }
+  const trace = useCallback((entry: TraceEntry) => {
     setLog((prev) => {
       if (entry.key) {
         const at = prev.findIndex((l) => l.key === entry.key);
@@ -1012,7 +1003,6 @@ export function ExampleRunner({
       model,
       draft.handlers,
       trace,
-      turnRef.current,
       visionSupport,
     );
     // Job types this example holds back for a manual choice (see
@@ -1074,16 +1064,23 @@ export function ExampleRunner({
                   : `🤖 scripted agent${host}: calling (nothing)`,
                 ...stamp,
               });
-            for (const a of activations)
+            const identities = claimTools(
+              turns,
+              turn,
+              job.elementId,
+              activations.map((a) => a.elementId),
+            );
+            activations.forEach((a, i) =>
               trace({
                 kind: "agent",
                 text: `🤖 calling ${a.elementId}`,
                 elementId: a.elementId,
                 args: (a.variables?.toolCall as Record<string, unknown> | undefined) ?? {},
                 ...stamp,
-              });
-            claimTools(turns, turn, job.elementId, activations.map((a) => a.elementId));
-            return result;
+                call: identities[i].call,
+              }),
+            );
+            return tagActivations(result, identities);
           };
         }
       }
@@ -1095,7 +1092,6 @@ export function ExampleRunner({
     }
 
     setLog([]);
-    callCountRef.current = new Map();
     setReviewState({ taskKey: null, values: {}, valid: false });
     // Only the *reference* to the image (imageId/imageName) rides in the
     // process variables — never the pixels (see `imageInput.ts`). The bytes are
@@ -1463,7 +1459,6 @@ export function ExampleRunner({
       runningRef.current = false;
     }
     setLog([]);
-    callCountRef.current = new Map();
     setDisplayVars({});
     // The next run creates its own instance; leaving the old key here would
     // make `canResume` ask about an instance the engine no longer has.

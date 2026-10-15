@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseModel } from "./model";
 import { buildWorkers } from "./compile";
 import type { ExampleHandler, TraceEntry } from "./types";
-import type { TurnRef } from "./agent/liveAgent";
+import { TRACE_IDENTITY_VAR } from "./agent/activation";
 
 const ONE_TASK = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="D" targetNamespace="http://bpmn.io/schema/bpmn">
@@ -55,43 +55,32 @@ describe("a handler's return value", () => {
 });
 
 describe("a tool's trace entries", () => {
-  const traced = async (turnRef?: TurnRef) => {
+  const traced = async (variables: Record<string, unknown>) => {
     const entries: TraceEntry[] = [];
     const handler = ((_job, helpers) => {
       helpers.trace("packing");
       return { packed: true };
     }) as ExampleHandler;
-    await buildWorkers(parseModel(ONE_TASK), { Pack: handler }, (e) => entries.push(e), turnRef).pack(job);
+    await buildWorkers(parseModel(ONE_TASK), { Pack: handler }, (e) => entries.push(e)).pack({
+      ...job,
+      variables,
+    });
     return entries;
   };
 
-  it("join the iteration of the agent host that activated the tool", async () => {
-    const turnRef: TurnRef = { current: 3, owners: new Map([["Pack", { turn: 2, agentId: "Packer" }]]) };
-    const entries = await traced(turnRef);
+  it("carry the identity of the agent activation that created the job", async () => {
+    const entries = await traced({
+      [TRACE_IDENTITY_VAR]: { turn: 2, agentId: "Packer", call: 3 },
+    });
     expect(entries.length).toBeGreaterThan(0);
-    // Owned by turn 2 of its own host — not whichever host started a turn last.
-    expect(entries.every((e) => e.turn === 2 && e.agentId === "Packer")).toBe(true);
-    // ...and all from the one job, so a second call of the tool stays apart.
-    expect(entries.every((e) => e.jobKey === job.key)).toBe(true);
+    expect(
+      entries.every((e) => e.turn === 2 && e.agentId === "Packer" && e.call === 3 && e.jobKey === job.key),
+    ).toBe(true);
   });
 
-  it("carry which call of the tool they are, kept across a retry of the same job", async () => {
-    const entries: TraceEntry[] = [];
-    const pack = buildWorkers(
-      parseModel(ONE_TASK),
-      { Pack: (() => ({})) as ExampleHandler },
-      (e) => entries.push(e),
-    ).pack;
-    await pack({ ...job, key: "a" });
-    await pack({ ...job, key: "b" });
-    await pack({ ...job, key: "a" }); // the engine handing job "a" back after a failure
-    const callOfKey = (key: string) => new Set(entries.filter((e) => e.jobKey === key).map((e) => e.call));
-    expect(callOfKey("a")).toEqual(new Set([1]));
-    expect(callOfKey("b")).toEqual(new Set([2]));
-  });
-
-  it("belong to no iteration when no agent activated the job", async () => {
-    const entries = await traced({ current: 3 });
-    expect(entries.every((e) => e.turn === undefined && e.agentId === undefined)).toBe(true);
+  it("belong to no iteration and no call when no agent activated the job", async () => {
+    // A tool a sequence flow reached: its job carries no activation identity.
+    const entries = await traced({});
+    expect(entries.every((e) => e.turn === undefined && e.call === undefined)).toBe(true);
   });
 });

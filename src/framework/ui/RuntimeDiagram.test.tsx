@@ -172,6 +172,43 @@ describe("RuntimeDiagram", () => {
     expect(container.querySelector(".nano-call-count")).toHaveTextContent("1");
   });
 
+  it("does not mark activations that arrive mid-walk until the token reaches them", async () => {
+    const marked = (container: HTMLElement, id: string) =>
+      container.querySelector(`[data-element-id="${id}"]`)?.classList.contains("nano-executed");
+    // A long hop holds the token on StartEvent_1 with Rule_1 queued behind it.
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={WALK_XML} activeIds={[]} incidentIds={[]} path={[]} runId={1} hopMs={60_000} />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-element-id="Task_1"]')).toBeInTheDocument());
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Rule_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1"]}
+        runId={1}
+        hopMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(marked(container, "StartEvent_1")).toBe(true));
+
+    // A new batch lands mid-hop, with a new frontier: the markers effect runs
+    // before the walk has queued Task_1.
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1", "Task_1"]}
+        runId={1}
+        hopMs={60_000}
+      />,
+    );
+    expect(marked(container, "StartEvent_1")).toBe(true);
+    expect(marked(container, "Rule_1")).toBe(false);
+    expect(marked(container, "Task_1")).toBe(false);
+  });
+
   it("draws the path already taken: walked elements, and the flows taken into them", async () => {
     const { container } = render(
       <RuntimeDiagram

@@ -163,51 +163,42 @@ function IterationCard({
     (e) => e.kind === "agent" && !e.elementId,
   );
   const errors = group.entries.filter((e) => e.kind === "error");
-  // A tool's own lines (kind "tool") go inside its card — except compile.ts's
-  // "▶ label" started line, which the card's header already says. Anything
-  // stamped with this turn that pairs with no activation (e.g. a non-agentic
-  // handler run inside an otherwise agentic turn) would otherwise vanish —
-  // render it as plain lines within the card, in original order.
-  const activatedElementIds = new Set(activations.map((a) => a.elementId));
   /**
-   * The result and notes of one call. A tool can be activated more than once
-   * in one iteration, so each activation pairs with the job entries carrying
-   * its own `call` number — an identity, so it holds when the capped log has
-   * dropped an earlier call. Without call numbers, the k-th activation pairs
-   * with the k-th job key in this iteration, and without job keys, by order.
+   * The job entries that belong to one call: by its `call` number — the
+   * identity an activation hands to the job it creates, so it holds when the
+   * capped log has dropped an earlier call or a sequence flow ran the same
+   * tool in between. Entries without call numbers pair the k-th activation
+   * with the k-th job key in this iteration, or failing that, by order.
    */
-  const partsOf = (activation: TraceLogLine) => {
+  const entriesOf = (activation: TraceLogLine): TraceLogLine[] => {
     const own = group.entries.filter(
       (e) => e.elementId === activation.elementId && (e.kind === "tool" || e.kind === "vars"),
     );
-    if (activation.call !== undefined && own.some((e) => e.call !== undefined)) {
-      const mine = own.filter((e) => e.call === activation.call);
-      return {
-        result: mine.find((e) => e.kind === "vars"),
-        notes: mine.filter((e) => e.kind === "tool" && !e.text.startsWith("▶ ")),
-      };
-    }
+    if (activation.call !== undefined) return own.filter((e) => e.call === activation.call);
     const k = activations
       .filter((a) => a.elementId === activation.elementId)
       .indexOf(activation);
     const keys = [...new Set(own.flatMap((e) => (e.jobKey ? [e.jobKey] : [])))];
-    const mine = keys.length
-      ? own.filter((e) => e.jobKey === keys[k])
-      : own.filter((e) => e.kind === "tool" || own.filter((r) => r.kind === "vars")[k] === e);
-    return {
-      result: mine.find((e) => e.kind === "vars"),
-      notes:
-        keys.length || k === 0
-          ? mine.filter((e) => e.kind === "tool" && !e.text.startsWith("▶ "))
-          : [],
-    };
+    if (keys.length) return own.filter((e) => e.jobKey === keys[k]);
+    const result = own.filter((e) => e.kind === "vars")[k];
+    return own.filter((e) => (e.kind === "tool" && k === 0) || e === result);
   };
+  const calls = activations.map((activation) => {
+    const mine = entriesOf(activation);
+    return {
+      activation,
+      mine,
+      result: mine.find((e) => e.kind === "vars"),
+      // The "▶ label" started line only repeats the card's own header.
+      notes: mine.filter((e) => e.kind === "tool" && !e.text.startsWith("▶ ")),
+    };
+  });
+  // Anything stamped with this iteration that belongs to no call — a task
+  // listener on a tool, a task inside a compound tool — stays visible as a
+  // plain line in the card, in original order.
+  const used = new Set(calls.flatMap((c) => c.mine.map((e) => e.id)));
   const loose = group.entries
-    .filter(
-      (e) =>
-        (e.kind === "tool" || e.kind === "vars") &&
-        !(e.elementId && activatedElementIds.has(e.elementId)),
-    )
+    .filter((e) => (e.kind === "tool" || e.kind === "vars" || e.kind === "step") && !used.has(e.id))
     .sort((a, b) => a.id - b.id);
   const host = showHost && group.agentId ? labelFor(group.agentId) || group.agentId : null;
 
@@ -238,19 +229,16 @@ function IterationCard({
         </div>
       ))}
 
-      {activations.map((a) => {
-        const { result, notes } = partsOf(a);
-        return (
-          <ToolStep
-            key={a.id}
-            activation={a}
-            result={result}
-            notes={notes}
-            completed={isCompleted(a)}
-            labelFor={labelFor}
-          />
-        );
-      })}
+      {calls.map(({ activation, result, notes }) => (
+        <ToolStep
+          key={activation.id}
+          activation={activation}
+          result={result}
+          notes={notes}
+          completed={isCompleted(activation)}
+          labelFor={labelFor}
+        />
+      ))}
 
       {loose.map((e) => (
         <div key={e.id} className={`log-line log-${e.kind}`}>
@@ -296,10 +284,14 @@ export function TraceTimeline({
     () => new Set(log.filter((e) => e.turn !== undefined).map((e) => e.agentId)).size > 1,
     [log],
   );
-  // A tool called again is complete only once the engine has completed it
-  // that many times — the first call finishing says nothing about the second.
-  // The runner numbers calls before capping the log (`TraceEntry.call`);
-  // counting what is still in the log is only the fallback.
+  // Only a call with no job of its own (a compound tool) needs this: a tool
+  // called again is complete only once the engine has completed it that many
+  // times — the first call finishing says nothing about the second. Calls are
+  // numbered as they are made (`TraceEntry.call`), so a capped log doesn't
+  // shift them; counting what is still in the log is only the fallback. The
+  // engine's count also includes any run of the tool a sequence flow started,
+  // which no call number accounts for — a compound tool reached that way can
+  // read as completed early.
   const isCompleted = useMemo(() => {
     const completed = new Map(elementStats.map((s) => [s.elementId, s.completed]));
     const nth = new Map<number, number>();

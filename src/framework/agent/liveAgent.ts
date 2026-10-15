@@ -3,6 +3,7 @@ import type { AgentSpec, ToolSpec } from "../model";
 import type { ChatFn, ChatMessage } from "../brains/types";
 import type { Trace } from "../types";
 import { collectToolCalls, extractJson, saysDone, shorten } from "./parse";
+import { tagActivations, type TraceIdentity } from "./activation";
 
 /**
  * A real LLM driving any agentic ad-hoc sub-process.
@@ -350,17 +351,14 @@ function resolveArguments(
 }
 
 /**
- * A shared counter, written by the currently-running agent turn and read by
- * `compile.ts`'s job wrapper, so a tool's "started"/"result" trace entries
- * land in the same turn group as the "agent" entry that activated it — see
- * `TraceEntry.turn` and `TraceTimeline.tsx`. Plain mutable object rather than
- * a return value: the agent and the job-dispatch loop run on two different
- * call paths (`stepWorkers`) that don't otherwise share state.
+ * Per-run state shared by every agent host: the turn most recently started,
+ * and how many times each tool has been called, so each call gets a run-wide
+ * number. Plain mutable object, created fresh for each run.
  *
- * Tool entries are stamped from `owners` — which host's turn activated each
- * tool — so a tool still groups with its own host's turn while two hosts run
- * at once. A job no agent activated (a task after the agent, or inside a
- * compound tool) belongs to no turn and renders ungrouped.
+ * Which turn a tool's own trace entries belong to does not come from here: an
+ * activation carries its identity in its own variables (see
+ * `tagActivations`), and the job it creates reads it back, so the link is the
+ * engine's rather than a guess from timing or position.
  */
 export interface TurnRef {
   /**
@@ -368,28 +366,28 @@ export interface TurnRef {
    * agent turn actually runs.
    */
   current: number | undefined;
-  /** Tool element id → the host turn that most recently activated it. */
-  owners?: Map<string, { turn: number; agentId: string }>;
+  /** Tool element id → explicit calls so far this run. */
+  calls?: Map<string, number>;
 }
 
-/** Record that `agentId`'s `turn` activated each of `toolIds`. */
+/**
+ * Give each of `toolIds`, activated by `agentId`'s `turn`, its identity: the
+ * turn, the host, and — with a `TurnRef` — which call of that tool this is
+ * in the run.
+ */
 export function claimTools(
   ref: TurnRef | undefined,
   turn: number,
   agentId: string,
   toolIds: string[],
-) {
-  if (!ref) return;
-  ref.owners ??= new Map();
-  for (const id of toolIds) ref.owners.set(id, { turn, agentId });
-}
-
-/** The turn a job for `elementId` belongs to, as `TraceEntry` fields. */
-export function turnFor(
-  ref: TurnRef | undefined,
-  elementId: string,
-): { turn?: number; agentId?: string } {
-  return ref?.owners?.get(elementId) ?? {};
+): TraceIdentity[] {
+  return toolIds.map((id) => {
+    if (!ref) return { turn, agentId };
+    ref.calls ??= new Map();
+    const call = (ref.calls.get(id) ?? 0) + 1;
+    ref.calls.set(id, call);
+    return { turn, agentId, call };
+  });
 }
 
 export interface LiveAgentOptions {
@@ -749,26 +747,30 @@ export function makeLiveAgent(
     // One trace entry per activated tool — not a single combined line — so
     // the trace timeline can show exactly which tool was chosen with which
     // arguments, rather than a joined name list.
-    for (const { tool } of resolved) {
+    const identities = claimTools(
+      turnRef,
+      turn,
+      spec.elementId,
+      resolved.map((r) => r.tool.elementId),
+    );
+    resolved.forEach(({ tool }, i) => {
       trace({
         kind: "agent",
         text: `🤖 calling ${tool.elementId}`,
         turn,
         elementId: tool.elementId,
         args: forHistory.get(tool.elementId) ?? {},
+        call: identities[i].call,
       });
-    }
-    claimTools(
-      turnRef,
-      turn,
-      spec.elementId,
-      resolved.map((r) => r.tool.elementId),
-    );
+    });
 
-    return {
-      activateElements: resolved.map((r) => ({ elementId: r.tool.elementId })),
-      variables: variablesOut,
-    };
+    return tagActivations(
+      {
+        activateElements: resolved.map((r) => ({ elementId: r.tool.elementId })),
+        variables: variablesOut,
+      },
+      identities,
+    );
     }
   };
 }

@@ -48,11 +48,12 @@ export interface TraceEntry {
    * - `jobKey` is the engine job an entry came from — the started line, a
    *   handler's own notes and its result share one, so a tool called twice in
    *   the same iteration keeps each call's output and notes apart.
-   * - `call` numbers a tool activation among every activation of that element
-   *   in the run (1 = first) — and a job's entries with the call they belong
-   *   to, so the two pair by identity rather than by position in the log. The
-   *   runner stamps activations and `buildWorkers` stamps jobs, both before
-   *   the log is capped, so neither shifts once early entries are dropped.
+   * - `call` numbers an agent's activation of a tool among every such
+   *   activation of that tool in the run (1 = first). The activation hands it
+   *   to the job it creates (see `agent/activation.ts`'s `tagActivations`), so
+   *   the call and its job's entries pair by identity — not by position in a
+   *   capped log, and not confused by a run of the tool a sequence flow
+   *   started, which carries none.
    */
   turn?: number;
   agentId?: string;
