@@ -162,6 +162,15 @@ export function useEmbedHeightReporter(enabled: boolean): void {
  * stays up — which is the whole point of preferring this over the height
  * message, which fires regardless.
  *
+ * Once sent, it is also re-sent in answer to the host's
+ * {@link EMBED_HEIGHT_REQUEST}. The one post races the host exactly as the first
+ * height does: a runner that is ready before the host page has hydrated and
+ * attached its listener posts into the void, and the host would keep its
+ * fallback over a working runner until reload. The host already asks for the
+ * height once it is listening, so answering that with readiness too closes the
+ * race with no new message type. Before the runner is ready a request gets no
+ * readiness answer, so the fallback guarantee above is unchanged.
+ *
  * A no-op when not embedded (`window.parent === window`), so it is safe to call
  * unconditionally.
  */
@@ -173,4 +182,16 @@ export function useEmbedReadyReporter(ready: boolean): void {
     sent.current = true;
     window.parent.postMessage(buildEmbedReadyMessage(), "*");
   }, [ready]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || window.parent === window) return;
+    const onRequest = (event: MessageEvent) => {
+      if (!sent.current || event.source !== window.parent) return;
+      const data = event.data as { type?: unknown } | null;
+      if (!data || data.type !== EMBED_HEIGHT_REQUEST) return;
+      window.parent.postMessage(buildEmbedReadyMessage(), "*");
+    };
+    window.addEventListener("message", onRequest);
+    return () => window.removeEventListener("message", onRequest);
+  }, []);
 }
