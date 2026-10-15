@@ -204,11 +204,24 @@ class Trace {
   seen = new Set();
   async capture(page) {
     // The panel renders newest row first; read rows oldest-first so the saved trace reads in run order.
-    const rows = await page.locator(".timeline").first().locator(":scope > *").allInnerTexts().catch(() => []);
     // An agent's tool call is a card in its iteration, not a "▶ label" line —
-    // name it the same way so scripted and live runs still compare step for step.
-    const tools = await page.locator(".timeline .timeline-tool-head strong").allInnerTexts().catch(() => []);
-    const text = [...rows.reverse(), ...tools.reverse().map((t) => `▶ ${t}`)].join("\n");
+    // name it the same way, in the card's own order and right after its own
+    // iteration, so scripted and live runs still compare step for step.
+    const rows = await page
+      .locator(".timeline")
+      .first()
+      .locator(":scope > *")
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          text: el.innerText,
+          tools: Array.from(el.querySelectorAll(".timeline-tool-head strong"), (s) => s.textContent ?? ""),
+        })),
+      )
+      .catch(() => []);
+    const text = rows
+      .reverse()
+      .flatMap((row) => [row.text, ...row.tools.map((t) => `▶ ${t}`)])
+      .join("\n");
     for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
       if (this.seen.has(line)) continue;
       this.seen.add(line);

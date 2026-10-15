@@ -37,45 +37,49 @@ const AGENT_JOB = "io.camunda.agenticai:aiagent-job-worker:1";
 async function run(plan: string[][], stall: string[] = [], limit = 1) {
   const model = parseModel(BPMN);
   const session = await createBojtosSession({ variant: "readmodel", wasm: loadReadModelWasm() });
-  session.deploy(BPMN);
-  session.createInstance("probe-adhoc-inner-flow", "{}");
-  const log: TraceEntry[] = [];
-  const noop = (() => ({})) as ExampleHandler;
-  const workers = buildWorkers(
-    model,
-    { ChainedTool: noop, ChainedFollowUp: noop, CompoundInner: noop, CompoundFollowUp: noop },
-    (e) => log.push(e),
-  );
-  for (const jobType of stall) {
-    const serve = workers[jobType];
-    let left = limit;
-    if (left === 0) delete workers[jobType];
-    else
-      workers[jobType] = async (job) => {
-        if (--left === 0) delete workers[jobType];
-        return serve(job);
-      };
+  try {
+    session.deploy(BPMN);
+    session.createInstance("probe-adhoc-inner-flow", "{}");
+    const log: TraceEntry[] = [];
+    const noop = (() => ({})) as ExampleHandler;
+    const workers = buildWorkers(
+      model,
+      { ChainedTool: noop, ChainedFollowUp: noop, CompoundInner: noop, CompoundFollowUp: noop },
+      (e) => log.push(e),
+    );
+    for (const jobType of stall) {
+      const serve = workers[jobType];
+      let left = limit;
+      if (left === 0) delete workers[jobType];
+      else
+        workers[jobType] = async (job) => {
+          if (--left === 0) delete workers[jobType];
+          return serve(job);
+        };
+    }
+    const turnRef: TurnRef = { current: undefined };
+    let turn = 0;
+    const agent: AgentHandler = async (): Promise<AgentResult> => {
+      const tools = plan[turn];
+      turn += 1;
+      if (!tools) return { completionConditionFulfilled: true };
+      const identities = claimTools(turnRef, turn, "Agent", tools);
+      return tagActivations({ activateElements: tools.map((elementId) => ({ elementId })) }, identities);
+    };
+    for (let i = 0; i < 12; i++) {
+      const round = await dispatchRound(session, workers, { agents: { [AGENT_JOB]: agent } });
+      if (round.handled === 0) break;
+    }
+    // One identity per job: what its started line was stamped with.
+    const followUps = log
+      .filter((e) => e.elementId === "ChainedFollowUp" && e.text.startsWith("▶"))
+      .map(({ turn, call }) => ({ turn, call }));
+    return Object.assign(followUps, {
+      outcomes: Object.fromEntries(toolCallOutcomes(session.events(), session.snapshot())),
+    });
+  } finally {
+    session.free();
   }
-  const turnRef: TurnRef = { current: undefined };
-  let turn = 0;
-  const agent: AgentHandler = async (): Promise<AgentResult> => {
-    const tools = plan[turn];
-    turn += 1;
-    if (!tools) return { completionConditionFulfilled: true };
-    const identities = claimTools(turnRef, turn, "Agent", tools);
-    return tagActivations({ activateElements: tools.map((elementId) => ({ elementId })) }, identities);
-  };
-  for (let i = 0; i < 12; i++) {
-    const round = await dispatchRound(session, workers, { agents: { [AGENT_JOB]: agent } });
-    if (round.handled === 0) break;
-  }
-  // One identity per job: what its started line was stamped with.
-  const followUps = log
-    .filter((e) => e.elementId === "ChainedFollowUp" && e.text.startsWith("▶"))
-    .map(({ turn, call }) => ({ turn, call }));
-  return Object.assign(followUps, {
-    outcomes: Object.fromEntries(toolCallOutcomes(session.events(), session.snapshot())),
-  });
 }
 
 describe("a tool's job and the agent call that made it", () => {
