@@ -69,6 +69,23 @@ export function agentStateOf(
   return null;
 }
 
+/** `ids` and every element that contains one of them, by the diagram's nesting. */
+export function enclosing(
+  registry: { get: (id: string) => unknown },
+  ids: readonly string[],
+): string[] {
+  const out = new Set<string>();
+  for (const id of ids) {
+    let el = registry.get(id) as { id: string; parent?: unknown } | undefined;
+    if (!el) out.add(id);
+    while (el) {
+      out.add(el.id);
+      el = el.parent as typeof el;
+    }
+  }
+  return [...out];
+}
+
 /**
  * How many times each element has been activated *as far as the walk has
  * shown*: every activation in `path`, less the ones still queued to walk.
@@ -93,6 +110,35 @@ export function walkedCounts(
  * marker from the value. Keep in step with `--blue` in `styles.css`.
  */
 const PATH_BLUE = "#2563eb";
+
+/**
+ * `path` as far as the walk has shown it, in order: everything but the last
+ * `queued.length` on-diagram activations, which are still waiting to be walked
+ * (off-diagram activations never enter the queue).
+ */
+export function walkedPrefix(
+  path: readonly string[],
+  queued: readonly string[],
+  onDiagram: (id: string) => boolean,
+): string[] {
+  let unwalked = queued.length;
+  let end = path.length;
+  while (unwalked > 0 && end > 0) {
+    end -= 1;
+    if (onDiagram(path[end])) unwalked -= 1;
+  }
+  return path.slice(0, end);
+}
+
+/**
+ * Whether the walk has shown a token leaving `from` and *then* reaching `to`.
+ * Reaching `to` at all is not enough: on a loop (A → B → A) the flow B → A
+ * would otherwise turn blue while the token is still on the first A.
+ */
+export function traversed(walked: readonly string[], from: string, to: string): boolean {
+  const left = walked.indexOf(from);
+  return left !== -1 && walked.lastIndexOf(to) > left;
+}
 
 export interface RuntimeDiagramProps {
   /** The diagram XML to render. */
@@ -334,7 +380,10 @@ export function RuntimeDiagram({
       }
     }
     markedRef.current = next;
-    paintTakenFlows(registry, walked);
+    paintTakenFlows(
+      registry,
+      walkedPrefix(pathRef.current.path ?? [], walkRef.current.queue, (id) => !!registry.get(id)),
+    );
 
     for (const id of agentOverlaysRef.current) {
       try {
@@ -345,8 +394,11 @@ export function RuntimeDiagram({
     }
     const agentOverlays: string[] = [];
     const hosts = idsRef.current.agents ?? [];
+    // A token deep inside a compound tool (a sub-process the agent activated)
+    // is still that tool running, so judge by every element enclosing it.
+    const within = enclosing(registry, tokenIds);
     for (const agent of hosts) {
-      const state = agentStateOf(agent, tokenIds);
+      const state = agentStateOf(agent, within);
       if (!state) continue;
       const host = registry.get(agent.elementId) as
         | { width?: number; height?: number }
@@ -388,12 +440,12 @@ export function RuntimeDiagram({
   };
 
   /**
-   * Draw each taken sequence flow blue once the walk has reached its target,
+   * Draw each taken sequence flow blue once the walk has traversed it,
    * and put back the model's own colour on any that no longer qualify (a new
    * run). Through the connection's colour rather than a CSS marker, as Operate
    * does, so bpmn-js redraws the arrowhead to match the line.
    */
-  const paintTakenFlows = (registry: RegistryLike, walked: Map<string, number>) => {
+  const paintTakenFlows = (registry: RegistryLike, walked: string[]) => {
     const viewer = viewerRef.current;
     if (!viewer) return;
     const graphics = viewer.get<{ update: (type: string, el: unknown, gfx: SVGElement) => void }>(
@@ -406,7 +458,8 @@ export function RuntimeDiagram({
     for (const el of registry.getAll() as ConnectionLike[]) {
       if (el.type !== "bpmn:SequenceFlow" || !el.di || !el.source || !el.target) continue;
       const on =
-        taken.has(`${el.source.id}\u0000${el.target.id}`) && walked.has(el.target.id);
+        taken.has(`${el.source.id}\u0000${el.target.id}`) &&
+        traversed(walked, el.source.id, el.target.id);
       if (on === colored.has(el.id)) continue;
       if (on) {
         colored.set(el.id, el.di.get("border-color"));

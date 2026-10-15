@@ -520,8 +520,17 @@ export function ExampleRunner({
     return (elementId: string) => map.get(elementId) ?? elementLabels(elementId);
   }, [draft.resolvedBpmn, elementLabels]);
 
+  // Run-lifetime count of each tool's activations, for `TraceEntry.call`.
+  // Reset wherever the log is.
+  const callCountRef = useRef(new Map<string, number>());
   /** Append a trace line — or update in place when it carries a `key`. */
-  const trace = useCallback((entry: TraceEntry) => {
+  const trace = useCallback((raw: TraceEntry) => {
+    let entry = raw;
+    if (entry.kind === "agent" && entry.elementId && entry.call === undefined) {
+      const call = (callCountRef.current.get(entry.elementId) ?? 0) + 1;
+      callCountRef.current.set(entry.elementId, call);
+      entry = { ...entry, call };
+    }
     setLog((prev) => {
       if (entry.key) {
         const at = prev.findIndex((l) => l.key === entry.key);
@@ -1086,6 +1095,7 @@ export function ExampleRunner({
     }
 
     setLog([]);
+    callCountRef.current = new Map();
     setReviewState({ taskKey: null, values: {}, valid: false });
     // Only the *reference* to the image (imageId/imageName) rides in the
     // process variables — never the pixels (see `imageInput.ts`). The bytes are
@@ -1453,6 +1463,7 @@ export function ExampleRunner({
       runningRef.current = false;
     }
     setLog([]);
+    callCountRef.current = new Map();
     setDisplayVars({});
     // The next run creates its own instance; leaving the old key here would
     // make `canResume` ask about an instance the engine no longer has.

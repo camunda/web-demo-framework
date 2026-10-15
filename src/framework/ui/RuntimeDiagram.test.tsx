@@ -2,7 +2,10 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   agentStateOf,
+  enclosing,
   fitWithPadding,
+  traversed,
+  walkedPrefix,
   RuntimeDiagram,
   walkedCounts,
   type CanvasLike,
@@ -557,5 +560,56 @@ describe("walkedCounts", () => {
   it("does not count an activation the walk has not reached yet", () => {
     const counts = walkedCounts(["Agent", "ToolA", "ToolB"], ["ToolB"]);
     expect(Object.fromEntries(counts)).toEqual({ Agent: 1, ToolA: 1 });
+  });
+});
+
+describe("enclosing", () => {
+  // Agent > SubTool (a compound tool) > Inner.
+  const agent = { id: "Agent" };
+  const subTool = { id: "SubTool", parent: agent };
+  const inner = { id: "Inner", parent: subTool };
+  const registry = { get: (id: string) => ({ Agent: agent, SubTool: subTool, Inner: inner })[id] };
+
+  it("keeps a token inside a compound tool attributed to that tool and its agent", () => {
+    const within = enclosing(registry, ["Inner"]);
+    expect(within).toEqual(expect.arrayContaining(["Inner", "SubTool", "Agent"]));
+    // ...so the agent still reads as calling tools, not as nothing at all.
+    expect(agentStateOf({ elementId: "Agent", toolIds: ["SubTool"] }, within)).toBe(
+      "calling-tools",
+    );
+  });
+
+  it("passes through an id the diagram doesn't have", () => {
+    expect(enclosing(registry, ["Elsewhere"])).toEqual(["Elsewhere"]);
+  });
+});
+
+describe("walkedPrefix", () => {
+  const onDiagram = (id: string) => id !== "Called";
+
+  it("drops the activations still queued to walk", () => {
+    expect(walkedPrefix(["Start", "A", "B", "A"], ["B", "A"], onDiagram)).toEqual(["Start", "A"]);
+  });
+
+  it("does not count an off-diagram activation as one of the queued", () => {
+    // A called process's elements never enter the queue.
+    expect(walkedPrefix(["Start", "A", "Called", "B"], ["B"], onDiagram)).toEqual([
+      "Start",
+      "A",
+      "Called",
+    ]);
+  });
+});
+
+describe("traversed", () => {
+  it("needs the walk to reach the target after leaving the source", () => {
+    expect(traversed(["Start", "A", "B"], "A", "B")).toBe(true);
+    expect(traversed(["Start", "A"], "A", "B")).toBe(false);
+  });
+
+  it("does not show a loop's way back while the token is still on its first pass", () => {
+    // Start → A → B → A, walked only as far as the first A: B → A hasn't happened yet.
+    expect(traversed(["Start", "A"], "B", "A")).toBe(false);
+    expect(traversed(["Start", "A", "B", "A"], "B", "A")).toBe(true);
   });
 });

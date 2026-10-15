@@ -51,7 +51,7 @@ export function compileAgent(source: string): AgentHandler {
 function helpersFor(
   job: ActivatedJob,
   trace: Trace,
-  stamp: { turn?: number; agentId?: string },
+  stamp: { turn?: number; agentId?: string; jobKey?: string },
   vision?: VisionSupport,
 ): HandlerHelpers {
   return {
@@ -150,7 +150,7 @@ export function buildWorkers(
   }
 
   const runHandler = async (job: ActivatedJob, handler: ExampleHandler) => {
-    const stamp = turnFor(turnRef, job.elementId);
+    const stamp = { ...turnFor(turnRef, job.elementId), jobKey: job.key };
     const out = await handler(job, helpersFor(job, trace, stamp, vision));
     trace({
       kind: "vars",
@@ -178,7 +178,7 @@ export function buildWorkers(
   for (const jobType of new Set([...taskJobTypes, ...listenersByType.keys()])) {
     const listeners = listenersByType.get(jobType) ?? [];
     workers[jobType] = async (job) => {
-      const stamp = turnFor(turnRef, job.elementId);
+      const stamp = { ...turnFor(turnRef, job.elementId), jobKey: job.key };
       const label = labels.get(job.elementId) ?? job.elementId;
       const onThisElement = listeners.filter((l) => l.elementId === job.elementId);
 

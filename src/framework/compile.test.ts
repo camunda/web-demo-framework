@@ -71,6 +71,8 @@ describe("a tool's trace entries", () => {
     expect(entries.length).toBeGreaterThan(0);
     // Owned by turn 2 of its own host — not whichever host started a turn last.
     expect(entries.every((e) => e.turn === 2 && e.agentId === "Packer")).toBe(true);
+    // ...and all from the one job, so a second call of the tool stays apart.
+    expect(entries.every((e) => e.jobKey === job.key)).toBe(true);
   });
 
   it("belong to no iteration when no agent activated the job", async () => {

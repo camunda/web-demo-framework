@@ -159,9 +159,6 @@ function IterationCard({
   const activations = group.entries.filter(
     (e) => e.kind === "agent" && e.elementId,
   );
-  const results = group.entries.filter(
-    (e) => e.kind === "vars" && e.elementId,
-  );
   const decisions = group.entries.filter(
     (e) => e.kind === "agent" && !e.elementId,
   );
@@ -172,10 +169,32 @@ function IterationCard({
   // handler run inside an otherwise agentic turn) would otherwise vanish —
   // render it as plain lines within the card, in original order.
   const activatedElementIds = new Set(activations.map((a) => a.elementId));
-  const ownLines = (elementId: string | undefined) =>
-    group.entries.filter(
-      (e) => e.kind === "tool" && e.elementId === elementId && !e.text.startsWith("▶ "),
+  /**
+   * The result and notes of one call. A tool can be activated more than once
+   * in one iteration, so the k-th activation pairs with the k-th job the
+   * engine ran for it — by job key, in the order each job first traced, since
+   * one job's entries can interleave with another's. Entries with no job key
+   * pair by order alone.
+   */
+  const partsOf = (activation: TraceLogLine) => {
+    const k = activations
+      .filter((a) => a.elementId === activation.elementId)
+      .indexOf(activation);
+    const own = group.entries.filter(
+      (e) => e.elementId === activation.elementId && (e.kind === "tool" || e.kind === "vars"),
     );
+    const keys = [...new Set(own.flatMap((e) => (e.jobKey ? [e.jobKey] : [])))];
+    const mine = keys.length
+      ? own.filter((e) => e.jobKey === keys[k])
+      : own.filter((e) => e.kind === "tool" || own.filter((r) => r.kind === "vars")[k] === e);
+    return {
+      result: mine.find((e) => e.kind === "vars"),
+      notes:
+        keys.length || k === 0
+          ? mine.filter((e) => e.kind === "tool" && !e.text.startsWith("▶ "))
+          : [],
+    };
+  };
   const loose = group.entries
     .filter(
       (e) =>
@@ -212,16 +231,19 @@ function IterationCard({
         </div>
       ))}
 
-      {activations.map((a) => (
-        <ToolStep
-          key={a.id}
-          activation={a}
-          result={results.find((r) => r.elementId === a.elementId && r.id > a.id)}
-          notes={ownLines(a.elementId)}
-          completed={isCompleted(a)}
-          labelFor={labelFor}
-        />
-      ))}
+      {activations.map((a) => {
+        const { result, notes } = partsOf(a);
+        return (
+          <ToolStep
+            key={a.id}
+            activation={a}
+            result={result}
+            notes={notes}
+            completed={isCompleted(a)}
+            labelFor={labelFor}
+          />
+        );
+      })}
 
       {loose.map((e) => (
         <div key={e.id} className={`log-line log-${e.kind}`}>
@@ -269,6 +291,8 @@ export function TraceTimeline({
   );
   // A tool called again is complete only once the engine has completed it
   // that many times — the first call finishing says nothing about the second.
+  // The runner numbers calls before capping the log (`TraceEntry.call`);
+  // counting what is still in the log is only the fallback.
   const isCompleted = useMemo(() => {
     const completed = new Map(elementStats.map((s) => [s.elementId, s.completed]));
     const nth = new Map<number, number>();
@@ -280,7 +304,7 @@ export function TraceTimeline({
       nth.set(e.id, n);
     }
     return (a: TraceLogLine) =>
-      (completed.get(a.elementId ?? "") ?? 0) >= (nth.get(a.id) ?? Infinity);
+      (completed.get(a.elementId ?? "") ?? 0) >= (a.call ?? nth.get(a.id) ?? Infinity);
   }, [log, elementStats]);
   const [copied, setCopied] = useState(false);
   const [engineViewOpen, setEngineViewOpen] = usePersistentDisclosure(

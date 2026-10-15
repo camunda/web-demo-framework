@@ -102,6 +102,39 @@ describe("TraceTimeline", () => {
     expect(outputs).toEqual(["Outputrunning…", "Outputcompleted"]);
   });
 
+  it("keeps two calls of one tool in the same iteration apart, output and notes", () => {
+    // Both activations come before either job runs, as they do in one iteration.
+    const log: TraceLogLine[] = [
+      { id: 1, kind: "agent", text: "calling Fx", turn: 1, elementId: "Fx", args: { pair: "EUR" } },
+      { id: 2, kind: "agent", text: "calling Fx", turn: 1, elementId: "Fx", args: { pair: "GBP" } },
+      { id: 3, kind: "tool", text: "▶ Fx", turn: 1, elementId: "Fx", jobKey: "j1" },
+      { id: 4, kind: "tool", text: "▶ Fx", turn: 1, elementId: "Fx", jobKey: "j2" },
+      { id: 5, kind: "tool", text: "   gbp note", turn: 1, elementId: "Fx", jobKey: "j2" },
+      { id: 6, kind: "tool", text: "   eur note", turn: 1, elementId: "Fx", jobKey: "j1" },
+      { id: 7, kind: "vars", text: "↳", turn: 1, elementId: "Fx", jobKey: "j1", result: { rate: 1.1 } },
+      { id: 8, kind: "vars", text: "↳", turn: 1, elementId: "Fx", jobKey: "j2", result: { rate: 0.9 } },
+    ];
+    const { container } = render(<TraceTimeline log={log} hasAgent />);
+    const [eur, gbp] = Array.from(container.querySelectorAll(".timeline-tool"));
+    expect(eur).toHaveTextContent('"rate": 1.1');
+    expect(eur).toHaveTextContent("eur note");
+    expect(eur).not.toHaveTextContent("gbp note");
+    expect(gbp).toHaveTextContent('"rate": 0.9');
+    expect(gbp).toHaveTextContent("gbp note");
+    expect(gbp).not.toHaveTextContent("eur note");
+  });
+
+  it("judges completion by the call's run-wide number, not its place in a capped log", () => {
+    // The first call of Sub has been dropped from the log; this is the second.
+    const log: TraceLogLine[] = [
+      { id: 50, kind: "agent", text: "calling Sub", turn: 2, elementId: "Sub", args: {}, call: 2 },
+    ];
+    const { container } = render(
+      <TraceTimeline log={log} hasAgent elementStats={[{ elementId: "Sub", completed: 1 }]} />,
+    );
+    expect(container.querySelector(".timeline-io-pending")).toHaveTextContent("running…");
+  });
+
   it("names the host and keeps each host's iterations apart when several run at once", () => {
     // Two hosts both on their first turn, interleaved as parallel hosts are.
     const log: TraceLogLine[] = [
