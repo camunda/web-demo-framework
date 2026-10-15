@@ -129,6 +129,6 @@ describe("TraceTimeline", () => {
       { id: 1, kind: "llm", text: "LLM thinking…", turn: 1, pending: true },
     ];
     const { container } = render(<TraceTimeline log={log} hasAgent />);
-    expect(container.querySelector(".timeline-thinking")).toHaveTextContent("Thinking…");
+    expect(container.querySelector(".timeline-thinking")).toHaveTextContent("Thinking...");
   });
 });

@@ -192,7 +192,11 @@ function IterationCard({
           {host && <span className="timeline-iteration-host">{host} · </span>}
           {group.turn}. iteration
         </span>
-        {reply?.pending && <span className="timeline-thinking">Thinking…</span>}
+        {reply?.pending && (
+          <span className="timeline-thinking">
+            <span>Thinking...</span>
+          </span>
+        )}
       </header>
 
       {reply && (

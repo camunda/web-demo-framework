@@ -1211,13 +1211,7 @@ export function ExampleRunner({
       })),
     [model],
   );
-  const completedIds = useMemo(
-    () =>
-      (run.snapshot?.elementStats ?? [])
-        .filter((s) => s.completed > 0)
-        .map((s) => s.elementId),
-    [run.snapshot],
-  );
+  const takenFlows = useMemo(() => run.snapshot?.takenSequenceFlows ?? [], [run.snapshot]);
   // A closed panel shows nothing, so what happens meanwhile is history once it
   // reopens — unlike what arrives while an open panel's diagram is still loading.
   useEffect(() => {
@@ -1938,7 +1932,7 @@ export function ExampleRunner({
             sectionId="process"
             data-tour={TOUR_ANCHOR.diagram}
             title="Process"
-            description={`${model.processName} — live token (blue), incidents (red).`}
+            description={`${model.processName} — live token and path taken (blue), incidents (red).`}
           >
             <WalkPanelPresence tracker={tracker} />
             {/* Render the Suspense boundary unconditionally so the lazy
@@ -1963,7 +1957,7 @@ export function ExampleRunner({
                 tracker={tracker}
                 hopMs={HOP}
                 agents={diagramAgents}
-                completedIds={completedIds}
+                takenFlows={takenFlows}
                 className="diagram"
               />
             </Suspense>
