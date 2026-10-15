@@ -4,6 +4,7 @@ import {
   embedView,
   examplePath,
   galleryPath,
+  hasHostLink,
   isAutostart,
   isEmbed,
   parseRoute,
@@ -73,6 +74,14 @@ describe("routing", () => {
     expect(embedType("?type=REDESIGN")).toBe("default");
     expect(embedType("?type=")).toBe("default");
     expect(embedType("")).toBe("default");
+  });
+
+  it("reads ?hostlink=1, and nothing else", () => {
+    expect(hasHostLink("?embed=1&view=compact&hostlink=1")).toBe(true);
+    expect(hasHostLink("?hostlink=0")).toBe(false);
+    expect(hasHostLink("?hostlink")).toBe(false);
+    expect(hasHostLink("?hostlink=true")).toBe(false);
+    expect(hasHostLink("")).toBe(false);
   });
 
   it("reads ?autostart=1", () => {

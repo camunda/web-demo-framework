@@ -140,4 +140,14 @@ describe("App — links out from an example", () => {
       expect(screen.queryByText(name), name).toBeNull();
     }
   });
+
+  it("leaves its full-page link to a host that renders its own", async () => {
+    history.pushState({}, "", "/examples/alpha?embed=1&view=compact&hostlink=1");
+    render(<App />);
+    settle("alpha");
+    await screen.findByText("running alpha");
+
+    expect(screen.queryByText(/Open the editable version ↗|Open full page ↗/)).toBeNull();
+    expect(document.querySelector(".example-meta")).toBeNull();
+  });
 });

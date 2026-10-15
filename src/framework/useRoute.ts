@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   embedType,
   embedView,
+  hasHostLink,
   isAutostart,
   isEmbed,
   parseRoute,
@@ -19,6 +20,8 @@ export interface RouteState {
   type: EmbedType;
   /** `?autostart=1` — run once, unprompted, when the example comes into view. */
   autostart: boolean;
+  /** `?hostlink=1` — the host links to the full page itself; don't repeat it. */
+  hostLink: boolean;
 }
 
 function readState(): RouteState {
@@ -28,6 +31,7 @@ function readState(): RouteState {
     view: embedView(),
     type: embedType(),
     autostart: isAutostart(),
+    hostLink: hasHostLink(),
   };
 }
 
