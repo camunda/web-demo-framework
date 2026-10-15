@@ -46,6 +46,8 @@ function Headline({ text }: { text: string }) {
  *   embed shows a process running rather than one waiting to be clicked.
  * - `?type=redesign` — set the embed in the redesigned camunda.com's face
  *   (Poppins) rather than the current site's (IBM Plex Sans).
+ * - `?hostlink=1` — the host page links to the full page itself, so the embed
+ *   leaves its own "Open full page" link out.
  *
  * Which brain is selected is deep-linked too, compressed into the URL hash
  * (see `framework/deepLink.ts`) — there's no server to hold state for us.
@@ -54,7 +56,7 @@ function Headline({ text }: { text: string }) {
  * the sandboxing work lands.
  */
 export function App() {
-  const { route, embed, view, type, autostart } = useRoute();
+  const { route, embed, view, type, autostart, hostLink } = useRoute();
   const compact = embed && view === "compact";
   const redesignType = embed && type === "redesign";
   const initialBrainKind = readDeepLinkState().brain;
@@ -152,31 +154,36 @@ export function App() {
           )}
         </>
       )}
-      <div className="example-meta">
-        {/* Only in the standalone app: an embed is already *on* camunda.com. */}
-        {!embed && example.pageUrl && (
-          <a
-            className="docs-link"
-            href={example.pageUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            View on camunda.com ↗
-          </a>
-        )}
-        {embed && (
-          // No query string on purpose: the full page is the un-restricted one,
-          // so `view=compact` must not follow the reader through this link.
-          <a
-            className="open-full-page"
-            href={examplePath(example.id) + (location.hash || "")}
-            target="_top"
-            rel="noreferrer"
-          >
-            {compact ? "Open the editable version ↗" : "Open full page ↗"}
-          </a>
-        )}
-      </div>
+      {/* Empty in an embed whose host carries the full-page link; left out
+          then rather than rendered as a zero-height row that still takes a
+          gap in the column. */}
+      {!(embed && hostLink) && (
+        <div className="example-meta">
+          {/* Only in the standalone app: an embed is already *on* camunda.com. */}
+          {!embed && example.pageUrl && (
+            <a
+              className="docs-link"
+              href={example.pageUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              View on camunda.com ↗
+            </a>
+          )}
+          {embed && (
+            // No query string on purpose: the full page is the un-restricted one,
+            // so `view=compact` must not follow the reader through this link.
+            <a
+              className="open-full-page"
+              href={examplePath(example.id) + (location.hash || "")}
+              target="_top"
+              rel="noreferrer"
+            >
+              {compact ? "Open the editable version ↗" : "Open full page ↗"}
+            </a>
+          )}
+        </div>
+      )}
       {/* Keyed so switching examples remounts with fresh editor/run state. */}
       {active && "error" in active ? (
         <p className="example-load-error" role="alert">
