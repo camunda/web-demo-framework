@@ -44,6 +44,8 @@ function Headline({ text }: { text: string }) {
  *   "Open full page" link is where the editable version lives.
  * - `?autostart=1` — press Run once the example scrolls into view, so the
  *   embed shows a process running rather than one waiting to be clicked.
+ * - `?type=redesign` — set the embed in the redesigned camunda.com's face
+ *   (Poppins) rather than the current site's (IBM Plex Sans).
  *
  * Which brain is selected is deep-linked too, compressed into the URL hash
  * (see `framework/deepLink.ts`) — there's no server to hold state for us.
@@ -52,8 +54,9 @@ function Headline({ text }: { text: string }) {
  * the sandboxing work lands.
  */
 export function App() {
-  const { route, embed, view, autostart } = useRoute();
+  const { route, embed, view, type, autostart } = useRoute();
   const compact = embed && view === "compact";
+  const redesignType = embed && type === "redesign";
   const initialBrainKind = readDeepLinkState().brain;
   const initialTourId = readTourParam();
   // Embedded, the host sizes the iframe from these messages, so the runner
@@ -215,7 +218,11 @@ export function App() {
 
   if (embed) {
     return (
-      <div className={`c4-ui app-shell app-embed${compact ? " app-compact" : ""}`}>
+      <div
+        className={`c4-ui app-shell app-embed${compact ? " app-compact" : ""}${
+          redesignType ? " app-type-redesign" : ""
+        }`}
+      >
         <main
           id="main"
           className={`layout layout-embed${compact ? " layout-compact" : ""}`}
