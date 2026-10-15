@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, renderHook } from "@testing-library/react";
 import {
   buildEmbedHeightMessage,
   buildEmbedReadyMessage,
   measureDocumentHeight,
+  useEmbedReadyReporter,
   EMBED_HEIGHT_MESSAGE,
+  EMBED_HEIGHT_REQUEST,
   EMBED_READY_MESSAGE,
 } from "./embedHeight";
 
@@ -82,5 +85,68 @@ describe("measureDocumentHeight", () => {
       }),
     );
     expect(height).toBe(900);
+  });
+});
+
+/**
+ * `useEmbedReadyReporter` needs only a parent to post to — no layout — so it is
+ * testable here. jsdom gives a top-level window no parent of its own, so a real
+ * (jsdom) iframe window stands in: a plain object would not be accepted as a
+ * `MessageEvent` source.
+ */
+describe("useEmbedReadyReporter", () => {
+  let frame: HTMLIFrameElement;
+  let parent: Window;
+  let post: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    parent = frame.contentWindow!;
+    post = vi.fn();
+    parent.postMessage = post as unknown as Window["postMessage"];
+    vi.spyOn(window, "parent", "get").mockReturnValue(parent as Window & typeof globalThis);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    frame.remove();
+  });
+
+  const ask = (source: Window = parent) =>
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { type: EMBED_HEIGHT_REQUEST }, source }),
+    );
+  const readyPosts = () =>
+    post.mock.calls.filter(([m]) => m?.type === EMBED_READY_MESSAGE).length;
+
+  it("posts once when the runner becomes ready", () => {
+    const { rerender } = renderHook(({ ready }) => useEmbedReadyReporter(ready), {
+      initialProps: { ready: false },
+    });
+    expect(readyPosts()).toBe(0);
+    rerender({ ready: true });
+    rerender({ ready: true });
+    expect(readyPosts()).toBe(1);
+  });
+
+  it("re-sends readiness when a host that missed it asks", () => {
+    renderHook(() => useEmbedReadyReporter(true));
+    expect(readyPosts()).toBe(1);
+    ask();
+    expect(readyPosts()).toBe(2);
+  });
+
+  it("does not claim readiness before the runner is ready", () => {
+    renderHook(() => useEmbedReadyReporter(false));
+    ask();
+    expect(readyPosts()).toBe(0);
+  });
+
+  it("answers only its own parent", () => {
+    renderHook(() => useEmbedReadyReporter(true));
+    ask(window);
+    expect(readyPosts()).toBe(1);
   });
 });

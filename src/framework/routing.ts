@@ -81,6 +81,18 @@ export function embedType(search: string = location.search): EmbedType {
 }
 
 /**
+ * Reads `?hostlink=1` — the host page renders its own link to the full page
+ * next to the embed, so the embed leaves out its "Open full page" link rather
+ * than offering the same destination twice.
+ *
+ * Opt-in: a docs page that inlines an example with no link of its own still
+ * needs the embed's, since it is the only way to the editors.
+ */
+export function hasHostLink(search: string = location.search): boolean {
+  return new URLSearchParams(search).get("hostlink") === "1";
+}
+
+/**
  * Reads `?autostart=1` — press Run on the reader's behalf once the example is
  * on screen and able to run.
  *
