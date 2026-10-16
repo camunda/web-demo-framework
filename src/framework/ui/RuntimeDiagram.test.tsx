@@ -1,6 +1,15 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { fitWithPadding, RuntimeDiagram, type CanvasLike } from "./RuntimeDiagram";
+import {
+  agentStateOf,
+  enclosing,
+  fitWithPadding,
+  traversed,
+  walkedPrefix,
+  RuntimeDiagram,
+  walkedCounts,
+  type CanvasLike,
+} from "./RuntimeDiagram";
 import { WalkTracker } from "./walkTracker";
 
 afterEach(cleanup);
@@ -34,6 +43,23 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
+
+const FLOW_XML = XML.replace(
+  '<bpmn:startEvent id="StartEvent_1" />',
+  '<bpmn:startEvent id="StartEvent_1"><bpmn:outgoing>Flow_1</bpmn:outgoing></bpmn:startEvent><bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Task_1" />',
+)
+  .replace(
+    '<bpmn:task id="Task_1" name="Do the thing" />',
+    '<bpmn:task id="Task_1" name="Do the thing"><bpmn:incoming>Flow_1</bpmn:incoming></bpmn:task>',
+  )
+  .replace(
+    "</bpmndi:BPMNPlane>",
+    '<bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1"><di:waypoint x="186" y="118" /><di:waypoint x="240" y="118" /></bpmndi:BPMNEdge></bpmndi:BPMNPlane>',
+  )
+  .replace(
+    'xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"',
+    'xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI"',
+  );
 
 describe("RuntimeDiagram", () => {
   const WALK_XML = XML.replace(
@@ -117,6 +143,104 @@ describe("RuntimeDiagram", () => {
     await waitFor(() =>
       expect(container.querySelector(".nano-token")).toBeInTheDocument(),
     );
+  });
+
+  it("labels a working agent and outlines it, and counts the calls of each tool it ran", async () => {
+    // Task_1 stands in for the agent host and StartEvent_1 for its tool; only
+    // the ids matter to the overlays.
+    const agents = [{ elementId: "Task_1", toolIds: ["StartEvent_1"] }];
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={XML} activeIds={["Task_1"]} incidentIds={[]} agents={agents} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".nano-agent-state")).toHaveTextContent("Thinking..."),
+    );
+    expect(container.querySelector(".nano-agent-shine")).toBeInTheDocument();
+
+    // The agent has finished: Operate labels nothing for a completed agent.
+    rerender(
+      <RuntimeDiagram
+        xml={XML}
+        activeIds={[]}
+        incidentIds={[]}
+        agents={agents}
+        path={["StartEvent_1"]}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector(".nano-agent-state")).toBeNull());
+    expect(container.querySelector(".nano-agent-shine")).toBeNull();
+    expect(container.querySelector(".nano-call-count")).toHaveTextContent("1");
+  });
+
+  it("does not mark activations that arrive mid-walk until the token reaches them", async () => {
+    const marked = (container: HTMLElement, id: string) =>
+      container.querySelector(`[data-element-id="${id}"]`)?.classList.contains("nano-executed");
+    // A long hop holds the token on StartEvent_1 with Rule_1 queued behind it.
+    const { container, rerender } = render(
+      <RuntimeDiagram xml={WALK_XML} activeIds={[]} incidentIds={[]} path={[]} runId={1} hopMs={60_000} />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-element-id="Task_1"]')).toBeInTheDocument());
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Rule_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1"]}
+        runId={1}
+        hopMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(marked(container, "StartEvent_1")).toBe(true));
+
+    // A new batch lands mid-hop, with a new frontier: the markers effect runs
+    // before the walk has queued Task_1.
+    rerender(
+      <RuntimeDiagram
+        xml={WALK_XML}
+        activeIds={["Task_1"]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Rule_1", "Task_1"]}
+        runId={1}
+        hopMs={60_000}
+      />,
+    );
+    expect(marked(container, "StartEvent_1")).toBe(true);
+    expect(marked(container, "Rule_1")).toBe(false);
+    expect(marked(container, "Task_1")).toBe(false);
+  });
+
+  it("draws the path already taken: walked elements, and the flows taken into them", async () => {
+    const { container } = render(
+      <RuntimeDiagram
+        xml={FLOW_XML}
+        activeIds={[]}
+        incidentIds={[]}
+        path={["StartEvent_1", "Task_1"]}
+        takenFlows={[{ from: "StartEvent_1", to: "Task_1" }]}
+        hopMs={1}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-element-id="Task_1"]')).toHaveClass("nano-executed"),
+    );
+    expect(container.querySelector('[data-element-id="StartEvent_1"]')).toHaveClass("nano-executed");
+    // Coloured through the diagram, so bpmn-js draws the line and its arrow blue.
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-element-id="Flow_1"] .djs-visual path')?.getAttribute("style") ?? "",
+      ).toMatch(/37, 99, 235|#2563eb/i),
+    );
+  });
+
+  it("shows no agent state on a model without one", async () => {
+    const { container } = render(
+      <RuntimeDiagram xml={XML} activeIds={["Task_1"]} incidentIds={[]} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".nano-token")).toBeInTheDocument(),
+    );
+    expect(container.querySelector(".nano-agent-state")).toBeNull();
+    expect(container.querySelector(".nano-call-count")).toBeNull();
   });
 
   it("survives unmounting while the import is still in flight", async () => {
@@ -425,6 +549,14 @@ describe("fitWithPadding", () => {
     expect(box.y + box.height / 2).toBe(25);
   });
 
+  it("leaves extra room above when asked, for an agent's state pill", () => {
+    const { canvas, set } = fakeCanvas({ x: 100, y: 50, width: 400, height: 200 });
+
+    fitWithPadding(canvas, 34);
+
+    expect(set).toEqual([{ x: 84, y: 0, width: 432, height: 266 }]);
+  });
+
   it("leaves an empty diagram to plain fit-viewport", () => {
     // A zero-sized content box has nothing to pad, and padding it would invert
     // the box rather than inset it.
@@ -434,5 +566,87 @@ describe("fitWithPadding", () => {
 
     expect(zoomed).toEqual(["fit-viewport"]);
     expect(set).toEqual([]);
+  });
+});
+
+describe("agentStateOf", () => {
+  const agent = { elementId: "Agent", toolIds: ["ToolA", "ToolB"] };
+
+  it("is calling tools while the token is on one of its tools", () => {
+    // The host stays active around a running tool; the tool is what to say.
+    expect(agentStateOf(agent, ["Agent", "ToolA"])).toBe("calling-tools");
+  });
+
+  it("is thinking while the token rests on the host itself", () => {
+    expect(agentStateOf(agent, ["Agent"])).toBe("thinking");
+  });
+
+  it("says nothing once the token has moved on, or before it arrives", () => {
+    // Operate shows no label for an idle or completed agent.
+    expect(agentStateOf(agent, ["Next"])).toBeNull();
+    expect(agentStateOf(agent, [])).toBeNull();
+  });
+});
+
+describe("walkedCounts", () => {
+  it("counts each element's activations on the path", () => {
+    const counts = walkedCounts(["Start", "Agent", "ToolA", "ToolB", "ToolA"], []);
+    expect(Object.fromEntries(counts)).toEqual({ Start: 1, Agent: 1, ToolA: 2, ToolB: 1 });
+  });
+
+  it("does not count an activation the walk has not reached yet", () => {
+    const counts = walkedCounts(["Agent", "ToolA", "ToolB"], ["ToolB"]);
+    expect(Object.fromEntries(counts)).toEqual({ Agent: 1, ToolA: 1 });
+  });
+});
+
+describe("enclosing", () => {
+  // Agent > SubTool (a compound tool) > Inner.
+  const agent = { id: "Agent" };
+  const subTool = { id: "SubTool", parent: agent };
+  const inner = { id: "Inner", parent: subTool };
+  const registry = { get: (id: string) => ({ Agent: agent, SubTool: subTool, Inner: inner })[id] };
+
+  it("keeps a token inside a compound tool attributed to that tool and its agent", () => {
+    const within = enclosing(registry, ["Inner"]);
+    expect(within).toEqual(expect.arrayContaining(["Inner", "SubTool", "Agent"]));
+    // ...so the agent still reads as calling tools, not as nothing at all.
+    expect(agentStateOf({ elementId: "Agent", toolIds: ["SubTool"] }, within)).toBe(
+      "calling-tools",
+    );
+  });
+
+  it("passes through an id the diagram doesn't have", () => {
+    expect(enclosing(registry, ["Elsewhere"])).toEqual(["Elsewhere"]);
+  });
+});
+
+describe("walkedPrefix", () => {
+  const onDiagram = (id: string) => id !== "Called";
+
+  it("drops the activations still queued to walk", () => {
+    expect(walkedPrefix(["Start", "A", "B", "A"], ["B", "A"], onDiagram)).toEqual(["Start", "A"]);
+  });
+
+  it("does not count an off-diagram activation as one of the queued", () => {
+    // A called process's elements never enter the queue.
+    expect(walkedPrefix(["Start", "A", "Called", "B"], ["B"], onDiagram)).toEqual([
+      "Start",
+      "A",
+      "Called",
+    ]);
+  });
+});
+
+describe("traversed", () => {
+  it("needs the walk to reach the target after leaving the source", () => {
+    expect(traversed(["Start", "A", "B"], "A", "B")).toBe(true);
+    expect(traversed(["Start", "A"], "A", "B")).toBe(false);
+  });
+
+  it("does not show a loop's way back while the token is still on its first pass", () => {
+    // Start → A → B → A, walked only as far as the first A: B → A hasn't happened yet.
+    expect(traversed(["Start", "A"], "B", "A")).toBe(false);
+    expect(traversed(["Start", "A", "B", "A"], "B", "A")).toBe(true);
   });
 });

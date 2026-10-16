@@ -278,7 +278,6 @@ describe("every example goes somewhere", () => {
       model,
       Object.fromEntries(example.handlers.map((h) => [h.elementId, compile(h.source)])),
       () => {},
-      undefined,
       vision,
     );
     for (const jobType of manualJobTypes) delete workers[jobType];

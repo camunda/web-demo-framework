@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseModel } from "./model";
 import { buildWorkers } from "./compile";
-import type { ExampleHandler } from "./types";
+import type { ExampleHandler, TraceEntry } from "./types";
+import { TRACE_IDENTITY_VAR } from "./agent/activation";
 
 const ONE_TASK = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="D" targetNamespace="http://bpmn.io/schema/bpmn">
@@ -50,5 +51,36 @@ describe("a handler's return value", () => {
 
   it.each([[{ packed: true }], [null], [undefined]])("is passed through when it is %j", async (value) => {
     await expect(workerReturning(value)(job)).resolves.toEqual(value);
+  });
+});
+
+describe("a tool's trace entries", () => {
+  const traced = async (variables: Record<string, unknown>) => {
+    const entries: TraceEntry[] = [];
+    const handler = ((_job, helpers) => {
+      helpers.trace("packing");
+      return { packed: true };
+    }) as ExampleHandler;
+    await buildWorkers(parseModel(ONE_TASK), { Pack: handler }, (e) => entries.push(e)).pack({
+      ...job,
+      variables,
+    });
+    return entries;
+  };
+
+  it("carry the identity of the agent activation that created the job", async () => {
+    const entries = await traced({
+      [TRACE_IDENTITY_VAR]: { turn: 2, agentId: "Packer", call: 3 },
+    });
+    expect(entries.length).toBeGreaterThan(0);
+    expect(
+      entries.every((e) => e.turn === 2 && e.agentId === "Packer" && e.call === 3 && e.jobKey === job.key),
+    ).toBe(true);
+  });
+
+  it("belong to no iteration and no call when no agent activated the job", async () => {
+    // A tool a sequence flow reached: its job carries no activation identity.
+    const entries = await traced({});
+    expect(entries.every((e) => e.turn === undefined && e.call === undefined)).toBe(true);
   });
 });

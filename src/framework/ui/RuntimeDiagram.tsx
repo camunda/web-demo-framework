@@ -25,7 +25,121 @@ import type { WalkTracker } from "./walkTracker";
  * once and update markers in place, so nothing re-imports while a run steps
  * through. The consumer loads bpmn-js's CSS and provides the `.nano-active` /
  * `.nano-incident` / `.nano-token` styles (see `styles.css`).
+ *
+ * The run is drawn the way Operate draws one: the path already taken —
+ * every element the walk has passed and every sequence flow it took — in blue,
+ * and an AI Agent host that is working gets a "Thinking..." / "Calling
+ * tools..." label above it and a moving purple outline, with a call count on
+ * each tool it has run. All of it follows the walking token rather than the
+ * engine's frontier, so none of it gets ahead of what the reader has seen
+ * (see `.nano-executed`, `.nano-agent-state`, `.nano-agent-shine` and
+ * `.nano-call-count` in `styles.css`).
  */
+
+/** An AI Agent host on the diagram and the tools inside it. */
+export interface AgentOnDiagram {
+  elementId: string;
+  toolIds: string[];
+}
+
+/**
+ * The states Operate labels on the diagram. It shows nothing for an idle or
+ * completed agent, and neither does this.
+ */
+export type AgentState = "thinking" | "calling-tools";
+
+/** Operate's words for each state. */
+export const AGENT_STATE_LABEL: Record<AgentState, string> = {
+  thinking: "Thinking...",
+  "calling-tools": "Calling tools...",
+};
+
+/**
+ * What `agent` is doing, given where the token stands. A running tool wins
+ * over the host, since the host stays active around its tools; with no tool
+ * running, a host holding the token is waiting on its next decision — the
+ * model's turn.
+ */
+export function agentStateOf(
+  agent: AgentOnDiagram,
+  tokenIds: readonly string[],
+): AgentState | null {
+  if (agent.toolIds.some((id) => tokenIds.includes(id))) return "calling-tools";
+  if (tokenIds.includes(agent.elementId)) return "thinking";
+  return null;
+}
+
+/** `ids` and every element that contains one of them, by the diagram's nesting. */
+export function enclosing(
+  registry: { get: (id: string) => unknown },
+  ids: readonly string[],
+): string[] {
+  const out = new Set<string>();
+  for (const id of ids) {
+    let el = registry.get(id) as { id: string; parent?: unknown } | undefined;
+    if (!el) out.add(id);
+    while (el) {
+      out.add(el.id);
+      el = el.parent as typeof el;
+    }
+  }
+  return [...out];
+}
+
+/**
+ * How many times each element has been activated *as far as the walk has
+ * shown*: every activation in `path`, less the ones still queued to walk.
+ */
+export function walkedCounts(
+  path: readonly string[],
+  queued: readonly string[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const id of path) counts.set(id, (counts.get(id) ?? 0) + 1);
+  for (const id of queued) {
+    const n = counts.get(id);
+    if (n !== undefined) counts.set(id, n - 1);
+  }
+  for (const [id, n] of counts) if (n <= 0) counts.delete(id);
+  return counts;
+}
+
+/**
+ * The taken-path colour, as a literal: it is written into the diagram's own
+ * colour attributes (see `colorConnection`), where bpmn-js derives the arrow
+ * marker from the value. Keep in step with `--blue` in `styles.css`.
+ */
+const PATH_BLUE = "#2563eb";
+
+/**
+ * `path` as far as the walk has shown it, in order: everything but the last
+ * `queued.length` on-diagram activations, which are still waiting to be walked
+ * (off-diagram activations never enter the queue).
+ */
+export function walkedPrefix(
+  path: readonly string[],
+  queued: readonly string[],
+  onDiagram: (id: string) => boolean,
+): string[] {
+  let unwalked = queued.length;
+  let end = path.length;
+  while (unwalked > 0 && end > 0) {
+    end -= 1;
+    if (onDiagram(path[end])) unwalked -= 1;
+  }
+  return path.slice(0, end);
+}
+
+/**
+ * Whether the walk has shown a token leaving `from` and *then* reaching `to`.
+ * Reaching `to` at all is not enough: on a loop (A → B → A) the flow B → A
+ * would otherwise turn blue while the token is still on the first A.
+ */
+export function traversed(walked: readonly string[], from: string, to: string): boolean {
+  const left = walked.indexOf(from);
+  return left !== -1 && walked.lastIndexOf(to) > left;
+}
+
 export interface RuntimeDiagramProps {
   /** The diagram XML to render. */
   xml: string;
@@ -54,6 +168,14 @@ export interface RuntimeDiagramProps {
   tracker?: WalkTracker;
   /** How long the walking token rests on each element, in ms. */
   hopMs?: number;
+  /** AI Agent hosts to show agent state on — see {@link agentStateOf}. */
+  agents?: AgentOnDiagram[];
+  /**
+   * Sequence flows the engine took, as source → target element ids
+   * (`snapshot.takenSequenceFlows`). One is drawn blue once the walk reaches
+   * its target.
+   */
+  takenFlows?: { from: string; to: string }[];
   /** Extra class for the container, added alongside `runtime-diagram`. */
   className?: string;
 }
@@ -79,6 +201,27 @@ interface OverlaysLike {
 }
 
 /**
+ * Room above an agent host for its state pill, in diagram units — added to the
+ * top of the fit only when the model has a host, so other diagrams keep their
+ * size.
+ */
+const AGENT_STATE_ROOM = 34;
+
+interface RegistryLike {
+  get: (id: string) => unknown;
+  getAll: () => unknown[];
+  getGraphics: (element: unknown) => SVGElement | undefined;
+}
+
+interface ConnectionLike {
+  id: string;
+  type: string;
+  source?: { id: string };
+  target?: { id: string };
+  di?: { get: (key: string) => unknown; set: (key: string, value: unknown) => void };
+}
+
+/**
  * Room left around the model when fitting, in diagram units.
  *
  * `fit-viewport` fits the element bounding box exactly, but the live token is
@@ -91,8 +234,11 @@ interface OverlaysLike {
  */
 const FIT_PADDING = 16;
 
-/** `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides. */
-export function fitWithPadding(canvas: CanvasLike) {
+/**
+ * `fit-viewport`, then widened by {@link FIT_PADDING} on all four sides, plus
+ * `extraTop` above.
+ */
+export function fitWithPadding(canvas: CanvasLike, extraTop = 0) {
   canvas.zoom("fit-viewport");
   const { inner, outer } = canvas.viewbox();
   // An empty diagram has nothing to pad, and its zero-sized box would make the
@@ -101,9 +247,9 @@ export function fitWithPadding(canvas: CanvasLike) {
 
   const padded = {
     x: inner.x - FIT_PADDING,
-    y: inner.y - FIT_PADDING,
+    y: inner.y - FIT_PADDING - extraTop,
     width: inner.width + FIT_PADDING * 2,
-    height: inner.height + FIT_PADDING * 2,
+    height: inner.height + FIT_PADDING * 2 + extraTop,
   };
   // `fit-viewport` caps its scale at 1 (`Math.min(1, …)` in diagram-js's
   // `_fitViewport`) so a small model is never blown up to fill the container.
@@ -128,6 +274,8 @@ export function RuntimeDiagram({
   runId,
   tracker,
   hopMs = 450,
+  agents,
+  takenFlows,
   className,
 }: RuntimeDiagramProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -138,8 +286,13 @@ export function RuntimeDiagram({
   // The latest ids, so the post-import marker pass uses current values rather
   // than the ones that were current when the import started — ids changing
   // mid-import would otherwise leave the diagram unmarked until the next change.
-  const idsRef = useRef({ activeIds, incidentIds });
-  idsRef.current = { activeIds, incidentIds };
+  const idsRef = useRef({ activeIds, incidentIds, agents, takenFlows });
+  idsRef.current = { activeIds, incidentIds, agents, takenFlows };
+  const agentOverlaysRef = useRef<string[]>([]);
+  // Connections drawn blue, with the colour each had in the model before.
+  const coloredFlowsRef = useRef(new Map<string, unknown>());
+  const fit = (canvas: CanvasLike) =>
+    fitWithPadding(canvas, idsRef.current.agents?.length ? AGENT_STATE_ROOM : 0);
   // The walk: elements still to show, the one shown now, and its timer.
   const walkRef = useRef<{ queue: string[]; at: string | null; timer: number }>({
     queue: [],
@@ -188,7 +341,6 @@ export function RuntimeDiagram({
         /* element not in this diagram */
       }
     }
-    markedRef.current = next;
 
     // A visible badge on each active element, so token movement reads clearly
     // even where the class-only highlight is too subtle. Removed and re-added
@@ -215,6 +367,117 @@ export function RuntimeDiagram({
       }
     }
     tokenOverlaysRef.current = nextOverlays;
+
+    // Only what the walk has taken in: activations that arrived since are not
+    // queued yet, so subtracting the queue alone would count them as walked.
+    const done = progress();
+    const takenIn =
+      done.run === pathRef.current.runId
+        ? (pathRef.current.path ?? []).slice(0, done.consumed)
+        : [];
+    const walked = walkedCounts(takenIn, walkRef.current.queue);
+    const registry = viewer.get<RegistryLike>("elementRegistry");
+    const executed = [...walked.keys()].filter((id) => registry.get(id));
+    for (const id of executed) {
+      try {
+        canvas.addMarker(id, "nano-executed");
+        next.push({ id, cls: "nano-executed" });
+      } catch {
+        /* not a shape this diagram can mark */
+      }
+    }
+    markedRef.current = next;
+    paintTakenFlows(
+      registry,
+      walkedPrefix(takenIn, walkRef.current.queue, (id) => !!registry.get(id)),
+    );
+
+    for (const id of agentOverlaysRef.current) {
+      try {
+        overlays.remove(id);
+      } catch {
+        /* already gone */
+      }
+    }
+    const agentOverlays: string[] = [];
+    const hosts = idsRef.current.agents ?? [];
+    // A token deep inside a compound tool (a sub-process the agent activated)
+    // is still that tool running, so judge by every element enclosing it.
+    const within = enclosing(registry, tokenIds);
+    for (const agent of hosts) {
+      const state = agentStateOf(agent, within);
+      if (!state) continue;
+      const host = registry.get(agent.elementId) as
+        | { width?: number; height?: number }
+        | undefined;
+      if (!host) continue;
+      try {
+        agentOverlays.push(
+          overlays.add(agent.elementId, {
+            position: { top: -32, left: 0 },
+            html: `<div class="nano-agent-state" aria-hidden="true"><span>${AGENT_STATE_LABEL[state]}</span></div>`,
+          }),
+        );
+        // An outline drawn just outside the host's own border.
+        agentOverlays.push(
+          overlays.add(agent.elementId, {
+            position: { top: -3, left: -3 },
+            html: `<div class="nano-agent-shine" aria-hidden="true" style="width:${(host.width ?? 0) + 6}px;height:${(host.height ?? 0) + 6}px"></div>`,
+          }),
+        );
+      } catch {
+        /* host not in this diagram */
+      }
+    }
+    const tools = new Set(hosts.flatMap((a) => a.toolIds));
+    for (const [id, n] of walked) {
+      if (!tools.has(id)) continue;
+      try {
+        agentOverlays.push(
+          overlays.add(id, {
+            position: { top: -10, right: 10 },
+            html: `<div class="nano-call-count" aria-hidden="true" title="Called ${n} time${n === 1 ? "" : "s"}">${n}</div>`,
+          }),
+        );
+      } catch {
+        /* tool not in this diagram */
+      }
+    }
+    agentOverlaysRef.current = agentOverlays;
+  };
+
+  /**
+   * Draw each taken sequence flow blue once the walk has traversed it,
+   * and put back the model's own colour on any that no longer qualify (a new
+   * run). Through the connection's colour rather than a CSS marker, as Operate
+   * does, so bpmn-js redraws the arrowhead to match the line.
+   */
+  const paintTakenFlows = (registry: RegistryLike, walked: string[]) => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const graphics = viewer.get<{ update: (type: string, el: unknown, gfx: SVGElement) => void }>(
+      "graphicsFactory",
+    );
+    const taken = new Set(
+      (idsRef.current.takenFlows ?? []).map((f) => `${f.from}\u0000${f.to}`),
+    );
+    const colored = coloredFlowsRef.current;
+    for (const el of registry.getAll() as ConnectionLike[]) {
+      if (el.type !== "bpmn:SequenceFlow" || !el.di || !el.source || !el.target) continue;
+      const on =
+        taken.has(`${el.source.id}\u0000${el.target.id}`) &&
+        traversed(walked, el.source.id, el.target.id);
+      if (on === colored.has(el.id)) continue;
+      if (on) {
+        colored.set(el.id, el.di.get("border-color"));
+        el.di.set("border-color", PATH_BLUE);
+      } else {
+        el.di.set("border-color", colored.get(el.id));
+        colored.delete(el.id);
+      }
+      const gfx = registry.getGraphics(el);
+      if (gfx) graphics.update("connection", el, gfx);
+    }
   };
 
   const reportHops = () => {
@@ -247,6 +510,8 @@ export function RuntimeDiagram({
     // A called process's elements are in the log too, but not on this diagram.
     const onDiagram = fresh.filter((id) => registry?.get(id));
     if (onDiagram.length === 0 || reduced) {
+      // Nothing to walk, but what was just taken in still marks the path.
+      if (fresh.length) applyMarkers();
       reportHops();
       return;
     }
@@ -267,6 +532,8 @@ export function RuntimeDiagram({
     const viewer = new Viewer({ container: containerRef.current });
     viewerRef.current = viewer;
     importedRef.current = false;
+    // A fresh import has the model's own colours; nothing is painted yet.
+    coloredFlowsRef.current = new Map();
     // `importXML` resolves after this effect may already have been cleaned up —
     // a new `xml` prop, or an unmount. Without this guard the late resolution
     // would zoom and mark a viewer that has been destroyed, or worse, mark the
@@ -276,7 +543,7 @@ export function RuntimeDiagram({
       .importXML(xml)
       .then(() => {
         if (!current) return;
-        fitWithPadding(viewer.get<CanvasLike>("canvas"));
+        fit(viewer.get<CanvasLike>("canvas"));
         importedRef.current = true;
         if (tracker) tracker.ready = true;
         applyMarkers();
@@ -310,7 +577,7 @@ export function RuntimeDiagram({
       const canvas = viewer.get<CanvasLike>("canvas");
       try {
         canvas.resized();
-        fitWithPadding(canvas);
+        fit(canvas);
       } catch {
         /* nothing imported yet — the import fits the viewport itself */
       }
@@ -323,7 +590,7 @@ export function RuntimeDiagram({
   useEffect(() => {
     applyMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- applyMarkers reads refs
-  }, [activeIds, incidentIds]);
+  }, [activeIds, incidentIds, agents, takenFlows]);
 
   useEffect(() => {
     consumePath();

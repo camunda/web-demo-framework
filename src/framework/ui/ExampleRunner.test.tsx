@@ -132,7 +132,7 @@ describe("ExampleRunner — a run with no human in it", () => {
       () => expect(app.trace().join("\n")).toMatch(/instance started/i),
       { timeout: 20_000 },
     );
-    expect(app.trace().join("\n")).not.toMatch(/round handled/i);
+    expect(app.trace().join("\n")).not.toMatch(/step handled/i);
     expect(app.status()).not.toBe("Completed");
     expect(app.trace().at(-1)).not.toContain("process instance completed");
 
@@ -140,7 +140,7 @@ describe("ExampleRunner — a run with no human in it", () => {
     await app.settle();
     fireEvent.click(screen.getByRole("button", { name: "⏭ Step" }));
     await waitFor(
-      () => expect(app.trace().join("\n")).toMatch(/round handled/i),
+      () => expect(app.trace().join("\n")).toMatch(/step handled/i),
       { timeout: 20_000 },
     );
 
@@ -283,6 +283,12 @@ describe("ExampleRunner — a human task inside the agent's tool loop", () => {
     // reviewer, mid-loop.
     expect(app.status()).toBe("Fill out the form below");
     expect(app.trace().join("\n")).toContain("RequestPaymentRelease");
+    // The scripted brain tells its loop the way a live one does: numbered
+    // iterations, each tool call with its input beside its output.
+    expect(app.trace().join("\n")).toMatch(/1\. iteration/);
+    expect(document.querySelector(".timeline-tool .timeline-io")).toHaveTextContent(
+      /Input.*Output/,
+    );
 
     await app.completeUserTask(() => {
       fireEvent.click(screen.getByText("Approve release"));

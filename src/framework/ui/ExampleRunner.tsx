@@ -23,8 +23,8 @@ import type { AgentSpec } from "../model";
 import { labelForHandlerKey, resolveCorrelationKey } from "../model";
 import { buildDraftRunDefinition } from "../draft";
 import { buildWorkers, compileAgent } from "../compile";
-import { makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
-import { withToolCallArgs } from "../agent/activation";
+import { claimTools, makeLiveAgentRouter, type TurnRef } from "../agent/liveAgent";
+import { seedToolCallArgs, tagActivations, withToolCallArgs } from "../agent/activation";
 import { matchReadyMessageEvents } from "../messageEvents";
 import { useExampleRun } from "../useExampleRun";
 import { userTaskVariables } from "../userTaskVariables";
@@ -40,6 +40,7 @@ import { ImageInputPanel } from "./ImageInputPanel";
 import type { FormRendererHandle } from "./FormRenderer";
 import { formDefaults, type FormSchema } from "./formSchema";
 import { TraceTimeline } from "./TraceTimeline";
+import { toolCallOutcomes, type CallOutcome } from "../toolCalls";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { usePersistentDisclosure } from "./usePersistentDisclosure";
 import { VariableList } from "./VariableList";
@@ -477,10 +478,11 @@ export function ExampleRunner({
   // flips back to `true` for a new run.
   const runSeqRef = useRef(0);
   const logIdRef = useRef(0);
-  // Shared with `buildWorkers` (compile.ts) and `makeLiveAgentRouter`
-  // (agent/liveAgent.ts) for one run, so a tool's own trace entries land in
-  // the same turn group as the agent entry that activated it — see
-  // `TraceTimeline.tsx`. Recreated fresh in `start` below, per run.
+  // Shared with `buildWorkers` (compile.ts), `makeLiveAgentRouter`
+  // (agent/liveAgent.ts) and the scripted agent in `beginRun`, for one run, so
+  // a tool's own trace entries land in the same iteration group as the agent
+  // entry that activated it — see `TraceTimeline.tsx`. Recreated fresh in
+  // `beginRun` below, per run.
   const turnRef = useRef<TurnRef>({ current: undefined });
   // The workers/agents maps from the run currently in progress, kept around
   // so a manual-control resolution (below) can resume the same drive loop
@@ -1002,7 +1004,6 @@ export function ExampleRunner({
       model,
       draft.handlers,
       trace,
-      turnRef.current,
       visionSupport,
     );
     // Job types this example holds back for a manual choice (see
@@ -1039,20 +1040,48 @@ export function ExampleRunner({
         // primary one: a host can live in a called process (the orchestrator
         // shape), where `model.agent` — the primary process's first host — is
         // null and nothing would be registered at all.
+        //
+        // Each call is one iteration of that host's loop, stamped like a live
+        // brain's turn so the activity panel tells both the same way.
+        const allTools = model.agents.flatMap((a) => a.tools);
+        const iterations = new Map<string, number>();
+        const turns = turnRef.current;
         for (const jobType of new Set(model.agents.map((a) => a.jobType))) {
           agents[jobType] = async (job) => {
-            const result = await scripted!(job);
-            const tools = (result.activateElements ?? [])
-              .map((a) => a.elementId)
-              .join(", ");
+            const turn = (iterations.get(job.elementId) ?? 0) + 1;
+            iterations.set(job.elementId, turn);
+            turns.current = turn;
+            const stamp = { turn, agentId: job.elementId };
+            // Seeded here rather than only below, so the trace can show each
+            // tool the input it is actually activated with.
+            const result = seedToolCallArgs(await scripted!(job), allTools);
+            const activations = result.activateElements ?? [];
             const host = model.agents.length > 1 ? ` (${job.elementId})` : "";
-            trace({
-              kind: "agent",
-              text: result.completionConditionFulfilled
-                ? `🤖 scripted agent${host}: done`
-                : `🤖 scripted agent${host}: calling ${tools || "(nothing)"}`,
-            });
-            return result;
+            if (result.completionConditionFulfilled || activations.length === 0)
+              trace({
+                kind: "agent",
+                text: result.completionConditionFulfilled
+                  ? `🤖 scripted agent${host}: done`
+                  : `🤖 scripted agent${host}: calling (nothing)`,
+                ...stamp,
+              });
+            const identities = claimTools(
+              turns,
+              turn,
+              job.elementId,
+              activations.map((a) => a.elementId),
+            );
+            activations.forEach((a, i) =>
+              trace({
+                kind: "agent",
+                text: `🤖 calling ${a.elementId}`,
+                elementId: a.elementId,
+                args: (a.variables?.toolCall as Record<string, unknown> | undefined) ?? {},
+                ...stamp,
+                call: identities[i].call,
+              }),
+            );
+            return tagActivations(result, identities);
           };
         }
       }
@@ -1177,6 +1206,21 @@ export function ExampleRunner({
   // Re-read on every snapshot: each engine command publishes one, after its events.
   const activationPath = useMemo(
     () => (run.snapshot ? elementActivations(run.events(), rootInstanceKeyRef.current) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
+    [run.snapshot],
+  );
+  // AI Agent hosts and their tools, for the diagram's agent-state overlays.
+  const diagramAgents = useMemo(
+    () =>
+      model.agents.map((a) => ({
+        elementId: a.elementId,
+        toolIds: a.tools.map((t) => t.elementId),
+      })),
+    [model],
+  );
+  const takenFlows = useMemo(() => run.snapshot?.takenSequenceFlows ?? [], [run.snapshot]);
+  const callOutcomes = useMemo(
+    () => (run.snapshot ? toolCallOutcomes(run.events(), run.snapshot) : new Map<string, CallOutcome>()),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run.events is stable; the snapshot is the change signal
     [run.snapshot],
   );
@@ -1900,7 +1944,7 @@ export function ExampleRunner({
             sectionId="process"
             data-tour={TOUR_ANCHOR.diagram}
             title="Process"
-            description={`${model.processName} — live token (green), incidents (red).`}
+            description={`${model.processName} — live token and path taken (blue), incidents (red).`}
           >
             <WalkPanelPresence tracker={tracker} />
             {/* Render the Suspense boundary unconditionally so the lazy
@@ -1924,6 +1968,8 @@ export function ExampleRunner({
                 runId={runId}
                 tracker={tracker}
                 hopMs={HOP}
+                agents={diagramAgents}
+                takenFlows={takenFlows}
                 className="diagram"
               />
             </Suspense>
@@ -2040,6 +2086,7 @@ export function ExampleRunner({
             incidents={run.snapshot?.incidents}
             labelFor={elementLabels}
             hasAgent={!!displayAgent}
+            callOutcomes={callOutcomes}
             variables={
               <details
                 className="vars-block"

@@ -1,7 +1,7 @@
 import type { ActivatedJob, AgentHandler, JobHandler } from "@nanobpm/bojtos-react";
 import type { ModelInfo, TaskListenerSpec } from "./model";
 import type { ExampleHandler, HandlerHelpers, Trace } from "./types";
-import type { TurnRef } from "./agent/liveAgent";
+import { traceIdentityOf } from "./agent/activation";
 import {
   makeImageAccessor,
   makeVisionAccessor,
@@ -51,7 +51,7 @@ export function compileAgent(source: string): AgentHandler {
 function helpersFor(
   job: ActivatedJob,
   trace: Trace,
-  turn?: number,
+  stamp: { turn?: number; agentId?: string; jobKey?: string; call?: number },
   vision?: VisionSupport,
 ): HandlerHelpers {
   return {
@@ -64,7 +64,7 @@ function helpersFor(
         kind: "tool",
         text: `   ${text}`,
         elementId: job.elementId,
-        turn,
+        ...stamp,
       }),
     text: (key, fallback = "") => {
       const v = job.variables[key];
@@ -107,11 +107,11 @@ function safeStringify(value: unknown): string {
  * handler throws when activated, which surfaces as an incident on the diagram
  * rather than a silent stall.
  *
- * `turnRef`, when supplied, stamps each "started"/"result" trace entry with
- * the agent turn in progress when the job ran (see `liveAgent.ts`'s
- * `TurnRef`), so a tool activated by an agent groups with its own result in
- * the trace timeline. Omit it for a non-agentic example — the entries just
- * render ungrouped, exactly as before.
+ * A job an agent activation created carries that activation's identity in
+ * its variables (`agent/activation.ts`'s `tagActivations`), and every trace
+ * entry it produces is stamped with it, so a tool groups with — and pairs
+ * with — the very call that started it. Any other job (a non-agentic example,
+ * or a tool reached by a sequence flow) renders ungrouped.
  *
  * `vision`, when supplied (only for an example with `imageInput`), gives every
  * handler a `helpers.vision`/`helpers.image` bound to this run's image and the
@@ -121,7 +121,6 @@ export function buildWorkers(
   model: ModelInfo,
   byElement: Record<string, ExampleHandler>,
   trace: Trace,
-  turnRef?: TurnRef,
   vision?: VisionSupport,
 ): Record<string, JobHandler> {
   const workers: Record<string, JobHandler> = {};
@@ -149,15 +148,18 @@ export function buildWorkers(
     else listenersByType.set(listener.jobType, [listener]);
   }
 
-  const runHandler = async (job: ActivatedJob, handler: ExampleHandler) => {
-    const turn = turnRef?.current;
-    const out = await handler(job, helpersFor(job, trace, turn, vision));
+  const runHandler = async (
+    job: ActivatedJob,
+    handler: ExampleHandler,
+    stamp: { turn?: number; agentId?: string; jobKey?: string; call?: number },
+  ) => {
+    const out = await handler(job, helpersFor(job, trace, stamp, vision));
     trace({
       kind: "vars",
       text: `  ↳ ${safeStringify(out)}`,
       elementId: job.elementId,
       result: out,
-      turn,
+      ...stamp,
     });
     // The engine rejects anything else mid-dispatch, which stalls the run with
     // no reason shown; failing the job turns it into an incident that names it.
@@ -178,7 +180,7 @@ export function buildWorkers(
   for (const jobType of new Set([...taskJobTypes, ...listenersByType.keys()])) {
     const listeners = listenersByType.get(jobType) ?? [];
     workers[jobType] = async (job) => {
-      const turn = turnRef?.current;
+      const stamp = { ...traceIdentityOf(job.variables), jobKey: job.key };
       const label = labels.get(job.elementId) ?? job.elementId;
       const onThisElement = listeners.filter((l) => l.elementId === job.elementId);
 
@@ -193,13 +195,16 @@ export function buildWorkers(
           kind: "step",
           text: `🎧 ${label} — ${listener.eventType} listener${handler ? "" : " (no code supplied)"}`,
           elementId: job.elementId,
-          turn,
+          ...stamp,
+          call: undefined,
         });
         // An unclaimed listener runs as a no-op rather than failing: a model
         // that carries one should still run, and "this fired and did nothing"
         // is a truthful thing to show. Supplying code for it is then opt-in.
         if (!handler) return undefined;
-        return runHandler(job, handler);
+        // A listener on a tool sits in that tool's iteration, but it is not the
+        // call itself, so its result must not stand in as the call's output.
+        return runHandler(job, handler, { ...stamp, call: undefined });
       }
 
       const handler = byElement[job.elementId];
@@ -207,8 +212,8 @@ export function buildWorkers(
         throw new Error(
           `No handler registered for ${job.elementId} (job type ${job.type})`,
         );
-      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, turn });
-      return runHandler(job, handler);
+      trace({ kind: "tool", text: `▶ ${label}`, elementId: job.elementId, ...stamp });
+      return runHandler(job, handler, stamp);
     };
   }
   return workers;

@@ -110,7 +110,7 @@ async function runHandler(
     live: false,
     resolve: () => image,
   };
-  const workers = buildWorkers(modelFixture(), byElement, noopTrace, undefined, support);
+  const workers = buildWorkers(modelFixture(), byElement, noopTrace, support);
   const worker: JobHandler = workers[jobType];
   const job: ActivatedJob = {
     key: "job-1",
@@ -173,7 +173,7 @@ describe("falsifiability probe — the scripted-vision path reads the real groun
       live: false,
       resolve: () => ({ imageId: seed.id, pixels: `${seed.id}.jpg` }),
     };
-    const workers = buildWorkers(modelFixture(), byElement, noopTrace, undefined, support);
+    const workers = buildWorkers(modelFixture(), byElement, noopTrace, support);
     const out = (await workers["extract-plate"]({
       key: "j",
       type: "extract-plate",

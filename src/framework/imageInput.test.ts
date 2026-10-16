@@ -71,7 +71,6 @@ async function runVisionHandler(
     model,
     { "extract-plate": handler },
     trace,
-    undefined,
     vision,
   );
   const worker: JobHandler = workers["extract-plate-job"];

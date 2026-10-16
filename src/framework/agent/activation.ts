@@ -56,3 +56,50 @@ export function seedToolCallArgs(result: AgentResult, tools: ToolSpec[]): AgentR
 export function withToolCallArgs(handler: AgentHandler, tools: ToolSpec[]): AgentHandler {
   return async (job) => seedToolCallArgs(await handler(job), tools);
 }
+
+/**
+ * Which agent turn, host and call a tool activation is — `TraceEntry.turn`,
+ * `agentId` and `call`.
+ */
+export interface TraceIdentity {
+  turn: number;
+  agentId: string;
+  call?: number;
+}
+
+/**
+ * The activation-local variable a tool's job reads its {@link TraceIdentity}
+ * from. Activation variables are local to the activated element, so the job
+ * an activation creates sees it, a run of the same tool reached by a sequence
+ * flow does not, and nothing reaches the instance's own variables.
+ */
+export const TRACE_IDENTITY_VAR = "__traceActivation";
+
+/** Put `identities[i]` on `result.activateElements[i]` (see {@link TRACE_IDENTITY_VAR}). */
+export function tagActivations(result: AgentResult, identities: TraceIdentity[]): AgentResult {
+  if (!result.activateElements?.length) return result;
+  return {
+    ...result,
+    activateElements: result.activateElements.map((activation, i) =>
+      identities[i]
+        ? {
+            ...activation,
+            variables: { ...activation.variables, [TRACE_IDENTITY_VAR]: identities[i] },
+          }
+        : activation,
+    ),
+  };
+}
+
+/** The {@link TraceIdentity} a job's variables carry, if an agent activation gave it one. */
+export function traceIdentityOf(
+  variables: Record<string, unknown>,
+): { turn?: number; agentId?: string; call?: number } {
+  const v = variables[TRACE_IDENTITY_VAR] as Partial<TraceIdentity> | undefined;
+  if (!v || typeof v.turn !== "number" || typeof v.agentId !== "string") return {};
+  return {
+    turn: v.turn,
+    agentId: v.agentId,
+    ...(typeof v.call === "number" ? { call: v.call } : {}),
+  };
+}

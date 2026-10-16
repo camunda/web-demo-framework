@@ -34,17 +34,34 @@ export interface TraceEntry {
    *   "started"/"result" entries (see `liveAgent.ts` and `compile.ts`, which
    *   share a turn counter via a `TurnRef` for exactly this correlation).
    *   Entries with no `turn` (process start, a human task, the final
-   *   outcome) render outside any turn group, in their original order.
+   *   outcome) render outside any turn group, in their original order. The
+   *   reader sees a turn as an *iteration* of the agent loop — Operate's word
+   *   for it.
+   * - `agentId` is the AI Agent host whose turn this is. Each host counts its
+   *   own turns, so two hosts running at once both have a turn 1; the pair is
+   *   what identifies one iteration.
    * - `elementId` names the BPMN element (tool or task) this entry concerns.
    * - `args` are the arguments supplied when activating a tool — the
    *   validated/coerced values, not the model's raw reply.
    * - `result` is what a tool/handler returned, for pairing with its own
    *   `args` entry by `elementId`.
+   * - `jobKey` is the engine job an entry came from — the started line, a
+   *   handler's own notes and its result share one, so a tool called twice in
+   *   the same iteration keeps each call's output and notes apart.
+   * - `call` numbers an agent's activation of a tool among every such
+   *   activation of that tool in the run (1 = first). The activation hands it
+   *   to the job it creates (see `agent/activation.ts`'s `tagActivations`), so
+   *   the call and its job's entries pair by identity — not by position in a
+   *   capped log, and not confused by a run of the tool a sequence flow
+   *   started, which carries none.
    */
   turn?: number;
+  agentId?: string;
   elementId?: string;
   args?: Record<string, unknown>;
   result?: unknown;
+  jobKey?: string;
+  call?: number;
 }
 
 export type Trace = (entry: TraceEntry) => void;

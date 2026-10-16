@@ -77,7 +77,7 @@ async function runHandler(
     live,
     resolve: () => image,
   };
-  const workers = buildWorkers(modelFixture(), byElement, noopTrace, undefined, support);
+  const workers = buildWorkers(modelFixture(), byElement, noopTrace, support);
   const worker: JobHandler = workers[jobType];
   const job: ActivatedJob = {
     key: "job-1",
@@ -211,7 +211,7 @@ describe("extract-plate handler (plate extraction from a live <OCR> transcriptio
       live: true,
       resolve: () => ({ imageId: "uploaded", pixels: "uploaded.jpg" }),
     };
-    const workers = buildWorkers(modelFixture(), byElement, noopTrace, undefined, support);
+    const workers = buildWorkers(modelFixture(), byElement, noopTrace, support);
     return (await workers["extract-plate"]({
       key: "j",
       type: "extract-plate",
