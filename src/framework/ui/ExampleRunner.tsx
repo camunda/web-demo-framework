@@ -208,6 +208,7 @@ interface LogLine extends TraceEntry {
 export function ExampleRunner({
   example,
   compact = false,
+  embed = false,
   autostart = false,
   initialBrainKind,
   initialTourId,
@@ -224,6 +225,12 @@ export function ExampleRunner({
    * unrendered tab is an unfetched chunk.
    */
   compact?: boolean;
+  /**
+   * Rendered inside a host page's iframe (`?embed=1`), which sizes the frame
+   * to this document. Panels whose content arrives mid-run default to
+   * collapsed here, so a run does not resize the host's frame.
+   */
+  embed?: boolean;
   /**
    * Press Run once, unprompted, when the example scrolls into view — see
    * `?autostart=1` in `src/framework/routing.ts`. Gated on the same conditions
@@ -340,9 +347,10 @@ export function ExampleRunner({
   // it holds, which would otherwise highlight a closed summary. Opening it
   // whenever a tour starts is what keeps that step worth reading.
   const [varsOpen, setVarsOpen] = usePersistentDisclosure("variables", false);
-  // Open by default: a decision is the point of a business-rule example, and
-  // it only shows when one actually evaluated (see `decisionInstances` below).
-  const [decisionsOpen, setDecisionsOpen] = usePersistentDisclosure("decisions", true);
+  // Open by default: a decision is the point of a business-rule example. Not
+  // in an embed, though: the evaluated decisions arrive mid-run, and an open
+  // list sized to them would resize the host's iframe.
+  const [decisionsOpen, setDecisionsOpen] = usePersistentDisclosure("decisions", !embed);
   // Held apart from the persisted preference on purpose, exactly as
   // `forcedStartOpen` is: the tour opening this panel is tour state, not a
   // choice the reader made, and writing it through would leave every later

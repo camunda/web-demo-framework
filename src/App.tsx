@@ -194,6 +194,7 @@ export function App() {
           key={active.def.id}
           example={active.def}
           compact={compact}
+          embed={embed}
           autostart={autostart}
           initialBrainKind={initialBrainKind}
           initialTourId={initialTourId}
