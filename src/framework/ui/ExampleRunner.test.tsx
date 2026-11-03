@@ -106,6 +106,28 @@ describe("ExampleRunner — a run with no human in it", () => {
     expect(document.querySelector(".decisions")).toBeNull();
   }, 30_000);
 
+  // A model edit leaves the last run's snapshot in place until the next Run,
+  // so removing the rule task from the draft must not hide what it decided.
+  it("keeps a run's decisions after the rule task is edited out of the model", async () => {
+    const app = await renderExample(expenseDecision);
+    await app.run();
+
+    const code = screen.getByRole("button", { name: /^Code/ });
+    if (code.getAttribute("aria-expanded") !== "true") fireEvent.click(code);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Model" }, { timeout: 10_000 }));
+    const editor = await screen.findByRole("textbox", { name: "Model XML" });
+    const xml = (editor as HTMLTextAreaElement).value;
+    expect(xml).toContain("bpmn:businessRuleTask");
+    fireEvent.change(editor, {
+      target: { value: xml.replaceAll("bpmn:businessRuleTask", "bpmn:task") },
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const decisions = document.querySelector(".decisions");
+    expect(decisions).not.toBeNull();
+    expect(decisions!.textContent).toContain("approved");
+  }, 40_000);
+
   /**
    * Run restarts a finished run rather than going dead, and Step has to do the
    * same. Disabling Step at completion looked harmless on the full page, where

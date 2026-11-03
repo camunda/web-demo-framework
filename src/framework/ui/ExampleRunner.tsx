@@ -2134,8 +2134,10 @@ export function ExampleRunner({
               // reader sees which rule matched" adds nothing to a non-DMN run.
               // Before one has evaluated it is hidden, except in an embed,
               // which keeps the toggle so the first decision does not grow
-              // the host iframe (CSS: `.vars-block-empty`).
-              hasBusinessRules && (
+              // the host iframe (CSS: `.vars-block-empty`). Recorded decisions
+              // always show: a model edit leaves the last run's snapshot in
+              // place until the next Run, even if it removes the rule task.
+              (hasBusinessRules || decisionCount > 0) && (
                 <details
                   className={`vars-block${decisionCount === 0 ? " vars-block-empty" : ""}`}
                   open={decisionsOpen}
