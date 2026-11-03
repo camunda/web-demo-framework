@@ -732,6 +732,15 @@ body {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+/* The Decisions toggle before any decision has evaluated. Only rendered for a
+   model with a business rule task; an embed keeps it so the first decision
+   does not grow the host iframe. */
+.vars-block-empty {
+  display: none;
+}
+.layout-embed .vars-block-empty {
+  display: block;
+}
 .vars-head {
   display: flex;
   align-items: center;
@@ -860,6 +869,12 @@ body {
   font-family: var(--ui-mono);
   font-size: 12px;
   line-height: 1.5;
+}
+/* Embedded, reserve the list's full height from the start. Growing from 90px
+   to 340px as a run fills it made the host iframe (which follows this
+   document's height) jump on every run. */
+.layout-embed .timeline {
+  height: 340px;
 }
 
 /* Top-level trace rows read as the demo's tinted log cards: a coloured left
@@ -1066,6 +1081,14 @@ body {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+/* Before anything has run there is nothing to show. An embed keeps the toggle
+   anyway so the first completed element does not grow the host iframe. */
+.engine-view-empty {
+  display: none;
+}
+.layout-embed .engine-view-empty {
+  display: block;
 }
 .engine-view > summary {
   display: flex;
@@ -1324,6 +1347,25 @@ body {
      sat beside the input on a wide screen and beneath it on a narrow one. */
   flex-basis: 100%;
   margin-top: -4px;
+}
+/* The hint's line is held open in an embed (see ExampleRunner), because the
+   host iframe follows this document's height and a run would otherwise grow
+   it. Outside an embed the empty placeholder takes no space. */
+.scenario-hint-empty {
+  display: none;
+}
+.layout-embed .scenario-hint {
+  line-height: 1.7;
+  min-height: 1.7em;
+}
+.layout-embed .scenario-hint-empty {
+  display: block;
+}
+/* The longest hint wraps to two lines on a phone; reserve both. */
+@media (max-width: 640px) {
+  .layout-embed .scenario-hint {
+    min-height: 3.4em;
+  }
 }
 
 /* Inline "edit the input" affordance: a text button that discloses the start

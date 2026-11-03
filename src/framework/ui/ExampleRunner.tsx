@@ -510,7 +510,7 @@ export function ExampleRunner({
   // them and `elementLabels` doesn't know their names. The decisions panel
   // wants the friendly name the diagram shows, so read it straight off the
   // resolved XML — cheap, and scoped to the one construct that needs it.
-  const decisionLabelFor = useMemo(() => {
+  const businessRuleLabels = useMemo(() => {
     const map = new Map<string, string>();
     const doc = new DOMParser().parseFromString(draft.resolvedBpmn, "application/xml");
     const BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
@@ -518,8 +518,14 @@ export function ExampleRunner({
       const id = el.getAttribute("id");
       if (id) map.set(id, el.getAttribute("name") || id);
     }
-    return (elementId: string) => map.get(elementId) ?? elementLabels(elementId);
-  }, [draft.resolvedBpmn, elementLabels]);
+    return map;
+  }, [draft.resolvedBpmn]);
+  const decisionLabelFor = useCallback(
+    (elementId: string) => businessRuleLabels.get(elementId) ?? elementLabels(elementId),
+    [businessRuleLabels, elementLabels],
+  );
+  const hasBusinessRules = businessRuleLabels.size > 0;
+  const decisionCount = run.snapshot?.decisionInstances?.length ?? 0;
 
   /** Append a trace line — or update in place when it carries a `key`. */
   const trace = useCallback((entry: TraceEntry) => {
@@ -1792,7 +1798,11 @@ export function ExampleRunner({
             <span className="scenario-hint">
               Fill in the input to enable Run
             </span>
-          ) : null}
+          ) : (
+            // Holds the hint's line while there is nothing to say, so an embed
+            // does not grow when a run starts. Hidden outside embeds (CSS).
+            <span className="scenario-hint scenario-hint-empty" aria-hidden="true" />
+          )}
         </div>
 
         {/* Hidden rather than unmounted while collapsed: the start form reports
@@ -2112,18 +2122,23 @@ export function ExampleRunner({
               </details>
             }
             decisions={
-              // Only present for a model with a business rule task, and only
-              // once one has evaluated — so #15's "the reader sees which rule
-              // matched" is met without adding anything to a non-DMN run.
-              (run.snapshot?.decisionInstances?.length ?? 0) > 0 && (
+              // Only for a model with a business rule task, so #15's "the
+              // reader sees which rule matched" adds nothing to a non-DMN run.
+              // Before one has evaluated it is hidden, except in an embed,
+              // which keeps the toggle so the first decision does not grow
+              // the host iframe (CSS: `.vars-block-empty`).
+              hasBusinessRules && (
                 <details
-                  className="vars-block"
+                  className={`vars-block${decisionCount === 0 ? " vars-block-empty" : ""}`}
                   open={decisionsOpen}
                   onToggle={(e) => setDecisionsOpen(e.currentTarget.open)}
                 >
                   <summary className="vars-head">Decisions</summary>
+                  {decisionCount === 0 && (
+                    <p className="log-empty">No decision has been evaluated yet.</p>
+                  )}
                   <ul className="decisions">
-                    {run.snapshot!.decisionInstances.map((d, i) => (
+                    {(run.snapshot?.decisionInstances ?? []).map((d, i) => (
                       <li key={`${d.elementId}-${i}`}>
                         <code>{decisionLabelFor(d.elementId)}</code>
                         {" → "}
