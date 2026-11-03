@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderExample } from "../testing/renderExample";
+import { storageKeyFor } from "./usePersistentDisclosure";
 import { messageStartFixture } from "../testing/messageStartFixture";
 import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
@@ -126,6 +127,22 @@ describe("ExampleRunner — a run with no human in it", () => {
     const decisions = document.querySelector(".decisions");
     expect(decisions).not.toBeNull();
     expect(decisions!.textContent).toContain("approved");
+  }, 40_000);
+
+  // Collapsed in an embed so the decision list can't resize the host's frame.
+  // The standalone panel saves "open" as soon as it renders open, so the embed
+  // must not read that key, or a same-origin embed would open on its own.
+  it("starts Decisions collapsed in an embed, whatever the full page saved", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(storageKeyFor("decisions"), "1");
+    const app = await renderExample(expenseDecision, { compact: true, embed: true });
+    await app.run();
+
+    const panel = document.querySelector(".decisions")?.closest("details");
+    expect(panel).not.toBeNull();
+    expect(panel!.open).toBe(false);
+    expect(panel!.textContent).toContain("approved");
+    window.localStorage.clear();
   }, 40_000);
 
   /**

@@ -66,9 +66,9 @@ export interface RunnerHarness {
 
 export async function renderExample(
   example: ExampleDef,
-  { compact = false }: { compact?: boolean } = {},
+  { compact = false, embed = false }: { compact?: boolean; embed?: boolean } = {},
 ): Promise<RunnerHarness> {
-  render(<ExampleRunner example={example} compact={compact} />);
+  render(<ExampleRunner example={example} compact={compact} embed={embed} />);
 
   const status = () => {
     for (const text of STATUSES) {

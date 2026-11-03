@@ -349,8 +349,14 @@ export function ExampleRunner({
   const [varsOpen, setVarsOpen] = usePersistentDisclosure("variables", false);
   // Open by default: a decision is the point of a business-rule example. Not
   // in an embed, though: the evaluated decisions arrive mid-run, and an open
-  // list sized to them would resize the host's iframe.
-  const [decisionsOpen, setDecisionsOpen] = usePersistentDisclosure("decisions", !embed);
+  // list sized to them would resize the host's iframe. The embed keeps its own
+  // key, because the standalone panel saves its open state as soon as it
+  // renders open (`toggle` fires for that too), and a same-origin embed
+  // reading that would open on its own.
+  const [decisionsOpen, setDecisionsOpen] = usePersistentDisclosure(
+    embed ? "decisions-embed" : "decisions",
+    !embed,
+  );
   // Held apart from the persisted preference on purpose, exactly as
   // `forcedStartOpen` is: the tour opening this panel is tour state, not a
   // choice the reader made, and writing it through would leave every later
