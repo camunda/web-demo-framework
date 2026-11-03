@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderExample } from "../testing/renderExample";
+import { storageKeyFor } from "./usePersistentDisclosure";
 import { messageStartFixture } from "../testing/messageStartFixture";
 import { orderProcess } from "../../examples/order-process";
 import { invoicePayment } from "../../examples/invoice-payment";
@@ -105,6 +106,44 @@ describe("ExampleRunner — a run with no human in it", () => {
     await app.run();
     expect(document.querySelector(".decisions")).toBeNull();
   }, 30_000);
+
+  // A model edit leaves the last run's snapshot in place until the next Run,
+  // so removing the rule task from the draft must not hide what it decided.
+  it("keeps a run's decisions after the rule task is edited out of the model", async () => {
+    const app = await renderExample(expenseDecision);
+    await app.run();
+
+    const code = screen.getByRole("button", { name: /^Code/ });
+    if (code.getAttribute("aria-expanded") !== "true") fireEvent.click(code);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Model" }, { timeout: 10_000 }));
+    const editor = await screen.findByRole("textbox", { name: "Model XML" });
+    const xml = (editor as HTMLTextAreaElement).value;
+    expect(xml).toContain("bpmn:businessRuleTask");
+    fireEvent.change(editor, {
+      target: { value: xml.replaceAll("bpmn:businessRuleTask", "bpmn:task") },
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const decisions = document.querySelector(".decisions");
+    expect(decisions).not.toBeNull();
+    expect(decisions!.textContent).toContain("approved");
+  }, 40_000);
+
+  // Collapsed in an embed so the decision list can't resize the host's frame.
+  // The standalone panel saves "open" as soon as it renders open, so the embed
+  // must not read that key, or a same-origin embed would open on its own.
+  it("starts Decisions collapsed in an embed, whatever the full page saved", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(storageKeyFor("decisions"), "1");
+    const app = await renderExample(expenseDecision, { compact: true, embed: true });
+    await app.run();
+
+    const panel = document.querySelector(".decisions")?.closest("details");
+    expect(panel).not.toBeNull();
+    expect(panel!.open).toBe(false);
+    expect(panel!.textContent).toContain("approved");
+    window.localStorage.clear();
+  }, 40_000);
 
   /**
    * Run restarts a finished run rather than going dead, and Step has to do the

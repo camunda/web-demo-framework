@@ -327,6 +327,8 @@ export function TraceTimeline({
     }
   };
 
+  const engineViewEmpty = elementStats.length === 0 && incidents.length === 0;
+
   return (
     <CollapsibleCard
       sectionId="activity"
@@ -371,50 +373,53 @@ export function TraceTimeline({
 
         {decisions}
 
-        {(elementStats.length > 0 || incidents.length > 0) && (
-          <details
-            className="engine-view"
-            open={engineViewOpen}
-            onToggle={(e) => setEngineViewOpen(e.currentTarget.open)}
-          >
-            <summary>
-              Element completion
-              {incidents.length > 0 &&
-                ` · ${incidents.length} incident${incidents.length === 1 ? "" : "s"}`}
-            </summary>
-            <div className="timeline-engine-view">
-              {elementStats.length > 0 && (
-                <div className="timeline-stats">
-                  <span className="timeline-kv-label">Element completion</span>
-                  <ul>
-                    {elementStats
-                      .filter((s) => s.completed > 0 || (s.active ?? 0) > 0)
-                      .map((s) => (
-                        <li key={s.elementId}>
-                          <code>{labelFor(s.elementId) || s.elementId}</code>{" "}
-                          completed {s.completed}
-                          {s.active ? `, ${s.active} active` : ""}
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              )}
-              {incidents.length > 0 && (
-                <div className="timeline-incidents">
-                  <span className="timeline-kv-label">Incidents</span>
-                  <ul>
-                    {incidents.map((inc, i) => (
-                      <li key={`${inc.elementId}-${i}`}>
-                        <code>{labelFor(inc.elementId) || inc.elementId}</code> —{" "}
-                        {inc.reason}
+        {/* Rendered even before anything has run, so an embed does not grow when
+            the first element completes; hidden outside embeds while empty (CSS). */}
+        <details
+          className={`engine-view${engineViewEmpty ? " engine-view-empty" : ""}`}
+          open={engineViewOpen}
+          onToggle={(e) => setEngineViewOpen(e.currentTarget.open)}
+        >
+          <summary>
+            Element completion
+            {incidents.length > 0 &&
+              ` · ${incidents.length} incident${incidents.length === 1 ? "" : "s"}`}
+          </summary>
+          {engineViewEmpty && (
+            <p className="log-empty">Nothing has run yet.</p>
+          )}
+          <div className="timeline-engine-view">
+            {elementStats.length > 0 && (
+              <div className="timeline-stats">
+                <span className="timeline-kv-label">Element completion</span>
+                <ul>
+                  {elementStats
+                    .filter((s) => s.completed > 0 || (s.active ?? 0) > 0)
+                    .map((s) => (
+                      <li key={s.elementId}>
+                        <code>{labelFor(s.elementId) || s.elementId}</code>{" "}
+                        completed {s.completed}
+                        {s.active ? `, ${s.active} active` : ""}
                       </li>
                     ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          </details>
-        )}
+                </ul>
+              </div>
+            )}
+            {incidents.length > 0 && (
+              <div className="timeline-incidents">
+                <span className="timeline-kv-label">Incidents</span>
+                <ul>
+                  {incidents.map((inc, i) => (
+                    <li key={`${inc.elementId}-${i}`}>
+                      <code>{labelFor(inc.elementId) || inc.elementId}</code> —{" "}
+                      {inc.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </details>
       </CollapsibleCard>
   );
 }
