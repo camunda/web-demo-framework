@@ -47,6 +47,11 @@ import reviewForm from "./bank-support-review.form.json";
  * 5. The specialists set `status`/`summary` from the scripted agent's final
  *    turn rather than through the AI Agent connector's `agent.responseJson.*`
  *    output mapping, which this engine doesn't apply.
+ *    The connector's own `<zeebe:output source="=agent" target="agent" />` on
+ *    the agent host is dropped too: from engine-wasm 0.13 an output mapping on
+ *    an ad-hoc agent host hands on nothing, the mapped variable included, so
+ *    it would discard every variable the agent sets (docs/engine-coverage.md,
+ *    "agent host with an output mapping"). Nothing here populates `agent`.
  * 6. Each specialist takes its own tool argument — `loanRequest`,
  *    `accountRequest`, `cardRequest` — and its call activity is fed from that
  *    (`=loanRequest` → the child's `customerRequest`). Upstream writes all

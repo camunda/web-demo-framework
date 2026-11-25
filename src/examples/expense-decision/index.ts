@@ -45,6 +45,11 @@ import claimReviewForm from "./expense-claim-review.form.json";
  *    `schemaName` stays, and the system prompt still asks for exactly
  *    `decision` and `reasoning`. `SCRIPTED_AGENT` writes them through
  *    `AgentResult.variables` on the turn it sets `completionConditionFulfilled`.
+ *    The connector's own `<zeebe:output source="=agent" target="agent" />` on
+ *    the agent host is dropped too: from engine-wasm 0.13 an output mapping on
+ *    an ad-hoc agent host hands on nothing, the mapped variable included, so
+ *    it would discard every variable the agent sets (docs/engine-coverage.md,
+ *    "agent host with an output mapping"). Nothing here populates `agent`.
  * 3. Worth knowing, and left deliberately: a **live** brain ends its run with
  *    `{"done": true}`, which `agent/liveAgent.ts` turns into a bare
  *    `completionConditionFulfilled` carrying no variables. So on a live brain

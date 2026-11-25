@@ -47,7 +47,6 @@
           <zeebe:input source="=false" target="data.response.includeAssistantMessage" />
           <zeebe:input source="=false" target="data.response.includeAgentContext" />
           <zeebe:input target="agent" />
-          <zeebe:output source="=agent" target="agent" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
           <zeebe:header key="elementTemplateVersion" value="10" />
@@ -117,6 +116,7 @@
             <zeebe:userTask />
             <zeebe:formDefinition formId="fraud-analyst-consult" />
             <zeebe:ioMapping>
+              <zeebe:output source="=analystAssessment" target="analystAssessment" />
               <zeebe:output source="=&#34;Analyst assessment: &#34; + analystAssessment + &#34;. Notes: &#34; + (if analystNotes != null then analystNotes else &#34;(none)&#34;)" target="toolCallResult" />
             </zeebe:ioMapping>
           </bpmn:extensionElements>

@@ -317,15 +317,13 @@ describe("fraud-alert-triage on the live engine — the event is the entry", () 
     expect(rootVariables().analystTimedOut).toBe(true);
     expect(String(rootVariables().investigationSummary)).toContain("no analyst response");
 
-    // The consultation is gone from the scope — which is what decides whether
-    // anything can still be completed there. Its `userTasks` row is left at
-    // `Created` rather than `Canceled`, unlike the message-boundary teardown
-    // below; both the runner and `drive.test` resolve open tasks against
-    // `activeElements` for exactly this reason, so it is a reporting artefact
-    // and not a second wait state. Pinned so it goes red if that changes.
+    // The consultation is gone from the scope, and its `userTasks` row says so.
+    // Before engine-wasm 0.13 the row was left at `Created` after a timer
+    // cancelled it, so the runner and `drive.test` resolve open tasks against
+    // `activeElements`; that is still the safer read, and this pins both.
     expect(cases()[0].activeElements.map((e) => e.elementId)).toEqual(["FraudTeamHandoff"]);
     expect(snap().userTasks.find((t) => t.elementId === "ConsultFraudAnalyst")?.state).toBe(
-      "Created",
+      "Canceled",
     );
     expect(snap().timers).toEqual([]);
     expect(snap().incidents).toEqual([]);

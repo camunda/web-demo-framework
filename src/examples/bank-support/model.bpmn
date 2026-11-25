@@ -33,7 +33,6 @@
           <zeebe:input source="WAIT_FOR_TOOL_CALL_RESULTS" target="data.events.behavior" />
           <zeebe:input source="text" target="data.response.format.type" />
           <zeebe:input target="agent" />
-          <zeebe:output source="=agent" target="agent" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
       <bpmn:incoming>Flow_ToAgent</bpmn:incoming>
@@ -195,7 +194,6 @@
           <zeebe:input source="json" target="data.response.format.type" />
           <zeebe:input source="LoanResolution" target="data.response.format.schemaName" />
           <zeebe:input target="agent" />
-          <zeebe:output source="=agent" target="agent" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
       <bpmn:incoming>Loan_FlowToAgent</bpmn:incoming>
@@ -240,7 +238,6 @@
           <zeebe:input source="json" target="data.response.format.type" />
           <zeebe:input source="AccountResolution" target="data.response.format.schemaName" />
           <zeebe:input target="agent" />
-          <zeebe:output source="=agent" target="agent" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
       <bpmn:incoming>Account_FlowToAgent</bpmn:incoming>
@@ -283,7 +280,6 @@
           <zeebe:input source="json" target="data.response.format.type" />
           <zeebe:input source="CardResolution" target="data.response.format.schemaName" />
           <zeebe:input target="agent" />
-          <zeebe:output source="=agent" target="agent" />
         </zeebe:ioMapping>
       </bpmn:extensionElements>
       <bpmn:incoming>Card_FlowToAgent</bpmn:incoming>

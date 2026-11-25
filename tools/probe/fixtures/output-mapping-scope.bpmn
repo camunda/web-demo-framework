@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Which variables survive a `zeebe:ioMapping` with outputs.
+
+  Elements with output mappings (`Svc`, `Human`) must hand on ONLY what those
+  outputs name — Zeebe's rule, enforced from engine-wasm 0.13; before that
+  everything leaked into the instance as well, and examples came to depend on
+  it. Every output-mapped element writes a mapped and an unmapped variable.
+
+  `Agent` has no output mapping and is the control: it must still hand on
+  everything it wrote. Without it "the unmapped one vanished" is also what an
+  engine that dropped every variable would show.
+
+  `MappedAgent` is the odd one out. An ad-hoc agent host with an output mapping
+  hands on nothing at all, mapped variables included, so the connector's own
+  `=agent` -> `agent` mapping cannot work (engine defect, recorded as such).
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_ProbeOutputScope" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="probe-output-scope" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start" targetRef="Agent" />
+    <bpmn:adHocSubProcess id="Agent" name="Agent, no output mapping">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-scope-agent" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+      <bpmn:serviceTask id="Tool" name="Tool">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="probe-scope-tool" />
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+    </bpmn:adHocSubProcess>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Agent" targetRef="Svc" />
+    <bpmn:serviceTask id="Svc" name="Service task, output mapping">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-scope-svc" />
+        <zeebe:ioMapping>
+          <zeebe:output source="=svcMapped" target="svcMapped" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Svc" targetRef="Human" />
+    <bpmn:userTask id="Human" name="User task, output mapping">
+      <bpmn:extensionElements>
+        <zeebe:userTask />
+        <zeebe:ioMapping>
+          <zeebe:output source="=humanMapped" target="humanMapped" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Human" targetRef="MappedAgent" />
+    <bpmn:adHocSubProcess id="MappedAgent" name="Agent, output mapping">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-scope-mapped-agent" />
+        <zeebe:ioMapping>
+          <zeebe:output source="=agentMapped" target="agentMapped" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+      <bpmn:serviceTask id="MappedTool" name="Tool">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="probe-scope-tool" />
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+    </bpmn:adHocSubProcess>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="MappedAgent" targetRef="Read" />
+    <bpmn:serviceTask id="Read" name="Read what survived">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="probe-scope-read" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Read" targetRef="End" />
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>
