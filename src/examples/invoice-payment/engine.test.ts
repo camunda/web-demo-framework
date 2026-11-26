@@ -237,6 +237,44 @@ describe("invoice-payment on the live engine — the in-loop human gate", () => 
       .hasCompletedElements("EndEvent_EscalatedForAudit");
   });
 
+  it("reaches compliance sign-off with a held outcome when the agent stops after a denial", async () => {
+    // The prompt lets the agent end the run on a denial without disputing.
+    // Nothing downstream of RecordReleaseDenied sets the outcome on that path,
+    // so the handler's provisional `held` values are all the compliance
+    // reviewer gets. An output mapping hands on only what it names
+    // (engine-wasm 0.13), so they reach sign-off only if mapped.
+    const stopsAfterDenial: Record<string, AgentHandler> = {
+      [model.agent!.jobType]: withToolCallArgs(async (job) => {
+        if (typeof job.variables.toolCallResult === "string" &&
+            job.variables.toolCallResult.startsWith("Payment release denied")) {
+          return { completionConditionFulfilled: true };
+        }
+        return agents[model.agent!.jobType](job);
+      }, model.agent!.tools),
+    };
+    session.reset();
+    session.deploy(invoicePayment.bpmn);
+    session.createInstance(PROCESS_ID, JSON.stringify(VAGUE_OVERAGE));
+    await dispatchWorkers(session, workers, { agents: stopsAfterDenial });
+    const open = await engine.openUserTasks({ processInstanceKey: undefined });
+    const review = open.find((t) => t.elementId === "ReviewPaymentRelease");
+    if (!review) throw new Error("no open ReviewPaymentRelease task to complete");
+    session.completeUserTask(
+      review.userTaskKey,
+      JSON.stringify({ releaseDecision: "deny", releaseReviewerComments: "No documentation." }),
+    );
+    await dispatchWorkers(session, workers, { agents: stopsAfterDenial });
+
+    expect(completedCount("NotifyVendorDispute")).toBe(0);
+    expect(completedCount("ReleasePayment")).toBe(0);
+    const signoff = (await engine.openUserTasks({ processInstanceKey: undefined })).find(
+      (t) => t.elementId === "HumanTask_ComplianceSignoff",
+    );
+    expect(signoff, "the run should be waiting on compliance sign-off").toBeDefined();
+    expect(currentVariables().caseOutcome).toBe("held");
+    expect(currentVariables().caseSummary).toContain("No documentation.");
+  });
+
   it("acts on the tool's result, not on the reviewer's form fields", async () => {
     // The denied branch reports back through a `toolCallResult` output mapping
     // on `RecordReleaseDenied`. Strip just that mapping: the reviewer's

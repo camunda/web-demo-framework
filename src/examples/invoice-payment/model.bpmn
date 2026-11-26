@@ -129,8 +129,9 @@
       <bpmn:scriptTask id="RecordReleaseDenied" name="Record release denied">
         <bpmn:documentation>Captures the reviewer's denial and comments, and returns them to the agent as the result of the RequestPaymentRelease call so it can decide what to do next.</bpmn:documentation>
         <bpmn:extensionElements>
-          <zeebe:script expression="=releaseReviewerComments" resultVariable="releaseReviewerComments" />
           <zeebe:ioMapping>
+            <zeebe:output source="=caseOutcome" target="caseOutcome" />
+            <zeebe:output source="=caseSummary" target="caseSummary" />
             <zeebe:output source="=&#34;Payment release denied by reviewer. Comments: &#34; + releaseReviewerComments" target="toolCallResult" />
           </zeebe:ioMapping>
         </bpmn:extensionElements>
