@@ -24,6 +24,13 @@ import complianceSignoffForm from "./compliance-signoff.form.json";
  *    inside it is renamed `ReviewPaymentRelease`.
  * 2. `caseOutcome`/`caseSummary` are derived in the handlers rather than by
  *    the agent's own output mapping, which this engine doesn't apply.
+ * 3. `RecordReleaseDenied` drops upstream's `zeebe:script` (a no-op that
+ *    reassigned `releaseReviewerComments` to itself). With one, the engine
+ *    evaluates the FEEL and never offers a job, so the handler below, which
+ *    sets the provisional `held` outcome, never ran. It also maps
+ *    `caseOutcome`/`caseSummary` out: with an output mapping only what it
+ *    names is handed on (engine-wasm 0.13), and an agent that stops after the
+ *    denial leaves nothing else to tell the compliance reviewer.
  *
  * Everything else — the prompts, the forms, the tool set, the gateways — is
  * the tutorial's. The connector bodies are stand-ins; see the handlers below.

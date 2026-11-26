@@ -53,13 +53,21 @@ import underwritingOpsEscalationForm from "./underwriting-ops-escalation.form.js
  *    *schema* goes with them; the system prompt still asks for exactly those
  *    three fields, and `SCRIPTED_AGENT` writes them through
  *    `AgentResult.variables` on the turn it sets `completionConditionFulfilled`.
+ *    The connector's own `<zeebe:output source="=agent" target="agent" />` on
+ *    the agent host is dropped too: from engine-wasm 0.13 an output mapping on
+ *    an ad-hoc agent host hands on nothing, the mapped variable included, so
+ *    it would discard every variable the agent sets (docs/engine-coverage.md,
+ *    "agent host with an output mapping"). Nothing here populates `agent`.
  * 5. `EscalateToUnderwritingOps` is an embedded `bpmn:subProcess` wrapping the
  *    user task, rather than being the user task. A bare `bpmn:userTask` carries
  *    no `zeebe:taskDefinition`, so `parseModel` gives it no job type and never
  *    advertises it as a tool — the agent would have had no way to call the
  *    human, which is the entire point of this element. It keeps upstream's tool
  *    name, since that is what the system prompt says; the user task inside it
- *    is `UnderwritingOpsDecision`.
+ *    is `UnderwritingOpsDecision`. That task also gains outputs for
+ *    `opsDecisionOutcome`/`opsApprovedLimitUSD`/`opsDecisionNotes`: with an output
+ *    mapping only what it names is handed on (engine-wasm 0.13), and the agent
+ *    reads the human's answer from those, not only from `toolCallResult`.
  * 6. `RequestCreditBureauReport`'s five arguments are renamed —
  *    `customerId` → `applicantId`, `currentLimitUSD` →
  *    `applicantCurrentLimitUSD`, and so on. An agent's arguments arrive as one

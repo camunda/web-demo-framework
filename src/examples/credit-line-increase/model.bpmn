@@ -46,7 +46,6 @@ Started by a form. The agent's first tool submits a no-op request to a credit bu
           <zeebe:input source="=false" target="data.response.includeAssistantMessage" />
           <zeebe:input source="=false" target="data.response.includeAgentContext" />
           <zeebe:input target="agent" />
-          <zeebe:output source="=agent" target="agent" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
           <zeebe:header key="elementTemplateVersion" value="10" />
@@ -152,6 +151,9 @@ Started by a form. The agent's first tool submits a no-op request to a credit bu
             <zeebe:userTask />
             <zeebe:formDefinition formId="underwriting-ops-escalation" />
             <zeebe:ioMapping>
+              <zeebe:output source="=opsDecisionOutcome" target="opsDecisionOutcome" />
+              <zeebe:output source="=opsApprovedLimitUSD" target="opsApprovedLimitUSD" />
+              <zeebe:output source="=opsDecisionNotes" target="opsDecisionNotes" />
               <zeebe:output source="=&#34;Underwriting ops decided: &#34; + opsDecisionOutcome + (if opsApprovedLimitUSD != null then &#34; at $&#34; + string(opsApprovedLimitUSD) else &#34;&#34;) + &#34;. Notes: &#34; + opsDecisionNotes" target="toolCallResult" />
             </zeebe:ioMapping>
           </bpmn:extensionElements>

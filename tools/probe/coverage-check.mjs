@@ -1038,6 +1038,111 @@ export async function runChecks() {
 }
 
 /**
+ * `zeebe:ioMapping` outputs scope what a completed element hands on. Before
+ * engine-wasm 0.13 every variable the job or the human wrote leaked into the
+ * instance whatever the mapping said, and the examples came to read variables
+ * no mapping named; from 0.13 only mapped outputs survive.
+ *
+ * Two records from one run. The first is the rule, asserted on a mapped and an
+ * unmapped variable per element, plus an agent with no output mapping that
+ * must still hand everything on — without that control, "the unmapped one
+ * vanished" is also what an engine that dropped every variable would show. The
+ * second is the defect beside it, asserted as the failure so it goes red the
+ * day it is fixed: an ad-hoc agent host WITH an output mapping hands on
+ * nothing, the mapped variable included, so the AI Agent template's own
+ * `=agent` -> `agent` output can't work and the examples omit it. Once fixed,
+ * restoring that output alone would still be wrong: it hands on only `agent`,
+ * which the examples never populate, and drops the flat results they read.
+ */
+async function runOutputMappingScopeFixture() {
+  const name = "ioMapping outputs: only mapped variables are handed on";
+  const defectName = "ad-hoc agent host with an output mapping — hands on nothing (engine defect)";
+  const xml = readFileSync(path.join(fixturesDir, "output-mapping-scope.bpmn"), "utf8");
+  const session = await createBojtosSession({ wasm: loadWasm() });
+  try {
+    const { processIds } = session.deploy(xml);
+    session.createInstance(processIds[0], "{}");
+
+    // Each agent activates its tool on the first turn and completes on the
+    // second, carrying a variable the mapping names and one it doesn't.
+    const turns = {};
+    const agentWriting = (variables) => (job) => {
+      turns[job.elementId] = (turns[job.elementId] ?? 0) + 1;
+      return turns[job.elementId] === 1
+        ? { activateElements: [{ elementId: job.elementId === "Agent" ? "Tool" : "MappedTool" }] }
+        : { completionConditionFulfilled: true, variables };
+    };
+    const agents = {
+      "probe-scope-agent": agentWriting({ agentPlain: "kept" }),
+      "probe-scope-mapped-agent": agentWriting({
+        agentMapped: "kept",
+        agentUnmapped: "dropped",
+      }),
+    };
+    let seen;
+    const workers = {
+      "probe-scope-tool": () => ({}),
+      "probe-scope-svc": () => ({ svcMapped: "kept", svcUnmapped: "dropped" }),
+      "probe-scope-read": (job) => {
+        seen = job.variables;
+        return {};
+      },
+    };
+    const humanTask = () =>
+      session.snapshot().userTasks.find((t) => t.elementId === "Human" && t.state === "Created");
+    for (let round = 0; round < 12 && !humanTask(); round += 1) {
+      const result = await dispatchRound(session, workers, { agents });
+      if (result.handled === 0) break;
+    }
+    const human = humanTask();
+    if (!human) {
+      record(name, false, "the run never reached the user task, so nothing was observed");
+      return;
+    }
+    session.completeUserTask(
+      human.key,
+      JSON.stringify({ humanMapped: "kept", humanUnmapped: "dropped" }),
+    );
+    for (let round = 0; round < 12 && !seen; round += 1) {
+      const result = await dispatchRound(session, workers, { agents });
+      if (result.handled === 0) break;
+    }
+    if (!seen) {
+      record(name, false, "the run never reached the step that reads the variables");
+      return;
+    }
+
+    const has = (k) => Object.prototype.hasOwnProperty.call(seen, k);
+    const mappedKept = seen.svcMapped === "kept" && seen.humanMapped === "kept";
+    const unmappedDropped = !has("svcUnmapped") && !has("humanUnmapped");
+    const controlKept = seen.agentPlain === "kept";
+    const ok = mappedKept && unmappedDropped && controlKept;
+    record(
+      name,
+      ok,
+      !mappedKept
+        ? `a mapped output was lost: ${JSON.stringify(seen)}`
+        : !unmappedDropped
+          ? `an unmapped variable leaked through the mapping (pre-0.13 behaviour): ${JSON.stringify(seen)}`
+          : !controlKept
+            ? `an agent with no output mapping stopped handing its variables on: ${JSON.stringify(seen)}`
+            : "service task and user task hand on only what their outputs name; an agent with no output mapping hands on everything",
+    );
+
+    const stillBroken = !has("agentMapped") && !has("agentUnmapped");
+    record(
+      defectName,
+      stillBroken,
+      stillBroken
+        ? "neither the mapped nor the unmapped variable reached the next step"
+        : `behaviour changed — saw ${JSON.stringify(seen)}; if the mapped variable now survives, an agent host can carry output mappings again, but don't just restore \`=agent\` -> \`agent\`: it hands on only \`agent\`, which the examples never populate, and drops the flat results they read; keep host outputs omitted or map each needed result field explicitly, then update the coverage doc and example notes`,
+    );
+  } finally {
+    session.free();
+  }
+}
+
+/**
  * Constructs the engine refuses at deploy (#1168). Probing a refusal matters as
  * much as probing a success: without it, the day one of these starts deploying,
  * the audit keeps reporting "rejected-at-deploy" for something that now runs —
@@ -1331,6 +1436,7 @@ async function main() {
   await runAgentInterruptFixture();
   await runAdHocCallActivityFixture();
   await runSignalStartFixture();
+  await runOutputMappingScopeFixture();
   await runDeployRejections();
   await runAuditedConstructsFixture();
 
