@@ -1050,7 +1050,9 @@ export async function runChecks() {
  * second is the defect beside it, asserted as the failure so it goes red the
  * day it is fixed: an ad-hoc agent host WITH an output mapping hands on
  * nothing, the mapped variable included, so the AI Agent template's own
- * `=agent` -> `agent` output can't work and the examples omit it.
+ * `=agent` -> `agent` output can't work and the examples omit it. Once fixed,
+ * restoring that output alone would still be wrong: it hands on only `agent`,
+ * which the examples never populate, and drops the flat results they read.
  */
 async function runOutputMappingScopeFixture() {
   const name = "ioMapping outputs: only mapped variables are handed on";
@@ -1133,7 +1135,7 @@ async function runOutputMappingScopeFixture() {
       stillBroken,
       stillBroken
         ? "neither the mapped nor the unmapped variable reached the next step"
-        : `behaviour changed — saw ${JSON.stringify(seen)}; if the mapped variable now survives, the examples can take the AI Agent template's \`=agent\` -> \`agent\` output back, and the coverage doc and example notes need updating`,
+        : `behaviour changed — saw ${JSON.stringify(seen)}; if the mapped variable now survives, an agent host can carry output mappings again, but don't just restore \`=agent\` -> \`agent\`: it hands on only \`agent\`, which the examples never populate, and drops the flat results they read; keep host outputs omitted or map each needed result field explicitly, then update the coverage doc and example notes`,
     );
   } finally {
     session.free();
